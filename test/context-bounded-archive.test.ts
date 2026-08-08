@@ -481,3 +481,110 @@ test("B74-AC8: health metrics expose soft/hard limits and active DB/WAL sizes", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("B85-AC1: power-loss durable handoff — WAL frames checkpointed BEFORE active delete (iris_agent#85)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b85-powerloss-"));
+  try {
+    const dbPath = join(dir, "context.db");
+    const archivePath = join(dir, "context-archive.db");
+    const store = ContextStore.open(dbPath, {
+      lineageId: LINEAGE,
+      bindingSoftLimit: 1,
+      bindingHardLimit: 2,
+      bindingRetainRecent: 0,
+      archiveDbPath: archivePath,
+    });
+    try {
+      store.createLineage(makeLineageInput("iris-b85-s-1"));
+      rolloverOnce(store, 1);
+      rolloverOnce(store, 2);
+      rolloverOnce(store, 3); // reclaims s-1 -> drains to archive
+
+      const stats = store.bindingArchiveStats();
+      assert.ok(stats.archiveBatches >= 1, "archive has batch(es)");
+
+      assert.equal(
+        store.bindingLedgerStats().auditRows,
+        0,
+        "active audit rows deleted after archive",
+      );
+
+      // CRITICAL: the archive's WAL should be checkpointed to zero bytes
+      // (TRUNCATE barrier ran BEFORE the active delete). This proves the
+      // archive data is in the MAIN DB file, not just uncheckpointed WAL
+      // frames that a power loss could drop.
+      const archiveDb = (
+        store as unknown as {
+          archiveDb: {
+            prepare(sql: string): { get(...a: unknown[]): unknown };
+          };
+        }
+      ).archiveDb;
+      const walInfo = archiveDb.prepare("PRAGMA wal_checkpoint(PASSIVE)").get() as {
+        busy: number;
+        log: number;
+        checkpointed: number;
+      };
+      assert.equal(
+        walInfo.log,
+        0,
+        "archive WAL is checkpointed to zero - durability barrier ran before active delete (iris_agent#85)",
+      );
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B85-AC2: archive WAL loss simulation - provenance survives (iris_agent#85)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b85-wallloss-"));
+  try {
+    const dbPath = join(dir, "context.db");
+    const archivePath = join(dir, "context-archive.db");
+    let store = ContextStore.open(dbPath, {
+      lineageId: LINEAGE,
+      bindingSoftLimit: 1,
+      bindingHardLimit: 2,
+      bindingRetainRecent: 0,
+      archiveDbPath: archivePath,
+    });
+    store.createLineage(makeLineageInput("iris-b85-s-1"));
+    rolloverOnce(store, 1);
+    rolloverOnce(store, 2);
+    rolloverOnce(store, 3);
+    store.close();
+
+    // Simulate power loss: delete the archive's WAL/SHM files.
+    // Because the #85 fix checkpoints (TRUNCATE) the archive before
+    // deleting active rows, the main archive DB file already contains
+    // all data. Deleting -wal/-shm should NOT lose data.
+    try {
+      rmSync(`${archivePath}-wal`, { force: true });
+      rmSync(`${archivePath}-shm`, { force: true });
+    } catch {
+      // WAL/SHM may not exist if already checkpointed
+    }
+
+    store = ContextStore.open(dbPath, {
+      lineageId: LINEAGE,
+      bindingSoftLimit: 1,
+      bindingHardLimit: 2,
+      bindingRetainRecent: 0,
+      archiveDbPath: archivePath,
+    });
+    try {
+      const stats = store.bindingArchiveStats();
+      assert.ok(stats.archiveRows >= 1, "archived rows survive WAL loss");
+      assert.ok(stats.archiveBatches >= 1, "manifest survives WAL loss");
+
+      const ledger = store.bindingLedgerStats();
+      assert.equal(ledger.auditRows, 0, "active audit still clean after WAL loss");
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

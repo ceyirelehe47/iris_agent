@@ -1185,11 +1185,7 @@ export class ContextStore implements ContextUnitStorePort {
       const archive = new DatabaseSync(this.archiveDbPath);
       archive.exec("PRAGMA busy_timeout = 5000");
       archive.exec("PRAGMA journal_mode = WAL");
-      // The archive is an audit store whose handoff is REPLAYABLE: the
-      // active rows are only deleted after the archive manifest exists, so
-      // a power-loss that drops the archive's last uncheckpointed commit
-      // simply leaves the active staging rows for the next drain. NORMAL
-      // keeps the archive fsync-cheap under heavy rollover churn.
+      // iris_agent#74: external binding-audit archive path (separate file).
       archive.exec("PRAGMA synchronous = NORMAL");
       archive.exec("PRAGMA foreign_keys = ON");
       archive.exec(`
@@ -1358,13 +1354,51 @@ export class ContextStore implements ContextUnitStorePort {
       throw error;
     }
 
-    // Phase C: delete active rows whose batch was copied IN THIS CALL (the
-    // staged scan above already includes every batch still present after a
-    // crash, so replay deletes old batches too — but only the batches
-    // actually present, never the whole archive manifest: that would make
-    // every drain O(archive lifetime)).
+    // iris_agent#85: DURABILITY BARRIER — after Phase B commits the archive
+    // transaction but BEFORE Phase C deletes the active rows, checkpoint the
+    // archive's WAL to the main DB file. Under `synchronous=NORMAL`, a COMMIT
+    // only writes to the WAL journal — it is NOT fsync'd into the main file.
+    // A power loss can drop uncheckpointed WAL frames, so deleting the active
+    // rows immediately after COMMIT would silently lose provenance if the
+    // archive's WAL is lost but the active DB's WAL (which auto-checkpoints
+    // more frequently due to higher write volume) survives.
+    //
+    // `wal_checkpoint(TRUNCATE)` forces all WAL frames into the main DB file
+    // and truncates the WAL to zero bytes. This establishes the same durability
+    // boundary as `synchronous=FULL` without the per-transaction overhead.
+    // If the checkpoint fails (busy or I/O error), Phase C is skipped — the
+    // active rows remain and will be re-drained on the next call.
     const drainedBatchIds = [...byBatch.keys()];
     if (drainedBatchIds.length > 0) {
+      const checkpointResult = archive.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as {
+        busy: number;
+        log: number;
+        checkpointed: number;
+      };
+      if (checkpointResult.busy !== 0) {
+        // Checkpoint could not complete (another reader holds the WAL).
+        // Skip deletion — the rows are safe in both archive (WAL, pending
+        // next checkpoint) and active staging. The next drain retry will
+        // checkpoint again.
+        const remaining = (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM session_lineage_bindings_audit WHERE archived_batch_id IS NOT NULL",
+            )
+            .get() as { n: number }
+        ).n;
+        return {
+          archived: stagedRows.length,
+          stagedRemaining: remaining,
+          batchId: newBatchId,
+        };
+      }
+
+      // Phase C: delete active rows whose batch was copied IN THIS CALL (the
+      // staged scan above already includes every batch still present after a
+      // crash, so replay deletes old batches too — but only the batches
+      // actually present, never the whole archive manifest: that would make
+      // every drain O(archive lifetime)).
       const deleteRow = this.db.prepare(
         `DELETE FROM session_lineage_bindings_audit WHERE archived_batch_id IN (${drainedBatchIds
           .map(() => "?")
