@@ -21,7 +21,7 @@ export type RuntimeEventDisposition = "include" | "reference_only" | "exclude";
 export interface RuntimeEventDerivationRefs {
   memoryRefs: string[];
   compartmentIds: string[];
-  sourceContextUnitIds: string[];
+  sourceContextMessageUnitIds: string[];
   workSnapshotVersion?: string;
 }
 

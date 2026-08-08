@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 import type { HistoryProjectionUnit, ProjectedLogicalUnits } from "./projection.js";
 
 /**
@@ -179,6 +180,7 @@ export function findSuffixStartForTokens(rawTokenCounts: number[], targetTokens:
   return 1;
 }
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 function unitEntrySeq(unit: HistoryProjectionUnit): number {
   switch (unit.kind) {
     case "input":
@@ -194,6 +196,7 @@ function unitEntrySeq(unit: HistoryProjectionUnit): number {
  * projection only emits sealed tool_arc units; unresolved calls remain as
  * assistant units carrying toolCallIds). */
 export function openToolCallIds(
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   units: HistoryProjectionUnit[],
 ): Array<{ assistantEntrySeq: number; callId: string }> {
   const resolved = new Set<string>();
@@ -215,6 +218,7 @@ export function openToolCallIds(
 }
 
 export interface EstimateTokensArgs {
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   units: HistoryProjectionUnit[];
   /** Per-unit token estimates aligned by index; falls back to 512/unit. */
   unitTokenCounts?: number[];

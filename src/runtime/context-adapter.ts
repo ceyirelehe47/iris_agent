@@ -3,6 +3,7 @@ import type { AgentMessage, CustomMessage } from "@earendil-works/pi-agent-core"
 import {
   IRIS_INPUT_META_CONTENT,
   IRIS_INPUT_META_CUSTOM_TYPE,
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   type ContextTransformResult,
   type TransformMessagesInput,
 } from "../contracts/context.js";
@@ -209,6 +210,7 @@ function projectedUserText(
     .join("\n\n");
 }
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export function transformContextMessages(input: TransformMessagesInput): ContextTransformResult {
   const candidates = findInputPairs(input.messages);
   const verifiedPairs = new Map<AgentMessage, VerifiedPair>();

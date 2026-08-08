@@ -87,7 +87,7 @@ function makeUnit(
       timestamp: 1,
     },
     paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     schemaVersion: "context-unit-v1",
     createdAt: "2026-08-05T00:00:00.000Z",
     ...overrides,

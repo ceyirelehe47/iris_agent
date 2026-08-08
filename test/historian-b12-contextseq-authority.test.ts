@@ -78,7 +78,7 @@ function insertUnit(
     contentHash: input.contentHash ?? "c".repeat(64),
     payload: { role: "user" as const, content: `content-${input.contextSeq}`, timestamp: 1 },
     paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     schemaVersion: "context-unit-v1",
     createdAt: "t",
   });

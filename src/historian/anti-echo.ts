@@ -49,7 +49,7 @@ export function hasAnyDerivationRefs(refs: RuntimeEventDerivationRefs): boolean 
   return (
     refs.memoryRefs.length > 0 ||
     refs.compartmentIds.length > 0 ||
-    refs.sourceContextUnitIds.length > 0 ||
+    refs.sourceContextMessageUnitIds.length > 0 ||
     refs.workSnapshotVersion !== undefined
   );
 }
@@ -66,7 +66,7 @@ export function hasAnyDerivationRefs(refs: RuntimeEventDerivationRefs): boolean 
  *    派生内容 —— 它不能独立产生新 Evidence(它只解释/重述既有记忆)。
  *
  * 注意:assistant 对"新 user 提问 + 新 tool 结果"的回答带有新 basis,
- * 由调用方(compartment builder)通过 sourceContextUnitIds 是否指向本批
+ * 由调用方(compartment builder)通过 sourceContextMessageUnitIds 是否指向本批
  * 新单元来判定;本函数只做单元级保守分类。
  */
 export function isDerivedOnlyUnit(
@@ -118,7 +118,7 @@ export function toEvidenceBasisRef(unit: HistorianUnitView): EvidenceBasisRef | 
  * derivedOnly=true 当本批没有产生任何新 Evidence basis(整批是回显/重述)。
  *
  * 批级语义(anti-echo 注释承诺的实现):assistant 单元若引用了**本批内的
- * 新单元**(derivationRefs.sourceContextUnitIds 与本批 include 且非
+ * 新单元**(derivationRefs.sourceContextMessageUnitIds 与本批 include 且非
  * derived-only 的 input/tool_result 单元有交集),说明它是"基于新输入/
  * 新 tool 结果的回答"而非纯回显 —— 此时即使它携带 memory/compartment
  * 派生引用,也不判 derived-only(避免误杀正常回答)。
@@ -148,7 +148,7 @@ export function classifyEvidenceBasis(units: HistorianUnitView[]): {
     }
     const groundedInNewObservations =
       unit.unitType === "assistant" &&
-      unit.derivationRefs.sourceContextUnitIds.some((id) => newObservationIds.has(id));
+      unit.derivationRefs.sourceContextMessageUnitIds.some((id) => newObservationIds.has(id));
     if (groundedInNewObservations) {
       // 基于本批新观察的回答:即使携带派生引用也不是纯回显,直接进入
       // basis(保留原始 derivationRefs 作审计面)。

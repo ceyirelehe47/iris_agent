@@ -60,7 +60,7 @@ export function contextUnitsFromEntries(entries: SessionTreeEntry[]): ContextMes
         timestamp: 0,
       },
       paired: false,
-      derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+      derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
       schemaVersion: "context-unit-v1",
       createdAt: entry.timestamp ?? new Date().toISOString(),
     });

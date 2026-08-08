@@ -55,7 +55,7 @@ function unit(contextSeq: number, overrides: Partial<HistorianUnitView> = {}): H
     unitType: "input",
     disposition: "include",
     contentHash: createHash("sha256").update(`content-${contextSeq}`).digest("hex"),
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     ...overrides,
   };
 }
@@ -399,7 +399,7 @@ test("B10-AC6: payloadHash is canonical over the complete payload; provenance ch
 
     // Changed derivation refs change the payload hash.
     const derived = unit(1, {
-      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextUnitIds: [] },
+      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
     });
     const fx2 = fixture(stubPort([derived]));
     try {

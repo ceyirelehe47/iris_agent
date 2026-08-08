@@ -154,7 +154,7 @@ function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistor
           (message as import("../src/contracts/context-units.js").ContextMessageUnit["payload"]) ??
           ({ role: "user", content: `content-${seq}`, timestamp: 1 } as never),
         paired: false,
-        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         schemaVersion: "context-unit-v1",
         createdAt: "2026-08-01T00:00:00.000Z",
       });
@@ -181,7 +181,7 @@ function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistor
           unitType: "input",
           disposition: "include",
           contentHash: "e".repeat(64),
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         });
       }
       return units;

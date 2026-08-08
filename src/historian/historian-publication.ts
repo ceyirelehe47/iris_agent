@@ -161,7 +161,7 @@ function partitionEpisodeSources(
       derivation: {
         memoryRefs,
         compartmentIds: [wireCompartmentId],
-        sourceContextUnitIds: [],
+        sourceContextMessageUnitIds: [],
       },
       // iris_memory#14: v2 focused semantic metadata
       semanticKind: part.kind,
