@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:iris:memory:graphiti-episode-source:v2",
+  "title": "GraphitiEpisodeSourceV2",
+  "description": "iris_memory#14: focused semantic metadata aligned with Roadmap v27. Adds semanticKind, attributionClass, sourceTrust and referenceTime as first-class episode-source metadata. V1 artifacts remain immutable; this version coexists with backward-compatible negotiation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "episodeSourceHash",
+    "episodeId",
+    "lineageId",
+    "contextRange",
+    "sourceUnitIds",
+    "canonicalContent",
+    "targetGroupId",
+    "temporal",
+    "isDerivedOnly",
+    "derivation",
+    "semanticKind",
+    "attributionClass",
+    "sourceTrust",
+    "referenceTime"
+  ],
+  "properties": {
+    "episodeSourceHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Deterministic canonical hash of THIS episode source (identity + provenance + content + metadata). Re-hashed by the Memory on acceptance."
+    },
+    "episodeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Memory-owned deterministic episode identity (stable across replay)."
+    },
+    "lineageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "contextRange": {
+      "$ref": "urn:iris:memory:context-range:v1"
+    },
+    "sourceUnitIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "maxItems": 4096
+    },
+    "canonicalContent": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200000,
+      "description": "Focused episode body — NOT a whole-batch concatenation."
+    },
+    "targetGroupId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "temporal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "endedAt"],
+      "properties": {
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "isDerivedOnly": {
+      "type": "boolean",
+      "description": "True when the episode contains NO new observation truth."
+    },
+    "derivation": {
+      "$ref": "urn:iris:memory:semantic-derivation-refs:v1"
+    },
+    "rawArchiveRef": {
+      "$ref": "urn:iris:memory:raw-archive-ref:v1"
+    },
+    "semanticKind": {
+      "type": "string",
+      "enum": ["observation", "dialogue", "tool_result", "reasoning", "system_event", "derived_summary"],
+      "description": "iris_memory#14: the semantic category of this episode source. Enables focused Graphiti Episode ingestion instead of whole-batch concatenation."
+    },
+    "attributionClass": {
+      "type": "string",
+      "enum": ["user", "assistant", "tool", "system", "recall", "compartment", "operational"],
+      "description": "iris_memory#14: the primary attribution class of the episode content."
+    },
+    "sourceTrust": {
+      "type": "string",
+      "enum": ["verified", "observed", "inferred", "recalled", "generated"],
+      "description": "iris_memory#14: trust level of the source material."
+    },
+    "referenceTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "iris_memory#14: the canonical reference time for this episode (distinct from temporal window — used for temporal validity in Graphiti)."
+    }
+  }
+}

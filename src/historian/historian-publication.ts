@@ -44,6 +44,139 @@ function renderEpisodeUnitLine(unit: {
   }
   return `[${unit.contextSeq}] ${role}: ${text}`;
 }
+
+/**
+ * iris_memory#14: partition payload units into focused GraphitiEpisodeSource
+ * entries by semantic category. Deterministic: the same units always yield the
+ * same partitions. Independent of Runtime Session segmentation. Preserves
+ * ordered Context provenance. Each episode source carries v2 focused metadata
+ * (semanticKind, attributionClass, sourceTrust, referenceTime).
+ *
+ * Partition rule: group consecutive units by their payload role/unitType.
+ * Common partitions:
+ *   - user input => dialogue, user, observed
+ *   - assistant output => reasoning, assistant, generated
+ *   - tool results => tool_result, tool, verified
+ *   - system/operational => system_event, system, verified
+ * A single unit type spanning the whole batch yields one episode (backward-
+ * compatible with the old single-episode behavior).
+ */
+function unitSemanticMetadata(
+  unitType: string,
+  payload: unknown,
+): { semanticKind: string; attributionClass: string; sourceTrust: string } {
+  const message = (payload as { message?: { role?: string } })?.message;
+  const role = message?.role ?? unitType;
+  switch (role) {
+    case "user":
+      return { semanticKind: "dialogue", attributionClass: "user", sourceTrust: "observed" };
+    case "assistant":
+      return { semanticKind: "reasoning", attributionClass: "assistant", sourceTrust: "generated" };
+    case "tool":
+      return { semanticKind: "tool_result", attributionClass: "tool", sourceTrust: "verified" };
+    default:
+      return { semanticKind: "system_event", attributionClass: "system", sourceTrust: "verified" };
+  }
+}
+
+function partitionEpisodeSources(
+  payloadUnits: ReadonlyArray<{
+    contextSeq: number;
+    contextUnitId: string;
+    unitType: string;
+    payload: unknown;
+    payloadTimestamp?: string;
+  }>,
+  lineageId: string,
+  batchFromContextSeq: number,
+  batchToContextSeq: number,
+  rangeHash: string,
+  wireCompartmentId: string,
+  memoryRefs: string[],
+  derivedOnly: boolean,
+  now: string,
+): Array<Record<string, unknown>> {
+  // Group consecutive units by their semantic role into partitions.
+  interface Partition {
+    units: Array<{
+      contextSeq: number;
+      contextUnitId: string;
+      unitType: string;
+      payload: unknown;
+      payloadTimestamp?: string;
+    }>;
+    kind: string;
+    attribution: string;
+    trust: string;
+  }
+  const partitions: Partition[] = [];
+  for (const unit of payloadUnits) {
+    const meta = unitSemanticMetadata(unit.unitType, unit.payload);
+    const lastPartition = partitions[partitions.length - 1];
+    if (
+      lastPartition?.kind === meta.semanticKind &&
+      lastPartition?.attribution === meta.attributionClass
+    ) {
+      lastPartition.units.push(unit);
+    } else {
+      partitions.push({
+        units: [unit],
+        kind: meta.semanticKind,
+        attribution: meta.attributionClass,
+        trust: meta.sourceTrust,
+      });
+    }
+  }
+
+  // Build one episode source per partition.
+  const sources: Array<Record<string, unknown>> = [];
+  let partitionIndex = 0;
+  for (const part of partitions) {
+    const partUnitIds = part.units.map((u) => u.contextUnitId);
+    const partContent = part.units.map((u) => renderEpisodeUnitLine(u)).join("\n");
+    const partTimestamps = part.units
+      .map((u) => u.payloadTimestamp)
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
+    const partStartedAt = partTimestamps.length > 0 ? partTimestamps[0] : now;
+    const partEndedAt = partTimestamps.length > 0 ? partTimestamps[partTimestamps.length - 1] : now;
+    const partFromSeq = part.units[0]?.contextSeq ?? batchFromContextSeq;
+    const partToSeq = part.units[part.units.length - 1]?.contextSeq ?? batchToContextSeq;
+
+    const episodeId = `episode:${lineageId}:${partFromSeq}..${partToSeq}:${rangeHash.slice(0, 8)}:p${partitionIndex}`;
+
+    const episodeSourceBase = {
+      episodeId,
+      lineageId,
+      contextRange: {
+        contextLineageId: lineageId,
+        fromContextSeq: batchFromContextSeq,
+        toContextSeq: batchToContextSeq,
+        rangeHash,
+      },
+      sourceUnitIds: partUnitIds,
+      canonicalContent: partContent,
+      targetGroupId: `group:${lineageId}`,
+      temporal: { startedAt: partStartedAt, endedAt: partEndedAt },
+      isDerivedOnly: derivedOnly,
+      derivation: {
+        memoryRefs,
+        compartmentIds: [wireCompartmentId],
+        sourceContextUnitIds: [],
+      },
+      // iris_memory#14: v2 focused semantic metadata
+      semanticKind: part.kind,
+      attributionClass: part.attribution,
+      sourceTrust: part.trust,
+      referenceTime: partEndedAt,
+    };
+    const episodeSourceHash = createHash("sha256")
+      .update(canonicalJson(episodeSourceBase), "utf8")
+      .digest("hex");
+    sources.push({ ...episodeSourceBase, episodeSourceHash });
+    partitionIndex++;
+  }
+  return sources;
+}
 import type { HistorianStore } from "./historian-store.js";
 import type { RunnerCommitHook } from "./historian-runner.js";
 import type { HistorianAnalysisView } from "./historian-analysis.js";
@@ -451,7 +584,6 @@ export class PublicationService {
           `${lineageId}; refusing to publish an empty episode source`,
       );
     }
-    const canonicalContent = payloadUnits.map((unit) => renderEpisodeUnitLine(unit)).join("\n");
     const timestamps = payloadUnits
       .map((unit) => unit.payloadTimestamp)
       .filter((t): t is string => typeof t === "string" && t.length > 0);
@@ -463,33 +595,21 @@ export class PublicationService {
     // Session-boundary-independent (the historian.db-internal id embeds the
     // runtime session for local bookkeeping only and never reaches Memory).
     const wireCompartmentId = `compartment:${lineageId}:${built.compartment.compartmentSequence}`;
-    const episodeSourceBase = {
-      episodeId: `episode:${lineageId}:${fromContextSeq}..${toContextSeq}:${rangeHash.slice(0, 12)}`,
+    // iris_memory#14: partition the payload units into focused episode sources
+    // by semantic category, instead of one giant batch-wide episode. Each
+    // partition is deterministic (same units -> same partition), preserves
+    // ordered Context provenance, and carries v2 focused metadata.
+    const episodeSources = partitionEpisodeSources(
+      payloadUnits,
       lineageId,
-      contextRange: {
-        contextLineageId: lineageId,
-        fromContextSeq,
-        toContextSeq,
-        rangeHash,
-      },
-      sourceUnitIds: payloadUnits.map((unit) => unit.contextUnitId),
-      canonicalContent,
-      targetGroupId: `group:${lineageId}`,
-      temporal: { startedAt, endedAt },
-      isDerivedOnly: derivedOnly,
-      derivation: {
-        memoryRefs,
-        compartmentIds: [wireCompartmentId],
-        sourceContextUnitIds: [],
-      },
-    };
-    // episodeSourceHash must equal iris_memory's deterministic canonical
-    // re-hash (sorted keys + compact separators — canonicalJson is
-    // byte-identical to the Python `_canonical_json_bytes`).
-    const episodeSourceHash = createHash("sha256")
-      .update(canonicalJson(episodeSourceBase), "utf8")
-      .digest("hex");
-    const episodeSource = { ...episodeSourceBase, episodeSourceHash };
+      fromContextSeq,
+      toContextSeq,
+      rangeHash,
+      wireCompartmentId,
+      memoryRefs,
+      derivedOnly,
+      now,
+    );
 
     const envelopeBase = {
       schemaVersion: "historian-publication-v3",
@@ -518,7 +638,7 @@ export class PublicationService {
           memoryRefs,
         },
       ],
-      episodeSources: [episodeSource],
+      episodeSources,
       derivationSummary: {
         derivedOnly,
         memoryRefs,
