@@ -19,7 +19,7 @@
   "derivation": {
     "memoryRefs": [],
     "compartmentIds": [],
-    "sourceContextUnitIds": []
+    "sourceContextMessageUnitIds": []
   },
   "semanticKind": "invalid_kind",
   "attributionClass": "user",

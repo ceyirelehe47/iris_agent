@@ -19,7 +19,7 @@
   "derivation": {
     "memoryRefs": [],
     "compartmentIds": ["compartment:identity-0123456789abcdef:1"],
-    "sourceContextUnitIds": []
+    "sourceContextMessageUnitIds": []
   },
   "semanticKind": "dialogue",
   "attributionClass": "user",
