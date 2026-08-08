@@ -228,19 +228,28 @@ export function freezeBoundary(input: BoundaryFreezeInput): BoundaryFreezeResult
   // only; protectedTailStart stays raw (the dynamic tail is never squeezed by
   // the lineage boundary).
   const rawSafeSeam = seam;
-  const ordinalEligible = raw.entries.filter(
-    (e) => e.entrySeq >= unprocessedFromEntrySeq && e.entrySeq <= rawSafeSeam,
-  );
   // iris_agent#76: entries carry their Context coordinate (contextSeq) as
   // attribution; hand-built fixtures without one fall back to the ordinal
   // (the pure freeze semantics stay identical in that case).
   const contextSeqOf = (entry: SequencedSessionEntry | undefined): number =>
     entry?.contextSeq ?? entry?.entrySeq ?? 0;
+  const ordinalEligible = raw.entries.filter(
+    (e) => e.entrySeq >= unprocessedFromEntrySeq && e.entrySeq <= rawSafeSeam,
+  );
+  // iris_agent#84: also exclude units at or below the Context semantic cursor.
+  // After Session rollover, the freeze claim starts AT the cursor (inclusive)
+  // to observe the current head for nothingNew detection. But already-
+  // processed units (contextSeq <= processedThroughContextSeq) must NOT
+  // enter the eligible set — the runner starts strictly after the cursor
+  // and the hash must match.
+  const semanticEligible = ordinalEligible.filter(
+    (e) => contextSeqOf(e) > processedThroughContextSeq,
+  );
   const lineageContextSeq = input.lineageBoundary?.representedThroughContextSeq;
   const contextEligible =
     lineageContextSeq !== null && lineageContextSeq !== undefined
-      ? ordinalEligible.filter((e) => contextSeqOf(e) <= lineageContextSeq)
-      : ordinalEligible;
+      ? semanticEligible.filter((e) => contextSeqOf(e) <= lineageContextSeq)
+      : semanticEligible;
   const eligibleThroughContextSeq =
     contextEligible.length === 0
       ? processedThroughContextSeq
