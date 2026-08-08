@@ -15,3 +15,7 @@ test-results/
 .idea/
 .omo/
 .cortexkit/
+
+# Local dependency trees must never be tracked.
+# Reject node_modules whether it is a directory, file, or symlink.
+node_modules
