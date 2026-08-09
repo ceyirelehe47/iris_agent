@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,12 @@ import {
   defaultFallbackConfig,
   freshRecoveryState,
 } from "../src/runtime/recovery-state.js";
+import { RuntimeCoordinator } from "../src/runtime/runtime-coordinator.js";
+import {
+  ActiveRuntimeRegistry,
+  activeRuntimeHandle,
+} from "../src/runtime/active-runtime-registry.js";
+import type { InvocationBinding } from "../src/runtime/harness-factory.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -875,4 +881,105 @@ test("reserved_retries survives restart via the store", async () => {
   assert.ok(loaded, "state should be loaded after restart");
   assert.equal(loaded.reservedRetries, 4, "reserved_retries must survive restart");
   restoredStore.close();
+});
+
+test("fallback_attempts survives restart via RecoveryStateStore", async () => {
+  // Create store in temp dir.
+  const tmpDir = mkdtempSync(join(tmpdir(), "recovery-test-"));
+  const store = new RecoveryStateStore(join(tmpDir, "recovery.db"));
+  const snapshot = freshRecoveryState("exec-restart-test", "2026-08-09T00:00:00.000Z");
+  const withAttempts = { ...snapshot, fallbackAttempts: 2 };
+  store.save(withAttempts);
+  const loaded = store.load("exec-restart-test");
+  assert.ok(loaded, "state should be loaded after save");
+  assert.equal(
+    (loaded as RecoveryStateSnapshot).fallbackAttempts,
+    2,
+    "fallback_attempts must survive restart",
+  );
+  store.close();
+  rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("RuntimeCoordinator promptWithModel throws on non-null model", async () => {
+  // Minimal coordinator built like runtime-coordinator.test.ts: a fake
+  // AgentRuntimePort installed in the active-runtime registry.
+  const epoch = {
+    epochId: "iris-runtime-2026-08-01-1",
+    runtimeSessionId: "iris-runtime-2026-08-01-1",
+    localDate: "2026-08-01",
+    ordinalWithinDate: 1,
+    status: "active" as const,
+    createdAt: "2026-08-01T00:00:00.000Z",
+  };
+  let promptCalls = 0;
+  const fakeRuntime: AgentRuntimePort = {
+    prompt: async function* (): AsyncIterable<AgentRuntimeEvent> {
+      promptCalls += 1;
+      yield { type: "turn_start", invocationId: "invocation-test-input-0001" };
+      yield { type: "settled", invocationId: "invocation-test-input-0001", nextTurnCount: 1 };
+    },
+    abort: async () => undefined,
+    getPhase: () => "idle",
+  };
+  const binding: InvocationBinding = {
+    input: testInput(),
+    prepared: {} as InvocationBinding["prepared"],
+    invocationId: "invocation-test-input-0001",
+  };
+  const registry = new ActiveRuntimeRegistry();
+  registry.install(activeRuntimeHandle(epoch, fakeRuntime, binding));
+  const coordinator = new RuntimeCoordinator({
+    activeRuntime: registry,
+    prepareInvocation: async (nextInput: AgentInput) => {
+      void nextInput;
+      return binding.prepared;
+    },
+  });
+
+  // Non-null model override must fail closed instead of being ignored.
+  await assert.rejects(
+    (async () => {
+      for await (const event of coordinator.promptWithModel(input, "some-model")) {
+        void event;
+      }
+    })(),
+    /model override "some-model" requested/,
+  );
+  assert.equal(promptCalls, 0, "non-null override must never reach the Capsule");
+
+  // Null override delegates to plain prompt().
+  let settled = 0;
+  for await (const event of coordinator.promptWithModel(input, null)) {
+    if (event.type === "settled") {
+      settled += 1;
+    }
+  }
+  assert.equal(promptCalls, 1, "null override must delegate to prompt()");
+  assert.equal(settled, 1, "delegated run must settle");
+});
+
+test("supervisor fails closed when runtime lacks promptWithModel and fallback model is selected", async () => {
+  // A runtime WITHOUT promptWithModel whose native prompt fails with a
+  // fallback-classified error. Before #89's fail-closed fix this silently
+  // degraded to prompt() and ignored the selected fallback model; the chain
+  // would exhaust with fallback_chain_exhausted instead of failing closed.
+  const runtime = new FakeRuntime();
+  runtime.promptHandler = () => failedWith(INVOCATION_ID, "provider unavailable");
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a", "model-b"]),
+    sleep: async () => undefined,
+  });
+
+  // The production dispatch selects model-a on the first attempt; without
+  // promptWithModel it must THROW, never silently run prompt().
+  await assert.rejects(
+    (async () => {
+      for await (const event of supervisor.prompt(input)) {
+        void event;
+      }
+    })(),
+    /cannot silently ignore fallback model/,
+  );
 });

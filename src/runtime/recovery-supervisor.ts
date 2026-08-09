@@ -302,14 +302,24 @@ export class RecoverySupervisor {
     };
 
     // iris_agent#89 Fix 1: production dispatch must honor the selected
-    // fallback model. Prefer promptWithModel when the runtime supports model
-    // override; fall back to plain prompt() for backward compatibility.
+    // fallback model. When a fallback model is selected the runtime MUST
+    // implement promptWithModel — a missing implementation fails CLOSED
+    // (throws) instead of silently degrading to prompt() and ignoring the
+    // fallback model.
     const dispatch =
       options?.dispatch ??
-      ((inputArg: AgentInput, model: string | null): AsyncIterable<AgentRuntimeEvent> =>
-        this.runtime.promptWithModel !== undefined
-          ? this.runtime.promptWithModel(inputArg, model)
-          : this.runtime.prompt(inputArg));
+      ((inputArg: AgentInput, model: string | null): AsyncIterable<AgentRuntimeEvent> => {
+        if (model !== null) {
+          if (this.runtime.promptWithModel === undefined) {
+            throw new Error(
+              `recovery supervisor: fallback model "${model}" selected but runtime does not ` +
+                `implement promptWithModel — cannot silently ignore fallback model`,
+            );
+          }
+          return this.runtime.promptWithModel(inputArg, model);
+        }
+        return this.runtime.prompt(inputArg);
+      });
 
     // iris_agent#90 Fix 2: the overall budget is anchored to the DURABLE
     // creation time — a restart cannot silently reset the recovery budget by
@@ -535,12 +545,12 @@ export class RecoverySupervisor {
 
         // Fallback classifications — skip same-model retry, advance chain.
         if (FALLBACK_CLASSIFICATIONS.has(classification)) {
-          // iris_agent#90 Fix 3: advanceFallback returns the updated snapshot;
-          // persist immediately so the chain position survives restart.
+          // iris_agent#90 Fix 3: advanceFallback returns the updated snapshot.
+          // Chain position + incremented fallback-attempt counter are computed
+          // FIRST and persisted in ONE transition — no intermediate persist.
           const { snapshot: advanced, nextModel } = this.advanceFallback(this.state);
-          persist(advanced);
           if (nextModel === null) {
-            const exhausted = { ...this.state, exhausted: true };
+            const exhausted = { ...advanced, exhausted: true };
             persist(exhausted);
             yield {
               type: "recovery_escalation",
@@ -616,9 +626,8 @@ export class RecoverySupervisor {
           // position survive restart.
           const marked = this.markModelFailed(model, this.state);
           const { snapshot: advanced, nextModel } = this.advanceFallback(marked);
-          persist(advanced);
           if (nextModel === null) {
-            const exhausted = { ...this.state, exhausted: true };
+            const exhausted = { ...advanced, exhausted: true };
             persist(exhausted);
             yield {
               type: "recovery_escalation",
