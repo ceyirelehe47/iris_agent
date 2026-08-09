@@ -317,8 +317,6 @@ export class RecoverySupervisor {
     const budgetDeadline = new Date(this.state.createdAt).getTime() + this.config.overallBudgetMs;
 
     try {
-      let fallbackAttempts = 0;
-
       for (;;) {
         // iris_agent#90 Fix 1: fail closed before ANY dispatch — a logical
         // execution restored in the exhausted state must not dispatch again.
@@ -553,8 +551,15 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_chain_exhausted");
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
+          // iris_agent#90: persist fallback attempt count durably so a restart
+          // cannot silently reset the fallback budget. The count is on the
+          // durable snapshot, not a process-local variable.
+          const fbAdvanced1 = {
+            ...advanced,
+            fallbackAttempts: advanced.fallbackAttempts + 1,
+          };
+          persist(fbAdvanced1);
+          if (fbAdvanced1.fallbackAttempts > this.config.fallbackAttemptBudget) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             yield {
@@ -628,8 +633,14 @@ export class RecoverySupervisor {
               "same_model_and_fallback_exhausted",
             );
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
+          // iris_agent#90: persist fallback attempt count durably (same as
+          // the FALLBACK_CLASSIFICATIONS path above).
+          const fbAdvanced2 = {
+            ...advanced,
+            fallbackAttempts: advanced.fallbackAttempts + 1,
+          };
+          persist(fbAdvanced2);
+          if (fbAdvanced2.fallbackAttempts > this.config.fallbackAttemptBudget) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_budget_exhausted");
