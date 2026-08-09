@@ -257,7 +257,7 @@ export function unitsInLayer(
   layer: 0 | 1 | 2 | 3 | 4 | 5,
 ): readonly ContextUnitV2[] {
   const ends = generation.header.layerEnds;
-  const start = layer === 0 ? 0 : ends[layer - 1]!;
-  const end = ends[layer]!;
+  const start = layer === 0 ? 0 : ends[layer - 1] ?? 0;
+  const end = ends[layer] ?? ends[5];
   return generation.units.slice(start, end);
 }
