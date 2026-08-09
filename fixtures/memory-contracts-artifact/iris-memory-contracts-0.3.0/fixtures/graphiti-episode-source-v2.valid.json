@@ -1,0 +1,28 @@
+{
+  "episodeSourceHash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "episodeId": "episode:identity-0123456789abcdef:1..2:aabbccdd",
+  "lineageId": "identity-0123456789abcdef",
+  "contextRange": {
+    "contextLineageId": "identity-0123456789abcdef",
+    "fromContextSeq": 1,
+    "toContextSeq": 2,
+    "rangeHash": "aabbccdd0000000000000000000000000000000000000000000000000000aabb"
+  },
+  "sourceUnitIds": ["u-1", "u-2"],
+  "canonicalContent": "user: hello\nassistant: hi there",
+  "targetGroupId": "group:identity-0123456789abcdef",
+  "temporal": {
+    "startedAt": "2026-08-05T00:00:00.000Z",
+    "endedAt": "2026-08-05T00:01:00.000Z"
+  },
+  "isDerivedOnly": false,
+  "derivation": {
+    "memoryRefs": [],
+    "compartmentIds": ["compartment:identity-0123456789abcdef:1"],
+    "sourceContextMessageUnitIds": []
+  },
+  "semanticKind": "dialogue",
+  "attributionClass": "user",
+  "sourceTrust": "observed",
+  "referenceTime": "2026-08-05T00:01:00.000Z"
+}

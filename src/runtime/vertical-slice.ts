@@ -29,6 +29,7 @@ import {
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 import type { PreparedContextSources } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { directUserRequest } from "../contracts/origin.js";
@@ -103,6 +104,7 @@ export function prepareContextSources(
   epochId: string,
   config: AgentConfigV3,
   now: string,
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 ): PreparedContextSources {
   const canonicalSystemPrompt =
     `IRIS SYSTEM PROMPT V1\n` +
@@ -148,6 +150,7 @@ function ensureLineage(
   contextStore: ContextStore,
   runtimeSessionId: string,
   epochId: string,
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   prepared: PreparedContextSources,
   providerProfileId: string,
 ): void {

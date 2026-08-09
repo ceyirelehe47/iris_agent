@@ -32,7 +32,7 @@
         "derivationRefs": {
           "memoryRefs": [],
           "compartmentIds": ["comp-1"],
-          "sourceContextUnitIds": []
+          "sourceContextMessageUnitIds": []
         }
       },
       {

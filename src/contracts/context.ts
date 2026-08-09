@@ -6,6 +6,7 @@ export const M0_EMPTY_BODY = "<session-history></session-history>";
 export const M1_EMPTY_PLACEHOLDER =
   "<session-history-since>(no new content since last materialization)</session-history-since>";
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export interface ContextSourceSnapshot {
   contextSourceSnapshotId: string;
   runtimeSessionId: string;
@@ -21,6 +22,7 @@ export interface ContextSourceSnapshot {
   preparedAt: string;
 }
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export interface PreparedContextSources {
   contextSourceSnapshotId: string;
   runtimeSessionId: string;
@@ -44,6 +46,7 @@ export interface TransformMessagesInput {
  * 真实的 m0/m1 物化边界状态现在由 context_lineages（ContextRenderer +
  * persistRender）持有，这里只保留 provider 可见的折叠后消息数组。
  */
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export interface ContextTransformResult {
   messages: AgentMessage[];
 }

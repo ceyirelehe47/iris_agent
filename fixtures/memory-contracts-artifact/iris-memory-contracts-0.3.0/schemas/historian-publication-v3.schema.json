@@ -68,7 +68,7 @@
     "episodeSources": {
       "type": "array",
       "items": {
-        "$ref": "urn:iris:memory:graphiti-episode-source:v1"
+        "$ref": "urn:iris:memory:graphiti-episode-source:v2"
       },
       "minItems": 1,
       "maxItems": 1024

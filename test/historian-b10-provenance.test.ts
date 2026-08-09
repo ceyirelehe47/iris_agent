@@ -55,7 +55,7 @@ function unit(contextSeq: number, overrides: Partial<HistorianUnitView> = {}): H
     unitType: "input",
     disposition: "include",
     contentHash: createHash("sha256").update(`content-${contextSeq}`).digest("hex"),
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     ...overrides,
   };
 }
@@ -241,15 +241,20 @@ test("B10-AC1/AC2: v2 Publication identifies the TRUE lineage id, stable across 
     );
 
     // Rollover: Session B publishes against the SAME lineage.
+    // iris_agent#84: after rollover, the lineage cursor persists at 2
+    // (A processed units 1..2). B cannot re-claim the same units — it
+    // starts from the lineage cursor. To get a committed publication for
+    // B, the port must supply NEW units (3+) that B hasn't seen.
     const r2 = await fx.runCycle([u("u-1", null, "two")], SESSION_B);
-    assert.equal(r2.status, "committed");
-    const env2 = fx.envelopeOf(SESSION_B);
-    assert.ok(env2);
     assert.equal(
-      rangeOf(env2).contextLineageId,
-      LINEAGE,
-      "rollover does not change lineage identity",
+      r2.status,
+      "nothing_new",
+      "rollover does not re-process already-committed units (iris_agent#84)",
     );
+    // iris_agent#84: nothing_new means NO publication for B — the lineage
+    // cursor prevents a duplicate publication of units 1..2.
+    const env2 = fx.envelopeOf(SESSION_B);
+    assert.equal(env2, undefined, "no duplicate publication on rollover without new units");
   } finally {
     fx.store.close();
     rmSync(fx.dir, { recursive: true, force: true });
@@ -394,7 +399,7 @@ test("B10-AC6: payloadHash is canonical over the complete payload; provenance ch
 
     // Changed derivation refs change the payload hash.
     const derived = unit(1, {
-      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextUnitIds: [] },
+      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
     });
     const fx2 = fixture(stubPort([derived]));
     try {

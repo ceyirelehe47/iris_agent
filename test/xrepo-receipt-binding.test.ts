@@ -73,7 +73,7 @@ function sampleEnvelope(
     derivation: {
       memoryRefs: [],
       compartmentIds: ["comp-x"],
-      sourceContextUnitIds: [],
+      sourceContextMessageUnitIds: [],
     },
   };
   const episodeSourceHash = createHash("sha256")

@@ -48,6 +48,9 @@ jobs:
         run: npm run build
         working-directory: ../pi
       - run: npm ci
+      # Repository hygiene guard (iris_agent#86): reject tracked node_modules
+      # and absolute /tmp-style symlinks before running any build.
+      - run: node scripts/check-repo-hygiene.mjs
       # Single aggregate check (format/lint/typecheck/unit + subprocess +
       # migration/crash/build/CLI/dist smoke) so CI never drifts from the
       # repository's own check contract — including the subprocess suite that

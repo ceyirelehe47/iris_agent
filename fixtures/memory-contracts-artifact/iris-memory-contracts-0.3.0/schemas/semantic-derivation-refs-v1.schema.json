@@ -5,25 +5,41 @@
   "description": "Derivation references that let the Memory service validate wire consistency and suppress echo without reconstructing Agent Context.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["memoryRefs", "compartmentIds", "sourceContextUnitIds"],
+  "required": [
+    "memoryRefs",
+    "compartmentIds",
+    "sourceContextMessageUnitIds"
+  ],
   "properties": {
     "memoryRefs": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1, "maxLength": 128},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
       "maxItems": 256
     },
     "compartmentIds": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1, "maxLength": 128},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
       "maxItems": 256
     },
     "workSnapshotVersion": {
       "type": "string",
       "maxLength": 128
     },
-    "sourceContextUnitIds": {
+    "sourceContextMessageUnitIds": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1, "maxLength": 128},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
       "maxItems": 256
     }
   }

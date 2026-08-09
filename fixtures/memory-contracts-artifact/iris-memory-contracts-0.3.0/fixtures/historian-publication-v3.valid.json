@@ -48,9 +48,13 @@
         "compartmentIds": [
           "comp-1"
         ],
-        "sourceContextUnitIds": []
+        "sourceContextMessageUnitIds": []
       },
-      "episodeSourceHash": "9b15991d8b9a5f10c3054830102fb3f8075208edf761c28f0e3dca73eb554a3d"
+      "episodeSourceHash": "9b15991d8b9a5f10c3054830102fb3f8075208edf761c28f0e3dca73eb554a3d",
+      "semanticKind": "dialogue",
+      "attributionClass": "user",
+      "sourceTrust": "observed",
+      "referenceTime": "2026-08-05T00:01:00.000Z"
     },
     {
       "episodeId": "episode-2",
@@ -76,9 +80,13 @@
         "compartmentIds": [
           "comp-1"
         ],
-        "sourceContextUnitIds": []
+        "sourceContextMessageUnitIds": []
       },
-      "episodeSourceHash": "8529eb7810f4bb4f8732daaf55667efbabe260e018015273906c6e5899d3f627"
+      "episodeSourceHash": "8529eb7810f4bb4f8732daaf55667efbabe260e018015273906c6e5899d3f627",
+      "semanticKind": "dialogue",
+      "attributionClass": "user",
+      "sourceTrust": "observed",
+      "referenceTime": "2026-08-05T00:01:00.000Z"
     }
   ],
   "derivationSummary": {

@@ -716,7 +716,14 @@ export class HistorianManager {
   ): Promise<{ snapshot: HistorianBoundarySnapshot; nothingNew: boolean } | null> {
     const state = this.store.getSessionState(runtimeSessionId);
     const processed = state?.processedThroughEntrySeq ?? 0;
-    const processedContextSeq = state?.processedThroughContextSeq ?? 0;
+    // iris_agent#84: the AUTHORITATIVE cursor is lineage-scoped. A Session
+    // rollover creates a new runtime_session_id with no session_state row —
+    // reading the session-scoped cursor would rewind to 0 and re-claim units
+    // that Session A already processed. The lineage cursor persists across
+    // rollover and is the sole source of truth for "where did this Iris
+    // identity last commit to?"
+    const lineageCursor = this.store.getLineageCursor(this.historyPort.lineageId());
+    const processedContextSeq = lineageCursor?.processedThroughContextSeq ?? 0;
     // iris_agent#76: the freeze head comes from a CONTEXT claim (global
     // contextSeq, lineage-scoped) — never a Pi Session read and never an
     // entrySeq window. The claim starts AT the durable cursor (inclusive)
@@ -768,11 +775,17 @@ export class HistorianManager {
         if (state === undefined) {
           return { ok: false, errorCode: "session_state_missing" };
         }
+        // iris_agent#84: wrapup reads the AUTHORITATIVE lineage-scoped cursor,
+        // not the session-scoped cursor. This ensures Session B's wrapup
+        // correctly starts after A's committed contextSeq ceiling.
+        const lineageId = this.historyPort.lineageId();
+        const lineageCursor = this.store.getLineageCursor(lineageId);
+        const wrapupCursor = lineageCursor?.processedThroughContextSeq ?? 0;
         // iris_agent#76: wrapup claims committed Context units through the
         // Context-owned port by global contextSeq (the frozen ceiling) —
         // never a Pi Session read, never an entrySeq window.
         const batch = this.historyPort.claimHistorianBatch({
-          afterContextSeqExclusive: state.processedThroughContextSeq ?? 0,
+          afterContextSeqExclusive: wrapupCursor,
           throughContextSeqInclusive: boundary.eligibleThroughContextSeq,
         });
         const eligible = unitsToSequencedEntries(runtimeSessionId, batch.units);
@@ -800,6 +813,15 @@ export class HistorianManager {
             commit: false,
           });
           this.commitWrapupPublication({ runtimeSessionId, boundary, eligible, state });
+          // iris_agent#84: advance the lineage-scoped cursor atomically
+          // with the wrapup transaction. The wrapup cursor was computed
+          // from the lineage cursor (not session_state), so we persist it
+          // back to ensure the lineage watermark stays correct.
+          this.store.upsertLineageCursor(
+            lineageId,
+            boundary.eligibleThroughContextSeq,
+            boundary.observedHeadContextSeq ?? boundary.eligibleThroughContextSeq,
+          );
           this.store.commit();
         } catch (error) {
           this.store.rollback();

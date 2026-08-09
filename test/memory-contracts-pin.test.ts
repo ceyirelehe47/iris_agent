@@ -166,7 +166,7 @@ async function producePublication(): Promise<{
           unitType: "input",
           disposition: "include",
           contentHash: "f".repeat(64),
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         },
       ],
       listUnitsWithPayload: () => [
@@ -177,7 +177,7 @@ async function producePublication(): Promise<{
           unitType: "input",
           disposition: "include",
           contentHash: "f".repeat(64),
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
           payload: { role: "user", content: "hello", timestamp: 0 },
           payloadTimestamp: "2026-08-01T00:00:00.000Z",
         },

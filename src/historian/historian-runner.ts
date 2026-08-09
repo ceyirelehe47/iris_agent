@@ -185,15 +185,24 @@ export class HistorianRunner {
     const { runtimeSessionId, boundary } = input;
     const state = this.store.getSessionState(runtimeSessionId);
 
+    // iris_agent#84: the AUTHORITATIVE cursor is lineage-scoped, not
+    // session-scoped. Session B after rollover has no session_state row,
+    // so reading the session-scoped cursor would rewind to 0. Read the
+    // lineage cursor instead — it persists across Session rollover.
+    const lineageCursor = this.store.getLineageCursor(this.historyPort.lineageId());
+    const lineageProcessedContextSeq = lineageCursor?.processedThroughContextSeq ?? 0;
+
     // The durable contextSeq cursor is the authoritative processed
     // watermark; the snapshot's batch starts strictly after it.
-    const fromContextSeq = unprocessedFromContextSeq(state);
+    // iris_agent#84: use the lineage-scoped cursor (authoritative), not
+    // the session-scoped one.
+    const fromContextSeq = lineageProcessedContextSeq + 1;
     const fromEntrySeq = unprocessedFromEntrySeq(state);
     if (boundary.eligibleThroughContextSeq < fromContextSeq) {
       return {
         committed: false,
         commitThroughEntrySeq: state?.processedThroughEntrySeq ?? 0,
-        commitThroughContextSeq: state?.processedThroughContextSeq ?? 0,
+        commitThroughContextSeq: lineageProcessedContextSeq,
         unprocessedFromEntrySeq: fromEntrySeq,
         discardedFromEntrySeq: null,
         status: "nothing_new",
@@ -212,7 +221,7 @@ export class HistorianRunner {
       return {
         committed: false,
         commitThroughEntrySeq: state?.processedThroughEntrySeq ?? 0,
-        commitThroughContextSeq: state?.processedThroughContextSeq ?? 0,
+        commitThroughContextSeq: lineageProcessedContextSeq,
         unprocessedFromEntrySeq: fromEntrySeq,
         discardedFromEntrySeq: null,
         status: "nothing_new",
@@ -238,7 +247,7 @@ export class HistorianRunner {
       return {
         committed: false,
         commitThroughEntrySeq: state?.processedThroughEntrySeq ?? 0,
-        commitThroughContextSeq: state?.processedThroughContextSeq ?? 0,
+        commitThroughContextSeq: lineageProcessedContextSeq,
         unprocessedFromEntrySeq: fromEntrySeq,
         discardedFromEntrySeq: null,
         status: "validation_failed",
@@ -267,6 +276,15 @@ export class HistorianRunner {
         updatedAt: new Date(this.store.now()).toISOString(),
       };
       this.store.upsertSessionState(nextState);
+      // iris_agent#84: advance the AUTHORITATIVE lineage-scoped cursor in the
+      // SAME transaction. This is the durable boundary that survives Session
+      // rollover; session_state.processedThroughContextSeq is the secondary
+      // attribution field.
+      this.store.upsertLineageCursor(
+        this.historyPort.lineageId(),
+        outcome.commitThroughContextSeq,
+        state?.observedHeadContextSeq ?? outcome.commitThroughContextSeq,
+      );
       this.commitHook?.commitSafePrefix({
         runtimeSessionId,
         boundary,

@@ -236,7 +236,7 @@ export class ContextIngest implements ContextIngestPort {
               timestamp: message.timestamp,
             },
             paired: false,
-            derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+            derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
             schemaVersion: "context-unit-v1",
             ...(event.entryId !== undefined
               ? { rawArchiveRef: `pi://session/${runtimeSessionId}/entry/${event.entryId}` }
@@ -318,7 +318,7 @@ export class ContextIngest implements ContextIngestPort {
           contentHash: event.contentHash ?? "",
           payload: message,
           paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
           schemaVersion: "context-unit-v1",
           ...(event.entryId !== undefined
             ? { rawArchiveRef: `pi://session/${runtimeSessionId}/entry/${event.entryId}` }

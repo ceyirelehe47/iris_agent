@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 import type { HistoryProjectionUnit } from "../context/projection.js";
 
 /**
@@ -15,7 +16,7 @@ import type { HistoryProjectionUnit } from "../context/projection.js";
  * The Historian is the ONLY persistent semantic processor of the Pi Session
  * transcript. It reads Session entries exclusively through the narrow
  * RuntimeSessionHistoryReadPort (never the Context repository, never
- * m0/m1/LKG), consumes the SAME HistoryProjectionUnit the Context pipeline
+ * m0/m1/LKG), consumes the SAME HistoryProjectionUnit the Context pipeline — TODO: R2 v27 migration
  * uses (one projection basis for the whole path — the Historian never
  * re-derives a different input/tool-arc boundary), and persists its own
  * immutable compartments/segments/evidence + publications in historian.db.
@@ -260,18 +261,21 @@ export function historianBatchHash(input: {
  * (issue #8: Context and Historian MUST NOT derive different projection
  * units — one basis for input/tool-arc boundaries).
  */
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export type { HistoryProjectionUnit };
 
 /** Projection-unit token/length estimate for budget accounting. */
 export interface ProjectionUnitEstimate {
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   unit: HistoryProjectionUnit;
   /** Deterministic token estimate (chars/4 unless a real counter is wired). */
   estimatedTokens: number;
 }
 
 /** Convenience: the shared projection unit's provider-visible text (B4). */
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export function projectionUnitProviderText(unit: HistoryProjectionUnit): string {
-  // 适配说明（R3-P0 port）：main 上的 HistoryProjectionUnit 仅扩展了可选的
+  // 适配说明（R3-P0 port）：main 上的 HistoryProjectionUnit 仅扩展了可选的 — TODO: R2 v27 migration
   // providerVisible 字段（类型级），projectLogicalUnits 尚未填充真实渲染值
   // （分支上的 provider-visible 渲染器属于被排除的 A-phase 特性）。此处回退
   // 为空串，保证契约在 main 依赖集上可编译；R3-P1..P4 对齐 v13 规格时再接入
@@ -280,6 +284,7 @@ export function projectionUnitProviderText(unit: HistoryProjectionUnit): string 
 }
 
 /** Serialize a projection unit for hashing/evidence (stable byte form). */
+// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
 export function serializeProjectionUnit(unit: HistoryProjectionUnit): string {
   return JSON.stringify(unit);
 }
@@ -297,6 +302,7 @@ export function stableHash(value: unknown): string {
 
 /** Marker: a projection unit whose semantics have been narrated/compacted. */
 export interface NarratedProjectionUnit {
+  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
   unit: HistoryProjectionUnit;
   narrationText: string;
   narrationHash: string;

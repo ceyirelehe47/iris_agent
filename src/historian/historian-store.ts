@@ -123,6 +123,23 @@ const BOUNDARY_SQL = {
     "FROM boundary_snapshots WHERE runtime_session_id = ? ORDER BY observed_head_entry_seq DESC LIMIT ?",
 };
 
+// iris_agent#84: lineage-scoped cursor — the AUTHORITATIVE durable
+// processedThroughContextSeq, independent of runtime_session_id. Session
+// rollover creates a new session_state row but the lineage cursor persists.
+const LINEAGE_CURSOR_SQL = {
+  select:
+    "SELECT lineage_id, processed_through_context_seq, observed_head_context_seq, updated_at FROM lineage_cursors WHERE lineage_id = ?",
+  upsert:
+    "INSERT INTO lineage_cursors (lineage_id, processed_through_context_seq, observed_head_context_seq, updated_at) " +
+    "VALUES (?, ?, ?, ?) " +
+    "ON CONFLICT(lineage_id) DO UPDATE SET " +
+    // Sticky: an upsert that does not carry a cursor value (NULL) must never
+    // reset the durable watermark; only explicit values advance it.
+    "processed_through_context_seq = COALESCE(excluded.processed_through_context_seq, lineage_cursors.processed_through_context_seq), " +
+    "observed_head_context_seq = excluded.observed_head_context_seq, " +
+    "updated_at = excluded.updated_at",
+};
+
 const SNAPSHOT_SQL_INSERT =
   "INSERT INTO continuity_snapshots (continuity_snapshot_id, runtime_session_id, snapshot_sequence, " +
   "final_head_entry_seq, source_range_hash, snapshot_json, complete, created_at) " +
@@ -434,6 +451,53 @@ export class HistorianStore {
       modelProviderProfile: row.model_provider_profile,
       frozenAt: row.frozen_at,
     }));
+  }
+
+  // ---- iris_agent#84: lineage-scoped cursor (AUTHORITATIVE) ----
+
+  /**
+   * Read the lineage-scoped cursor. Returns undefined when no cursor row
+   * exists (a fresh lineage or pre-migration DB). The caller treats
+   * undefined as 0 (nothing processed).
+   */
+  getLineageCursor(
+    lineageId: string,
+  ): { processedThroughContextSeq: number; observedHeadContextSeq: number } | undefined {
+    const row = this.db.prepare(LINEAGE_CURSOR_SQL.select).get(lineageId) as
+      | {
+          lineage_id: string;
+          processed_through_context_seq: number;
+          observed_head_context_seq: number;
+          updated_at: string;
+        }
+      | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    return {
+      processedThroughContextSeq: row.processed_through_context_seq,
+      observedHeadContextSeq: row.observed_head_context_seq,
+    };
+  }
+
+  /**
+   * Upsert the lineage-scoped cursor. Must run inside the same transaction
+   * as the session_state cursor update so both commit atomically.
+   * processedThroughContextSeq is sticky (COALESCE on NULL).
+   */
+  upsertLineageCursor(
+    lineageId: string,
+    processedThroughContextSeq: number | null,
+    observedHeadContextSeq: number,
+  ): void {
+    this.db
+      .prepare(LINEAGE_CURSOR_SQL.upsert)
+      .run(
+        lineageId,
+        processedThroughContextSeq,
+        observedHeadContextSeq,
+        new Date(this.nowMs()).toISOString(),
+      );
   }
 
   /** BEGIN a write transaction; the caller commits or rolls back. */

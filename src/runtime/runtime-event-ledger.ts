@@ -38,8 +38,8 @@ function parseDerivationRefs(json: string): RuntimeEventDerivationRefs {
   return {
     memoryRefs: Array.isArray(parsed.memoryRefs) ? parsed.memoryRefs : [],
     compartmentIds: Array.isArray(parsed.compartmentIds) ? parsed.compartmentIds : [],
-    sourceContextUnitIds: Array.isArray(parsed.sourceContextUnitIds)
-      ? parsed.sourceContextUnitIds
+    sourceContextMessageUnitIds: Array.isArray(parsed.sourceContextMessageUnitIds)
+      ? parsed.sourceContextMessageUnitIds
       : [],
     ...(typeof parsed.workSnapshotVersion === "string"
       ? { workSnapshotVersion: parsed.workSnapshotVersion }
@@ -74,7 +74,7 @@ function rowToEvent(row: RuntimeEventRow): RuntimeEvent {
 const DEFAULT_DERIVATION_REFS: RuntimeEventDerivationRefs = {
   memoryRefs: [],
   compartmentIds: [],
-  sourceContextUnitIds: [],
+  sourceContextMessageUnitIds: [],
 };
 
 /**

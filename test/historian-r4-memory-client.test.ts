@@ -66,7 +66,7 @@ function fakeHistoryPort(): ContextHistoryReadPort {
         unitType: "input",
         disposition: "include",
         contentHash: "d".repeat(64),
-        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
       },
     ],
     listUnitsWithPayload: () => [
@@ -77,7 +77,7 @@ function fakeHistoryPort(): ContextHistoryReadPort {
         unitType: "input",
         disposition: "include",
         contentHash: "d".repeat(64),
-        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         payload: { role: "user", content: "hello", timestamp: 0 },
         payloadTimestamp: "2026-08-01T00:00:00.000Z",
       },
@@ -99,7 +99,7 @@ function fakeHistoryPort(): ContextHistoryReadPort {
           contentHash: "d".repeat(64),
           payload: { role: "user", content: "hello", timestamp: 1 },
           paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
           schemaVersion: "context-unit-v1",
           createdAt: "2026-08-01T00:00:00.000Z",
         });
@@ -197,7 +197,7 @@ const SAMPLE_ENVELOPE = (() => {
     derivation: {
       memoryRefs: [],
       compartmentIds: ["comp-x"],
-      sourceContextUnitIds: [],
+      sourceContextMessageUnitIds: [],
     },
   };
   const episodeSourceHash = createHash("sha256")

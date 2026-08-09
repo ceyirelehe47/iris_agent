@@ -132,7 +132,7 @@ function stubHistoryPort(texts?: string[]): ContextHistoryReadPort {
           unitType: "input",
           disposition: "include",
           contentHash: "b".repeat(64),
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         });
       }
       return units;
@@ -168,7 +168,7 @@ function stubHistoryPort(texts?: string[]): ContextHistoryReadPort {
             timestamp: 1,
           },
           paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextUnitIds: [] },
+          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
           schemaVersion: "context-unit-v1",
           createdAt: "2026-08-01T00:00:00.000Z",
         });
