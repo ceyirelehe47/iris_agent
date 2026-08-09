@@ -3,6 +3,32 @@ import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
 import type { PreparedInvocationSources } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
+import type { Model } from "@earendil-works/pi-ai";
+
+/**
+ * iris_agent#89: Model resolution port for production fallback dispatch.
+ *
+ * The supervisor needs to select a fallback model/provider without duplicating
+ * Pi's native provider loop. This port lets the coordinator resolve a model
+ * identifier (from the fallback chain) to a concrete Pi `Model` object, then
+ * apply it to the active harness before the next dispatch.
+ *
+ * Pi remains the sole same-provider/same-model transport retry loop. The
+ * supervisor only decides WHEN to switch models; Pi's native retry handles
+ * transient failures within one model.
+ */
+export interface ModelOverridePort {
+  /**
+   * Resolve a model identifier to a concrete Pi `Model` object.
+   * Returns undefined when the model is not in the current provider catalog.
+   */
+  resolveModel(modelId: string): Model<string> | undefined;
+  /**
+   * Apply a model override to the currently active runtime capsule.
+   * Called before dispatch when the supervisor selects a fallback model.
+   */
+  applyModelOverride(model: Model<string>): Promise<void>;
+}
 
 /**
  * Thin Runtime Coordinator (00 Module Boundaries, 03 Runtime Coordinator).
@@ -35,6 +61,14 @@ export interface SettledBoundaryInfo {
 export interface RuntimeCoordinatorOptions {
   /** Registry providing the current ready Capsule (ActiveRuntimePort). */
   activeRuntime: ActiveRuntimePort;
+  /**
+   * iris_agent#89: Optional model override port for production fallback.
+   * When provided, the coordinator implements `promptWithModel` by resolving
+   * the model id via this port and applying it to the active harness before
+   * dispatch. This is the ONLY production seam through which the supervisor
+   * can switch models — it does NOT duplicate Pi's native provider loop.
+   */
+  modelOverride?: ModelOverridePort;
   /**
    * Derives InvocationSourceBinding + canonical system prompt for an input,
    * scoped to the active runtime Session/Epoch. Called before every prompt().
@@ -69,6 +103,7 @@ export interface RuntimeCoordinatorOptions {
 
 export class RuntimeCoordinator implements AgentRuntimePort {
   private readonly activeRuntime: ActiveRuntimePort;
+  private readonly modelOverride: ModelOverridePort | undefined;
   private readonly prepareInvocation: RuntimeCoordinatorOptions["prepareInvocation"];
   private readonly onSettledBoundary: RuntimeCoordinatorOptions["onSettledBoundary"];
   private readonly onInvocationStart: RuntimeCoordinatorOptions["onInvocationStart"];
@@ -84,6 +119,7 @@ export class RuntimeCoordinator implements AgentRuntimePort {
 
   constructor(options: RuntimeCoordinatorOptions) {
     this.activeRuntime = options.activeRuntime;
+    this.modelOverride = options.modelOverride;
     this.prepareInvocation = options.prepareInvocation;
     this.onSettledBoundary = options.onSettledBoundary;
     this.onInvocationStart = options.onInvocationStart;
@@ -231,6 +267,33 @@ export class RuntimeCoordinator implements AgentRuntimePort {
    * Runtime Coordinator, Abort). If the run does not settle within
    * `timeoutMs` the promise rejects so the caller can recover.
    */
+
+  /**
+   * iris_agent#89: Production model override dispatch.
+   *
+   * When the Recovery Supervisor selects a fallback model, it calls this
+   * method instead of `prompt()`. The coordinator resolves the model id via
+   * the ModelOverridePort, applies it to the active harness via
+   * `harness.setModel()`, then proceeds with the normal dispatch flow.
+   *
+   * This is the ONLY production seam for model/provider fallback. Pi's native
+   * same-provider/same-model retry loop remains L1 and is NOT duplicated here.
+   */
+  async *promptWithModel(
+    input: AgentInput,
+    modelId: string | null,
+  ): AsyncIterable<AgentRuntimeEvent> {
+    if (modelId !== null && this.modelOverride !== undefined) {
+      const resolved = this.modelOverride.resolveModel(modelId);
+      if (resolved !== undefined) {
+        await this.modelOverride.applyModelOverride(resolved);
+      }
+      // If the model cannot be resolved, fall through to prompt() with the
+      // current model — the supervisor's classification/budget will catch it.
+    }
+    yield* this.prompt(input);
+  }
+
   async abort(invocationId: string, reason?: string, timeoutMs = 15000): Promise<void> {
     if (this.activeInvocation !== invocationId) {
       throw new Error(`no active invocation ${invocationId}`);
