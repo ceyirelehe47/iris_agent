@@ -40,9 +40,7 @@ const DEPRECATED_NAMES = [
 ];
 
 // Files where LegacyFlat types are permitted (they define/test the fence)
-const LEGACY_TYPE_EXEMPT_FILES = new Set([
-  "src/contracts/context-v27.ts",
-]);
+const LEGACY_TYPE_EXEMPT_FILES = new Set(["src/contracts/context-v27.ts"]);
 
 const EXEMPT_PATH_PATTERNS = [
   /node_modules\//,
@@ -107,8 +105,10 @@ for (const file of trackedFiles) {
       const regex = new RegExp(`\\b${escaped}\\b`);
       if (regex.test(line)) {
         // LegacyFlat types are only allowed in their definition file + tests
-        if ((name === "LegacyFlatV1Generation" || name === "LegacyFlatV1Unit") &&
-            LEGACY_TYPE_EXEMPT_FILES.has(file)) {
+        if (
+          (name === "LegacyFlatV1Generation" || name === "LegacyFlatV1Unit") &&
+          LEGACY_TYPE_EXEMPT_FILES.has(file)
+        ) {
           continue;
         }
         const trimmed = line.trim();
@@ -210,7 +210,9 @@ for (const check of STRUCTURAL_CHECKS) {
 }
 
 if (structuralViolations.length > 0) {
-  console.error(`Architecture structural check FAILED (${structuralViolations.length} violation(s)):`);
+  console.error(
+    `Architecture structural check FAILED (${structuralViolations.length} violation(s)):`,
+  );
   for (const v of structuralViolations) {
     console.error(`  ${v.description} (${v.file}${v.fileMissing ? " MISSING" : ""})`);
   }
@@ -218,4 +220,6 @@ if (structuralViolations.length > 0) {
   process.exit(1);
 }
 
-console.log("Deprecated-name + architecture check passed — no prohibited names or structural violations.");
+console.log(
+  "Deprecated-name + architecture check passed — no prohibited names or structural violations.",
+);

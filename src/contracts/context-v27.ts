@@ -47,12 +47,7 @@ export type ContextMessageUnitLifecycleState =
   | "retired";
 
 export type ContextUnitType =
-  | "input"
-  | "output"
-  | "tool_call"
-  | "tool_result"
-  | "system"
-  | "operational";
+  "input" | "output" | "tool_call" | "tool_result" | "system" | "operational";
 
 export type ContextMessageUnitDisposition = "include" | "reference_only" | "exclude";
 
@@ -225,7 +220,13 @@ export function validateGenerationV2(generation: ContextGenerationV2): boolean {
   const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
   const len = generation.units.length;
   return (
-    0 <= e0 && e0 <= e1 && e1 <= e2 && e2 <= e3 && e3 <= e4 && e4 <= e5 && e5 === len &&
+    0 <= e0 &&
+    e0 <= e1 &&
+    e1 <= e2 &&
+    e2 <= e3 &&
+    e3 <= e4 &&
+    e4 <= e5 &&
+    e5 === len &&
     generation.schemaId === CONTEXT_GENERATION_V2_SCHEMA_ID &&
     generation.header.schemaId === CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID &&
     generation.units.every(
@@ -248,11 +249,7 @@ export function hasForbiddenUnitFields(unit: unknown): boolean {
   const header = record["header"];
   if (typeof header === "object" && header !== null) {
     const headerRecord = header as Record<string, unknown>;
-    return (
-      "layer" in headerRecord ||
-      "pLevel" in headerRecord ||
-      "sourceKind" in headerRecord
-    );
+    return "layer" in headerRecord || "pLevel" in headerRecord || "sourceKind" in headerRecord;
   }
   return "layer" in record || "pLevel" in record || "sourceKind" in record;
 }
@@ -346,8 +343,7 @@ export function v1ToF2Fence(
   if (isLegacyFlatV1Generation(value)) {
     const v1 = value as LegacyFlatV1Generation;
     const units: ContextUnitV2[] = v1.units.map((v1u) => {
-      const sourceHash =
-        v1u.sourceRef.sourceHash ?? v1u.content.contentHash;
+      const sourceHash = v1u.sourceRef.sourceHash ?? v1u.content.contentHash;
       const header: ContextUnitHeaderV1 = {
         schemaId: CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
         contextUnitId: v1u.contextUnitId,

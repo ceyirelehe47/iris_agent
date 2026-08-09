@@ -92,7 +92,6 @@ function makeGeneration(
 // ---------------------------------------------------------------------------
 
 describe("iris_agent#96: V2 Context Generation contract", () => {
-
   describe("exact V2 structured types", () => {
     it("ContextGenerationV2 has exactly schemaId, header, units", () => {
       const gen = makeGeneration([], [0, 0, 0, 0, 0, 0]);
@@ -228,7 +227,13 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
   describe("V1→V2 migration / rejection fence", () => {
     it("passes through valid V2 generation unchanged", () => {
       const gen = makeGeneration([], [0, 0, 0, 0, 0, 0]);
-      const result = v1ToF2Fence(gen, "lineage-001", "gen-001", "snapshot-001", "2026-01-01T00:00:00Z");
+      const result = v1ToF2Fence(
+        gen,
+        "lineage-001",
+        "gen-001",
+        "snapshot-001",
+        "2026-01-01T00:00:00Z",
+      );
       assert.equal(result.outcome, "v2");
     });
 
@@ -249,7 +254,13 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
         ],
       };
       assert.ok(isLegacyFlatV1Generation(legacyV1));
-      const result = v1ToF2Fence(legacyV1, "lineage-001", "gen-001", "snapshot-001", "2026-01-01T00:00:00Z");
+      const result = v1ToF2Fence(
+        legacyV1,
+        "lineage-001",
+        "gen-001",
+        "snapshot-001",
+        "2026-01-01T00:00:00Z",
+      );
       assert.equal(result.outcome, "migrated");
       if (result.outcome === "migrated") {
         const m = result.migrated;
@@ -275,10 +286,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("V1 and V2 cannot mix in the same pipeline (V2 input returns 'v2', not 'migrated')", () => {
-      const gen = makeGeneration(
-        [makeUnit("u1", "test", "x")],
-        [0, 0, 0, 0, 0, 1],
-      );
+      const gen = makeGeneration([makeUnit("u1", "test", "x")], [0, 0, 0, 0, 0, 1]);
       const result = v1ToF2Fence(gen, "lineage", "gen", "snap", "2026-01-01");
       assert.equal(result.outcome, "v2");
     });

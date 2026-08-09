@@ -139,7 +139,12 @@ export function buildContextGenerationV2(
   const e5 = units.length;
 
   const layerEnds: readonly [number, number, number, number, number, number] = [
-    e0, e1, e2, e3, e4, e5,
+    e0,
+    e1,
+    e2,
+    e3,
+    e4,
+    e5,
   ];
 
   const contextGenerationHash = computeContextGenerationHash({
@@ -201,8 +206,7 @@ function projectStaticUnit(unit: P0P1P2P3P4Unit): ContextUnitV2 {
  * as the semanticContent JsonValue.
  */
 function projectP5Unit(cmu: ContextMessageUnit): ContextUnitV2 {
-  const semanticSchemaId =
-    P5_SEMANTIC_SCHEMA_MAP[cmu.unitType] ?? "iris.semantic.p5.unknown.v1";
+  const semanticSchemaId = P5_SEMANTIC_SCHEMA_MAP[cmu.unitType] ?? "iris.semantic.p5.unknown.v1";
 
   // Serialize the AgentMessage payload as JsonValue
   const semanticContent = cmu.payload as unknown as JsonValue;
