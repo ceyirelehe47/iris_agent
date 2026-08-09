@@ -6,8 +6,7 @@ import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
 
 import {
   projectLogicalUnits,
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  type HistoryProjectionUnit,
+  type SessionProjectionUnit,
   type P0System,
   type P1PersonaSnapshot,
   type P2Declarations,
@@ -169,8 +168,7 @@ test("projection: verified input pair becomes one input unit with real entry ids
   ];
   const result = projectLogicalUnits("iris-runtime-2026-08-01-1", entries);
   const inputUnits = result.units.filter((u) => u.kind === "input") as Array<
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    Extract<HistoryProjectionUnit, { kind: "input" }>
+    Extract<SessionProjectionUnit, { kind: "input" }>
   >;
   assert.equal(inputUnits.length, 2);
   assert.equal(inputUnits[0]?.userEntryId, "u-1", "real raw UserMessage entry id");
@@ -198,8 +196,7 @@ test("projection: assistant + toolResult produce tool_arc with adjacency from du
   assert.ok(kinds.includes("tool_result"));
   assert.ok(kinds.includes("tool_arc"), "sealed tool arc must exist");
   const arc = result.units.find(
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    (u): u is Extract<HistoryProjectionUnit, { kind: "tool_arc" }> => u.kind === "tool_arc",
+    (u): u is Extract<SessionProjectionUnit, { kind: "tool_arc" }> => u.kind === "tool_arc",
   );
   assert.ok(arc);
   assert.equal(arc.assistantEntryId, "a-1", "arc bound to real assistant entry id");
@@ -290,8 +287,7 @@ test("projection: unverified/orphan user (no companion) is fail-conservative", (
   ];
   const result = projectLogicalUnits("iris-runtime-2026-08-01-1", entries);
   const inputUnit = result.units.find(
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    (u): u is Extract<HistoryProjectionUnit, { kind: "input" }> => u.kind === "input",
+    (u): u is Extract<SessionProjectionUnit, { kind: "input" }> => u.kind === "input",
   );
   assert.ok(inputUnit);
   assert.equal(inputUnit.verified, false);
@@ -329,8 +325,7 @@ test("projection: corrupt companion (wrong content/display) is NOT verified (rev
   ];
   const result = projectLogicalUnits("iris-runtime-2026-08-01-1", entries);
   const inputUnit = result.units.find(
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    (u): u is Extract<HistoryProjectionUnit, { kind: "input" }> => u.kind === "input",
+    (u): u is Extract<SessionProjectionUnit, { kind: "input" }> => u.kind === "input",
   );
   assert.ok(inputUnit);
   assert.equal(
@@ -352,8 +347,7 @@ test("projection: companion without pairKey is NOT verified (reviewer F1)", () =
   ];
   const result = projectLogicalUnits("iris-runtime-2026-08-01-1", entries);
   const inputUnit = result.units.find(
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    (u): u is Extract<HistoryProjectionUnit, { kind: "input" }> => u.kind === "input",
+    (u): u is Extract<SessionProjectionUnit, { kind: "input" }> => u.kind === "input",
   );
   assert.ok(inputUnit);
   assert.equal(inputUnit.verified, false, "missing pairKey must fail closed");
@@ -373,8 +367,7 @@ test("projection: tool_result unit toolName comes from the native message field 
   ];
   const result = projectLogicalUnits("iris-runtime-2026-08-01-1", entries);
   const toolResult = result.units.find(
-    // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-    (u): u is Extract<HistoryProjectionUnit, { kind: "tool_result" }> => u.kind === "tool_result",
+    (u): u is Extract<SessionProjectionUnit, { kind: "tool_result" }> => u.kind === "tool_result",
   );
   assert.ok(toolResult);
   assert.equal(toolResult.toolName, "read_file", "toolName = native Pi toolName field");

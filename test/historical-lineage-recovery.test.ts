@@ -402,7 +402,11 @@ test("c5: single-current-binding guard, ambiguity fail-closed and unmasked hard-
               contentHash: "c".repeat(64),
               payload: { role: "assistant", content: [{ type: "text", text: "x" }] } as never,
               paired: false,
-              derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
+              derivationRefs: {
+                memoryRefs: [],
+                compartmentIds: [],
+                sourceContextMessageUnitIds: [],
+              },
               schemaVersion: "context-unit-v1",
               createdAt: "2026-08-05T00:00:00.000Z",
             },

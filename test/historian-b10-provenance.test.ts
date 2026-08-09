@@ -399,7 +399,11 @@ test("B10-AC6: payloadHash is canonical over the complete payload; provenance ch
 
     // Changed derivation refs change the payload hash.
     const derived = unit(1, {
-      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
+      derivationRefs: {
+        memoryRefs: ["mem-1"],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
     });
     const fx2 = fixture(stubPort([derived]));
     try {

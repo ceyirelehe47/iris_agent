@@ -162,11 +162,19 @@ test("r3 anti-echo wiring: derived-only batch persists derivedOnly=true and empt
     const units = makeUnitViews([
       {
         unitType: "assistant",
-        derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
+        derivationRefs: {
+          memoryRefs: ["mem-1"],
+          compartmentIds: [],
+          sourceContextMessageUnitIds: [],
+        },
       },
       {
         unitType: "assistant",
-        derivationRefs: { memoryRefs: [], compartmentIds: ["comp-1"], sourceContextMessageUnitIds: [] },
+        derivationRefs: {
+          memoryRefs: [],
+          compartmentIds: ["comp-1"],
+          sourceContextMessageUnitIds: [],
+        },
       },
     ]);
     runPublication(store, fakeHistoryPort(units), [1, 2]);
@@ -285,7 +293,11 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
       contentHash: "d".repeat(64),
       payload: { role: "assistant", content: "as you recall..." } as never,
       paired: false,
-      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
+      derivationRefs: {
+        memoryRefs: ["mem-1"],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
       schemaVersion: "context-unit-v1",
       createdAt: "t",
     });

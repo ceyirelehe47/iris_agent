@@ -19,7 +19,7 @@ import {
  * P5  current Runtime Session transcript projection
  *
  * R2 scope: P0/P1/P2 are the immutable+stable system prefix (provided by the
- * prepared ContextSourceSnapshot); P3/P4 arrive through stable read ports / — TODO: R2 v27 migration
+ * prepared InvocationSourceBinding); P3/P4 arrive through stable read ports /
  * fixtures (a production Historian / Memory integration is R3/R4 — never
  * faked here); P5 is the current Session's logical-unit projection built
  * from the RAW Pi entries, preserving source entry ids, ranges, hashes,
@@ -106,8 +106,7 @@ export interface P4MemoryInput {
  * tail, LKG, historian) can splice and validate deterministically without
  * re-deriving pairing from a compressed array (iris_agent#6 principle).
  */
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-export type HistoryProjectionUnit =
+export type SessionProjectionUnit =
   | {
       kind: "input";
       unitId: string;
@@ -207,8 +206,7 @@ export type HistoryProjectionUnit =
 
 export interface ProjectedLogicalUnits {
   runtimeSessionId: string;
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  units: HistoryProjectionUnit[];
+  units: SessionProjectionUnit[];
   /** First raw entrySeq represented by the projection (inclusive). */
   fromEntrySeq: number;
   /** Last raw entrySeq represented by the projection (inclusive). */
@@ -241,8 +239,7 @@ export function projectLogicalUnits(
 ): ProjectedLogicalUnits {
   const projected = projectSessionMessages(entries);
 
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  const units: HistoryProjectionUnit[] = [];
+  const units: SessionProjectionUnit[] = [];
   let lastSafeUserAnchor: ProjectedLogicalUnits["lastSafeUserAnchor"] = null;
 
   // Index: entrySeq -> entry (raw order). Session-local ordinals.
@@ -304,8 +301,7 @@ export function projectLogicalUnits(
       const pairKey = details?.iris?.pairKey;
       const endEntrySeq =
         companion === undefined ? entrySeq : (entrySeqById.get(companion.entryId) ?? entrySeq);
-      // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-      const inputUnit: HistoryProjectionUnit = {
+      const inputUnit: SessionProjectionUnit = {
         kind: "input",
         unitId: `input-${item.entryId}`,
         runtimeSessionId,
@@ -345,8 +341,7 @@ export function projectLogicalUnits(
           )
         : [];
       const toolCallIds = toolCalls.map((call) => call.id ?? "");
-      // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-      const assistantUnit: HistoryProjectionUnit = {
+      const assistantUnit: SessionProjectionUnit = {
         kind: "assistant",
         unitId: `assistant-${item.entryId}`,
         runtimeSessionId,
@@ -369,8 +364,7 @@ export function projectLogicalUnits(
         const result = toolResultByCallId.get(callId);
         if (result !== undefined) {
           const resultSeq = entrySeqById.get(result.entryId) ?? entrySeq;
-          // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-          const arc: HistoryProjectionUnit = {
+          const arc: SessionProjectionUnit = {
             kind: "tool_arc",
             unitId: `arc-${callId}`,
             runtimeSessionId,
@@ -395,8 +389,7 @@ export function projectLogicalUnits(
       const nativeToolName = (message as AgentMessage & { toolName?: string }).toolName ?? "";
       const details = (message as AgentMessage & { details?: unknown }).details as
         { iris?: { toolExecutionKey?: string; assistantEntryId?: string } } | undefined;
-      // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-      const toolResultUnit: HistoryProjectionUnit = {
+      const toolResultUnit: SessionProjectionUnit = {
         kind: "tool_result",
         unitId: `tool-result-${item.entryId}`,
         runtimeSessionId,
@@ -496,10 +489,8 @@ export function projectLogicalUnits(
   };
 }
 
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-function entrySeqOfOrder(a: HistoryProjectionUnit, b: HistoryProjectionUnit): number {
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  const seqOf = (unit: HistoryProjectionUnit): number => {
+function entrySeqOfOrder(a: SessionProjectionUnit, b: SessionProjectionUnit): number {
+  const seqOf = (unit: SessionProjectionUnit): number => {
     switch (unit.kind) {
       case "input":
         return unit.entryRange.startEntrySeq;

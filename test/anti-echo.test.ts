@@ -45,7 +45,11 @@ test("anti-echo: tool result is never derived-only", () => {
 test("anti-echo: assistant restating recalled memory is derived-only and excluded", () => {
   const unit = unitView({
     unitType: "assistant",
-    derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: ["comp-1"], sourceContextMessageUnitIds: [] },
+    derivationRefs: {
+      memoryRefs: ["mem-1"],
+      compartmentIds: ["comp-1"],
+      sourceContextMessageUnitIds: [],
+    },
   });
   assert.equal(isDerivedOnlyUnit(unit), true);
   assert.equal(isEvidenceEligibleUnit(unit), false);
@@ -70,7 +74,11 @@ test("anti-echo: classifyEvidenceBasis keeps only eligible units", () => {
       contextUnitId: "u2",
       contextSeq: 2,
       unitType: "assistant",
-      derivationRefs: { memoryRefs: ["mem-9"], compartmentIds: [], sourceContextMessageUnitIds: [] },
+      derivationRefs: {
+        memoryRefs: ["mem-9"],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
     }),
     unitView({ contextUnitId: "u3", contextSeq: 3, unitType: "tool_result" }),
     unitView({
@@ -94,13 +102,21 @@ test("anti-echo: all-derived batch is marked derivedOnly", () => {
       contextUnitId: "e1",
       contextSeq: 1,
       unitType: "assistant",
-      derivationRefs: { memoryRefs: ["mem-1"], compartmentIds: [], sourceContextMessageUnitIds: [] },
+      derivationRefs: {
+        memoryRefs: ["mem-1"],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
     }),
     unitView({
       contextUnitId: "e2",
       contextSeq: 2,
       unitType: "assistant",
-      derivationRefs: { memoryRefs: [], compartmentIds: ["comp-2"], sourceContextMessageUnitIds: [] },
+      derivationRefs: {
+        memoryRefs: [],
+        compartmentIds: ["comp-2"],
+        sourceContextMessageUnitIds: [],
+      },
     }),
   ];
   const { evidenceBasis, derivedOnly } = classifyEvidenceBasis(units);

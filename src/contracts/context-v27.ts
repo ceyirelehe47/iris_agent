@@ -17,12 +17,18 @@
 /**
  * The lifecycle state of a durable ContextMessageUnit.
  * Replaces the deprecated `ContextUnitLifecycleState`.
+ *
+ * Authoritative lifecycle (Notion R2):
+ * committed → historian_eligible → historian_claimed →
+ * compartmentalized_pending_bust → represented_in_p3 → retired
  */
 export type ContextMessageUnitLifecycleState =
-  | "active"
-  | "represented"
-  | "retired"
-  | "dropped";
+  | "committed"
+  | "historian_eligible"
+  | "historian_claimed"
+  | "compartmentalized_pending_bust"
+  | "represented_in_p3"
+  | "retired";
 
 /**
  * A durable, identity-level Context semantic unit stored in context.db.
@@ -46,7 +52,11 @@ export interface ContextMessageUnitV1 {
   readonly disposition: ContextMessageUnitDisposition;
   /** Content hash for provenance verification. */
   readonly contentHash: string;
-  /** Lifecycle state (active/represented/retired/dropped). */
+  /**
+   * Lifecycle state
+   * (committed/historian_eligible/historian_claimed/compartmentalized_pending_bust/
+   * represented_in_p3/retired).
+   */
   readonly lifecycleState: ContextMessageUnitLifecycleState;
   /** Optional raw archive reference (for recovery/audit only). */
   readonly rawArchiveRef?: RawArchiveRefV1;
@@ -64,7 +74,9 @@ export interface ContextMessageUnitV1 {
 export interface ContextUnitV1 {
   /** Stable identity (same as the source ContextMessageUnit or source ref). */
   readonly contextUnitId: string;
-  /** The P-level source that produced this unit (0-5). NOT persisted on the unit. */
+  /** Location of this unit's slot in P0-P5 is structural (array index +
+   * layerEnds), not carried on the unit. Reference to the authoritative source
+   * that produced this unit; NOT persisted on the unit. */
   readonly sourceRef: ContextUnitSourceRefV1;
   /** Content for provider rendering. */
   readonly content: ContextUnitContent;
@@ -74,8 +86,6 @@ export interface ContextUnitV1 {
  * Reference to the authoritative source that produced a generation unit.
  */
 export interface ContextUnitSourceRefV1 {
-  /** P-level: 0=system, 1=persona, 2=capability, 3=compartment, 4=memory, 5=live. */
-  readonly pLevel: number;
   /** Source-specific identity (e.g. systemPromptId, personaId, memoryRef, contextUnitId). */
   readonly sourceId: string;
   /** Optional content hash for verification. */
@@ -123,17 +133,9 @@ export interface SemanticDerivationRefsV1 {
 // ---- Supporting types ----
 
 export type ContextUnitType =
-  | "input"
-  | "output"
-  | "tool_call"
-  | "tool_result"
-  | "system"
-  | "operational";
+  "input" | "output" | "tool_call" | "tool_result" | "system" | "operational";
 
-export type ContextMessageUnitDisposition =
-  | "include"
-  | "reference_only"
-  | "exclude";
+export type ContextMessageUnitDisposition = "include" | "reference_only" | "exclude";
 
 export interface RawArchiveRefV1 {
   readonly runtimeSessionId: string;
@@ -150,13 +152,5 @@ export interface RawArchiveRefV1 {
 export function validateGeneration(generation: ContextGenerationV1): boolean {
   const [e0, e1, e2, e3, e4, e5] = generation.layerEnds;
   const len = generation.units.length;
-  return (
-    0 <= e0 &&
-    e0 <= e1 &&
-    e1 <= e2 &&
-    e2 <= e3 &&
-    e3 <= e4 &&
-    e4 <= e5 &&
-    e5 === len
-  );
+  return 0 <= e0 && e0 <= e1 && e1 <= e2 && e2 <= e3 && e3 <= e4 && e4 <= e5 && e5 === len;
 }
