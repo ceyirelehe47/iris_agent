@@ -24,6 +24,7 @@ import { RuntimeEpochStore } from "../runtime/epoch-manager.js";
 import { nodeSqliteRepoEnv } from "../runtime/pi-env.js";
 import {
   composeProvider,
+  deriveLineageId,
   openOrCreateSession,
   prepareContextSources,
   makeReadOnlyTestTool,
@@ -602,6 +603,7 @@ export class IrisHost {
           pending.epochId,
           this.config,
           now,
+          deriveLineageId(this.dataRoot),
         ),
         invocationId: `invocation-${pending.runtimeSessionId}`,
       };
@@ -928,6 +930,7 @@ export class IrisHost {
           epoch.epochId,
           config,
           new Date().toISOString(),
+          deriveLineageId(options.dataRoot),
         ),
         invocationId: `invocation-${epoch.runtimeSessionId}`,
       };
@@ -955,7 +958,14 @@ export class IrisHost {
       const coordinator = new RuntimeCoordinator({
         activeRuntime: registry,
         prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-          prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
+          prepareContextSources(
+            input,
+            runtimeSessionId,
+            epochId,
+            config,
+            new Date().toISOString(),
+            deriveLineageId(options.dataRoot),
+          ),
         maxQueuedInputs: config.host.input_queue_max ?? 20,
         // A3: consume the ONE-TIME native-settled authorization. Every
         // invocation that observes Pi native settled on the active Epoch

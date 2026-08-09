@@ -9,16 +9,6 @@ import type { CustomMessage, SessionTreeEntry } from "@earendil-works/pi-agent-c
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";
-import { ContextStore } from "../src/context/context-store.js";
-import {
-  createContextHistoryReadPort,
-  type ContextHistoryReadPort,
-} from "../src/context/history-read-port.js";
-import { historianBatchHash } from "../src/contracts/historian.js";
-import type { LineageBoundaryInput } from "../src/historian/historian-boundary.js";
-import { HistorianManager } from "../src/historian/historian-manager.js";
-import { HistorianStore } from "../src/historian/historian-store.js";
-import { resolveDataRootPaths } from "../src/host/data-root.js";
 import {
   computeContentLayoutHash,
   decodeInputFrames,
@@ -30,60 +20,6 @@ import {
   runMinimalSlice,
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
-
-/** R3-P1：记录 enqueueIncremental 调用的 mock manager（不触碰真实 freeze/runner）。 */
-class RecordingHistorianManager extends HistorianManager {
-  readonly enqueueCalls: Array<{
-    runtimeSessionId: string;
-    lineageBoundary: LineageBoundaryInput | undefined;
-  }> = [];
-
-  override async enqueueIncremental(
-    runtimeSessionId: string,
-    lineageBoundary?: LineageBoundaryInput,
-  ): Promise<boolean> {
-    this.enqueueCalls.push({ runtimeSessionId, lineageBoundary });
-    return true;
-  }
-}
-
-/** iris_agent#66: minimal Context claim port for the recording manager
- * (construction requires it; the recording manager never runs jobs). */
-function emptyHistoryPort(): ContextHistoryReadPort {
-  return {
-    getMaterializedBoundary() {
-      return {
-        representedThroughContextSeq: 0,
-        representedThroughEntrySeq: 0,
-        m0ContentHash: null,
-        lineageStatus: "ok",
-        providerProfileId: "mock",
-      };
-    },
-    listUnitsForHistorian() {
-      return [];
-    },
-    listUnitsWithPayload() {
-      return [];
-    },
-    claimHistorianBatch: ({ afterContextSeqExclusive }) => {
-      const batch: import("../src/contracts/historian.js").HistorianBatchV1 = {
-        schemaVersion: "historian-batch-v1",
-        lineageId: "identity-slice",
-        afterContextSeqExclusive,
-        throughContextSeqInclusive: afterContextSeqExclusive,
-        units: [],
-        batchHash: "",
-        frozenAt: new Date().toISOString(),
-      };
-      batch.batchHash = historianBatchHash(batch);
-      return batch;
-    },
-    lineageId() {
-      return "identity-slice";
-    },
-  };
-}
 
 function messageEntries(entries: SessionTreeEntry[]): Array<{
   type: string;
@@ -191,50 +127,29 @@ test("restart reopens the same active Session without synthetic entries", async 
   assert.ok(!existsSync(join(dataRoot, "result.db")));
 });
 
-test("R3-P1 vertical slice: wired historianManager triggers enqueueIncremental on the HARD fold with the lineage boundary", async () => {
-  const dataRoot = mkdtempSync(join(tmpdir(), "iris-slice-historian-"));
-  const historianDir = mkdtempSync(join(tmpdir(), "iris-slice-historian-db-"));
+test("v27: slice produces a validated V2 generation covering P0-P2", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "iris-slice-v2-"));
   const config = defaultAgentConfig();
   const input = sampleAgentInput();
-  const historianStore = HistorianStore.open({ databasePath: join(historianDir, "historian.db") });
   try {
-    const manager = new RecordingHistorianManager({
-      store: historianStore,
-      modelProviderProfile: "mock-iris-provider-v1",
-      nowMs: () => 1_785_000_000_000,
-      historyPort: emptyHistoryPort(),
-    });
-    const result = await runMinimalSlice({
-      dataRoot,
-      config,
-      input,
-      historianManager: manager,
-    });
-    // 一次 prompt → 结束时一次 persistRender → HARD（first_render）→ 一次触发。
-    assert.equal(manager.enqueueCalls.length, 1, "HARD fold at prompt completion triggers once");
-    const call = manager.enqueueCalls[0];
-    assert.ok(call, "enqueueIncremental was called");
-    assert.equal(call.runtimeSessionId, result.runtimeSessionId);
-    assert.ok(call.lineageBoundary !== undefined, "lineage boundary is passed to the freeze");
-    // 交叉验证：传入 freeze 的物化边界与 context.db 中持久化的 lineage 一致
-    // （端口读取为权威值）。
-    const paths = resolveDataRootPaths(dataRoot, config);
-    const reopened = ContextStore.open(paths.contextDb);
-    try {
-      const boundary = createContextHistoryReadPort(reopened).getMaterializedBoundary(
-        result.runtimeSessionId,
-      );
-      assert.equal(
-        call.lineageBoundary?.representedThroughContextSeq,
-        boundary.representedThroughContextSeq,
-        "wired boundary matches the durable lineage boundary",
-      );
-    } finally {
-      reopened.close();
-    }
+    const result = await runMinimalSlice({ dataRoot, config, input });
+    const generation = result.generation;
+    assert.ok(generation, "slice must carry the last built V2 generation");
+    assert.equal(generation.schemaId, "iris.context-generation.v2");
+    assert.equal(generation.header.layerEnds[5], generation.units.length);
+    assert.ok(generation.header.layerEnds[0] >= 1, "P0 system prompt present");
+    assert.ok(generation.header.layerEnds[1] >= 2, "P1 persona present");
+    assert.ok(generation.header.layerEnds[2] >= 3, "P2 declarations present");
+    assert.equal(
+      generation.units[0]?.header.semanticSchemaId,
+      "iris.system.v1",
+      "P0 unit is the system prompt unit",
+    );
+    assert.ok(
+      generation.header.layerEnds[5] >= 3,
+      "P5 covers the committed user/assistant/tool-result units",
+    );
   } finally {
-    historianStore.close();
     rmSync(dataRoot, { recursive: true, force: true });
-    rmSync(historianDir, { recursive: true, force: true });
   }
 });

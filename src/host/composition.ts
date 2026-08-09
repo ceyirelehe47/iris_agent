@@ -7,6 +7,7 @@ import type { SliceProviderMode } from "../runtime/vertical-slice.js";
 import {
   closeSessionStorage,
   composeProvider,
+  deriveLineageId,
   openOrCreateSession,
   prepareContextSources,
   makeReadOnlyTestTool,
@@ -113,6 +114,7 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
         epoch.epochId,
         config,
         new Date().toISOString(),
+        deriveLineageId(options.dataRoot),
       ),
       invocationId: `invocation-${epoch.runtimeSessionId}`,
     };
@@ -140,7 +142,14 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     const coordinator = new RuntimeCoordinator({
       activeRuntime: registry,
       prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-        prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
+        prepareContextSources(
+          input,
+          runtimeSessionId,
+          epochId,
+          config,
+          new Date().toISOString(),
+          deriveLineageId(options.dataRoot),
+        ),
     });
 
     let closed = false;

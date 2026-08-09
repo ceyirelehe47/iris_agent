@@ -46,6 +46,7 @@ test("capability gate: the production SQLite session satisfies crash-recoverable
       epoch.epochId,
       config,
       "2026-08-05T00:00:00.000Z",
+      "identity-test",
     );
     // Must NOT throw: SQLite journal is crash-recoverable.
     const { harness } = createIrisHarness({

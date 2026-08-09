@@ -52,6 +52,7 @@ function buildCoordinator(options?: { maxQueuedInputs?: number }): Promise<{
       epoch.epochId,
       config,
       now,
+      "identity-test",
     );
     const currentInvocation: InvocationBinding = {
       input,
@@ -82,7 +83,7 @@ function buildCoordinator(options?: { maxQueuedInputs?: number }): Promise<{
     const coordinator = new RuntimeCoordinator({
       activeRuntime: registry,
       prepareInvocation: async (nextInput: AgentInput, runtimeSessionId: string, epochId: string) =>
-        prepareContextSources(nextInput, runtimeSessionId, epochId, config, now),
+        prepareContextSources(nextInput, runtimeSessionId, epochId, config, now, "identity-test"),
       ...(options?.maxQueuedInputs !== undefined
         ? { maxQueuedInputs: options.maxQueuedInputs }
         : {}),

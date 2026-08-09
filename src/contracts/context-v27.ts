@@ -128,6 +128,38 @@ export interface SemanticDerivationRefsV1 {
   readonly sourceContextMessageUnitIds: readonly string[];
 }
 
+/**
+ * Per-invocation frozen P0–P2 authoritative sources (V2 assembly input).
+ *
+ * `prepareContextSources` returns exactly this: the immutable+stable system
+ * prefix (P0 system prompt, P1 persona snapshot, P2 stable declarations)
+ * bound to the active Runtime Session/Epoch. The V2 generation builder
+ * consumes it directly; nothing here is materialized or mutated.
+ *
+ * Supersedes the flat invocation-sources DTO (v27 naming — the invocation
+ * binding carries the P0–P2 sources themselves, not a projection of them).
+ */
+export interface PreparedV2Sources {
+  /** Identity of this source snapshot (deterministic from the sources). */
+  readonly contextSourceSnapshotId: string;
+  readonly runtimeSessionId: string;
+  /** Identity-level lineage id the generation belongs to. */
+  readonly lineageId: string;
+  /** P0: system prompt identity + content + projection hash. */
+  readonly systemPromptId: string;
+  readonly canonicalSystemPrompt: string;
+  readonly systemProjectionHash: string;
+  /** P1: persona snapshot identity + rendered content + content hash. */
+  readonly personaSnapshotId: string;
+  readonly renderedPersona: string;
+  readonly personaContentHash: string;
+  /** P2: stable declarations identity + serialized content + hash. */
+  readonly declarationVersion: string;
+  readonly declarationsSerialized: string;
+  readonly declarationsHash: string;
+  readonly preparedAt: string;
+}
+
 // ---- Supporting types ----
 
 export type ContextUnitType =
@@ -166,13 +198,15 @@ export function validateGenerationV2(generation: ContextGenerationV2): boolean {
 export function computeLayerEnds(
   counts: readonly [number, number, number, number, number, number],
 ): [number, number, number, number, number, number] {
-  let cumulative = 0;
-  const result = [0, 0, 0, 0, 0, 0];
-  for (let i = 0; i < 6; i++) {
-    cumulative += counts[i]!;
-    result[i] = cumulative;
-  }
-  return result as [number, number, number, number, number, number];
+  const [c0, c1, c2, c3, c4, c5] = counts;
+  return [
+    c0,
+    c0 + c1,
+    c0 + c1 + c2,
+    c0 + c1 + c2 + c3,
+    c0 + c1 + c2 + c3 + c4,
+    c0 + c1 + c2 + c3 + c4 + c5,
+  ];
 }
 
 /**

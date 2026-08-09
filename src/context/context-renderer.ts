@@ -13,6 +13,15 @@ import {
 } from "./pass-taxonomy.js";
 
 /**
+ * SUPERSEDED — Roadmap v27 legacy m0/m1 materialization renderer.
+ *
+ * Retained ONLY as the historical behavior reference for legacy tests
+ * (m0m1-parity-golden, context-bounded, context-renderer-wiring) and for the
+ * Historian's m0-clamp integration. The normal Context assembly path is the
+ * V2 pipeline (src/context/v2-generation.ts + src/context/v2-renderer.ts);
+ * this module is NOT imported by harness-factory / vertical-slice /
+ * runtime-coordinator anymore.
+ *
  * R2-P1 Provider Renderer（Roadmap v13 canonical chain 的 Provider 投影）。
  *
  * 从 immutable ContextMessageUnit + persisted lineage（context_lineages）渲染
@@ -41,10 +50,9 @@ import {
  * pass-through），因此 m0/m1 不会被二次折叠。
  */
 
-/** R2-P1 序列化器身份（lineage.context_serializer_version；变化 → HARD）。 */
-export const CONTEXT_SERIALIZER_VERSION = "iris-context-units-v1";
-/** R2-P1 carrier schema 身份（lineage.carrier_schema_version）。 */
-export const CONTEXT_CARRIER_SCHEMA_VERSION = "1";
+// Serializer/carrier identities now live with the lineage row owner
+// (context-store); re-exported for legacy consumers.
+export { CONTEXT_CARRIER_SCHEMA_VERSION, CONTEXT_SERIALIZER_VERSION } from "./context-store.js";
 
 /** R2 固定：synthetic 消息的确定性时间戳（m0/m1 永不写入 Session）。 */
 export const SYNTHETIC_MESSAGE_TIMESTAMP = 0;

@@ -10,6 +10,11 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextMessageUnit, UnitDispositionFilter } from "../contracts/context-units.js";
 import type { ContextUnitStorePort } from "./context-ingest.js";
 
+/** R2-P1 serializer identity stored on context_lineages (lineage owner). */
+export const CONTEXT_SERIALIZER_VERSION = "iris-context-units-v1";
+/** R2-P1 carrier schema identity stored on context_lineages. */
+export const CONTEXT_CARRIER_SCHEMA_VERSION = "1";
+
 /**
  * F4 (iris_agent#9 / feature 4.1): typed failure for lineage resolution on the
  * normal production write path. An unknown, stale, wrong-data-root or

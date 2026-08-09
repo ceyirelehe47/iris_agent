@@ -7,14 +7,7 @@ import type { RuntimeEvent } from "../contracts/runtime-events.js";
 import { RuntimeEventLedger } from "./runtime-event-ledger.js";
 import { ContextStore } from "../context/context-store.js";
 import { ContextIngest } from "../context/context-ingest.js";
-import {
-  CONTEXT_CARRIER_SCHEMA_VERSION,
-  CONTEXT_SERIALIZER_VERSION,
-  ContextRenderer,
-} from "../context/context-renderer.js";
 import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
-import { createContextHistoryReadPort } from "../context/history-read-port.js";
-import type { HistorianManager } from "../historian/historian-manager.js";
 
 import {
   type AgentHarnessTool,
@@ -29,9 +22,13 @@ import {
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { PreparedV2Sources } from "../contracts/context-v27.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { directUserRequest } from "../contracts/origin.js";
+import {
+  CONTEXT_CARRIER_SCHEMA_VERSION,
+  CONTEXT_SERIALIZER_VERSION,
+} from "../context/context-store.js";
 import { acquireDataRootLock } from "../host/lock.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../host/data-root.js";
 import { nodeSqliteRepoEnv } from "./pi-env.js";
@@ -55,11 +52,9 @@ export interface VerticalSliceResult {
   ledgerEvents: RuntimeEvent[];
   /** R2-P0：ContextMessageUnit 语义单元（ingest 折叠后）。 */
   contextUnits: ContextMessageUnit[];
-  /** R2-P1：prompt 完成后 persistRender 提交的 m0/m1 字节与 context_seq
-   * watermark（测试断言 golden parity 用；未发生 provider render 时为空串/0）。 */
-  m0Body: string;
-  m1Body: string;
-  representedThroughContextSeq: number;
+  /** v27：最后一次 provider render 的 validated ContextGenerationV2
+   * （测试断言 V2 generation 形状用；未发生 provider render 时为 undefined）。 */
+  generation: import("../contracts/context-v27.js").ContextGenerationV2 | undefined;
   dataRoot: string;
 }
 
@@ -103,7 +98,8 @@ export function prepareContextSources(
   epochId: string,
   config: AgentConfigV3,
   now: string,
-): PreparedInvocationSources {
+  lineageId: string,
+): PreparedV2Sources {
   const canonicalSystemPrompt =
     `IRIS SYSTEM PROMPT V1\n` +
     `instance: ${config.instance_name}\n` +
@@ -112,12 +108,33 @@ export function prepareContextSources(
     `inputId: ${input.inputId}\n` +
     `providerProfileId: ${config.model.main_agent.active_profile}\n` +
     `binding: immutable-for-invocation\n`;
+  // P1：persona snapshot（Host 集成前的确定性 fixture 源，与 system prompt
+  // 同构——immutable、按 invocation 冻结）。
+  const renderedPersona =
+    `IRIS PERSONA SNAPSHOT V1\n` +
+    `personaSnapshotId: persona-default-v1\n` +
+    `runtimeSessionId: ${runtimeSessionId}\n` +
+    `identity: iris-default\n`;
+  // P2：stable declarations（工具/技能/机体/运行时声明；R2 为确定性空声明）。
+  const declarationsSerialized =
+    `IRIS DECLARATIONS V1\n` +
+    `declarationVersion: decl-v1\n` +
+    `tools: <none>\n` +
+    `runtime: <none>\n`;
+  const snapshotSeed = `${canonicalSystemPrompt}\0${renderedPersona}\0${declarationsSerialized}`;
   return {
-    contextSourceSnapshotId: `snapshot-${createHash("sha256").update(canonicalSystemPrompt).digest("hex").slice(0, 12)}`,
+    contextSourceSnapshotId: `snapshot-${createHash("sha256").update(snapshotSeed).digest("hex").slice(0, 12)}`,
     runtimeSessionId,
+    lineageId,
+    systemPromptId: `system-${createHash("sha256").update(canonicalSystemPrompt).digest("hex").slice(0, 12)}`,
     canonicalSystemPrompt,
     systemProjectionHash: createHash("sha256").update(canonicalSystemPrompt).digest("hex"),
-    materializationIdentity: "mock-m0m1-v1",
+    personaSnapshotId: "persona-default-v1",
+    renderedPersona,
+    personaContentHash: createHash("sha256").update(renderedPersona).digest("hex"),
+    declarationVersion: "decl-v1",
+    declarationsSerialized,
+    declarationsHash: createHash("sha256").update(declarationsSerialized).digest("hex"),
     preparedAt: new Date(now).toISOString(),
   };
 }
@@ -148,7 +165,7 @@ function ensureLineage(
   contextStore: ContextStore,
   runtimeSessionId: string,
   epochId: string,
-  prepared: PreparedInvocationSources,
+  prepared: PreparedV2Sources,
   providerProfileId: string,
 ): void {
   const lineageId = contextStore.lineageId;
@@ -164,13 +181,13 @@ function ensureLineage(
     runtimeSessionId,
     contextSourceSnapshotId: prepared.contextSourceSnapshotId,
     epochId,
-    personaSnapshotId: "persona-default-v1",
-    declarationVersion: "decl-v1",
+    personaSnapshotId: prepared.personaSnapshotId,
+    declarationVersion: prepared.declarationVersion,
     providerProfileId,
     canonicalSystemPrompt: prepared.canonicalSystemPrompt,
     systemProjectionHash: prepared.systemProjectionHash,
     preparedAt: prepared.preparedAt,
-    materializationId: prepared.materializationIdentity,
+    materializationId: "v2-generation-v1",
     contextSerializerVersion: CONTEXT_SERIALIZER_VERSION,
     carrierSchemaVersion: CONTEXT_CARRIER_SCHEMA_VERSION,
   });
@@ -294,6 +311,7 @@ export async function reconcileHistoricalSession(options: {
               "recovery",
               config,
               now,
+              lineageId,
             ),
             invocationId: `reconcile-${options.runtimeSessionId}`,
           };
@@ -376,12 +394,6 @@ export async function runMinimalSlice(options: {
   /** R2-P3：ContextStore 的每 session 软 cap（测试注入极小值以在少量单元内触发
    * cap / fail-closed 路径；缺省 = MAX_UNITS_PER_SESSION，硬 cap = 2× 软 cap）。 */
   maxUnitsPerSession?: number;
-  /** R3-P1：可选的 HistorianManager（Host 集成前为 opt-in，完整接线在 R3-P4）。
-   * 提供时，HARD fold 提交后经 ContextHistoryReadPort 读取 lineage 物化边界并
-   * 触发 HistorianManager.enqueueIncremental（m0-clamp：只有已进入 m0/m1 的
-   * compartment 才可被 raw 替换）。缺省 = 不接线，本 slice 行为与 R2 完全一致
-   * （byte-identical）。 */
-  historianManager?: HistorianManager;
 }): Promise<VerticalSliceResult> {
   const config = options.config ?? defaultAgentConfig();
   const input = options.input ?? sampleAgentInput();
@@ -408,6 +420,7 @@ export async function runMinimalSlice(options: {
       epoch.epochId,
       config,
       now,
+      deriveLineageId(paths.dataRoot),
     );
     const providerContextSnapshots: string[] = [];
     const { models, model, providerProfileId } = await composeProvider(providerMode, (messages) => {
@@ -430,27 +443,10 @@ export async function runMinimalSlice(options: {
         ? {}
         : { maxUnitsPerSession: options.maxUnitsPerSession }),
     });
-    // R2-P1：Provider Renderer 需要 persisted lineage（m0/m1/watermark）。
-    // 幂等创建；rollover 的新 session 默认获得全新 lineage。
+    // v27：V2 generation 需要 persisted lineage（P5 durable 单元的写入锚点）。
+    // 幂等创建；rollover 的新 session 只重新绑定，绝不创建新 lineage。
     ensureLineage(contextStore, epoch.runtimeSessionId, epoch.epochId, prepared, providerProfileId);
     const contextIngest = new ContextIngest(ledger, contextStore, contextStore.lineageId);
-    const contextRenderer = new ContextRenderer(contextStore);
-    // R3-P1：freeze-trigger 接线（opt-in）。flow：HARD fold 提交 →
-    // onMaterialized → 经 ContextHistoryReadPort 读取 lineage 物化边界 →
-    // HistorianManager.enqueueIncremental（freeze 时以该边界 clamp eligible
-    // 范围）。historianManager 缺省 = 不接线（行为与 R2 完全一致）。
-    if (options.historianManager !== undefined) {
-      const historyPort = createContextHistoryReadPort(contextStore);
-      const historianManager = options.historianManager;
-      contextRenderer.onMaterialized = (runtimeSessionId) => {
-        // 端口读取为权威物化边界（values-only，跨库安全）；enqueueIncremental
-        // 把 representedThroughContextSeq 传给 freeze 作为 m0-clamp 上界。
-        const boundary = historyPort.getMaterializedBoundary(runtimeSessionId);
-        void historianManager.enqueueIncremental(runtimeSessionId, {
-          representedThroughContextSeq: boundary.representedThroughContextSeq,
-        });
-      };
-    }
     const { harness, observers } = createIrisHarness({
       session,
       instanceEpoch: epoch.ordinalWithinDate,
@@ -462,7 +458,6 @@ export async function runMinimalSlice(options: {
       providerProfileId,
       callbacks: options.callbacks,
       contextIngest,
-      contextRenderer,
     });
     observers.providerContextSnapshots = providerContextSnapshots;
     attachRuntimeEventSeam(harness, {
@@ -472,10 +467,6 @@ export async function runMinimalSlice(options: {
       contextIngest,
     });
     const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
-    // R2-P1：prompt 完成后提交最近一次 provider render 的物化决策
-    // （HARD→m0 重建 / SOFT→m1 / SOFT+→仅对齐 watermark）。now 由调用方固定，
-    // 保证确定性（测试传固定时间戳）。
-    const persisted = contextRenderer.persistRender(new Date(now).getTime());
     const ledgerEvents = ledger.listBySession(epoch.runtimeSessionId);
     const contextUnits = contextIngest.listUnits(epoch.runtimeSessionId);
     ledger.close();
@@ -491,9 +482,7 @@ export async function runMinimalSlice(options: {
       entries,
       ledgerEvents,
       contextUnits,
-      m0Body: persisted?.m0Body ?? "",
-      m1Body: persisted?.m1Body ?? "",
-      representedThroughContextSeq: persisted?.representedThroughContextSeq ?? 0,
+      generation: observers.lastGenerationV2,
       dataRoot: options.dataRoot,
     };
   } finally {
@@ -537,6 +526,7 @@ export async function reopenActiveSession(options: {
       epoch.epochId,
       config,
       now,
+      deriveLineageId(paths.dataRoot),
     );
     const providerContextSnapshots: string[] = [];
     const { models, model, providerProfileId } = await composeProvider(providerMode, (messages) => {

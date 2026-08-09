@@ -10,11 +10,8 @@ import {
   canonicalCarrierJson,
   emptyM1Placeholder,
 } from "../src/context/carriers.js";
-import {
-  IRIS_INPUT_META_CUSTOM_TYPE,
-  M0_EMPTY_BODY,
-  M1_EMPTY_PLACEHOLDER,
-} from "../src/contracts/context.js";
+import { IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";
+import { M0_EMPTY_BODY, M1_EMPTY_PLACEHOLDER } from "../src/contracts/context.js";
 import type { ContextLineage } from "../src/context/context-store.js";
 
 const BASE_INPUT = {

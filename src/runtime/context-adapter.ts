@@ -1,11 +1,6 @@
 import type { AgentMessage, CustomMessage } from "@earendil-works/pi-agent-core";
 
-import {
-  IRIS_INPUT_META_CONTENT,
-  IRIS_INPUT_META_CUSTOM_TYPE,
-  type MessageProjectionResult,
-  type TransformMessagesInput,
-} from "../contracts/context.js";
+import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contracts/context.js";
 import {
   type InputFrame,
   type IrisInputMetaDetails,
@@ -209,8 +204,16 @@ function projectedUserText(
     .join("\n\n");
 }
 
-export function transformContextMessages(input: TransformMessagesInput): MessageProjectionResult {
-  const candidates = findInputPairs(input.messages);
+/**
+ * v27: live steer-pair fold (supersedes the m0/m1-era transformContextMessages
+ * DTO contract). Folds the CURRENT turn's input pair (user + iris_input_meta
+ * companion) into provider-visible messages: companions are stripped, verified
+ * user content is provenance-labelled, unverifiable wire degrades to an
+ * untrusted anchor. Everything else passes through untouched (synthetic
+ * P1–P4 units included — never re-folded).
+ */
+export function foldLiveTurnMessages(messages: AgentMessage[]): AgentMessage[] {
+  const candidates = findInputPairs(messages);
   const verifiedPairs = new Map<AgentMessage, VerifiedPair>();
   for (const pair of candidates) {
     const details = pair.companion.details as IrisInputMetaDetails | undefined;
@@ -237,7 +240,7 @@ export function transformContextMessages(input: TransformMessagesInput): Message
   }
 
   const projected: AgentMessage[] = [];
-  for (const message of input.messages) {
+  for (const message of messages) {
     if (message === undefined) {
       continue;
     }
@@ -267,8 +270,5 @@ export function transformContextMessages(input: TransformMessagesInput): Message
     projected.push(message);
   }
 
-  // v13：live-fold 只产出 provider 可见的折叠后消息数组。m0/m1 物化边界
-  // 状态（原 v12 representedBoundaryState / "mock-m0m1-v1"）已删除——真实
-  // 物化状态现在由 context_lineages + ContextRenderer.persistRender 持有。
-  return { messages: projected };
+  return projected;
 }

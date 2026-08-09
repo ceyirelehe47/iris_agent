@@ -123,4 +123,87 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// v27 structural check: the V2 assembly path must contain NO m0/m1/SOFT/HARD
+// materialization semantics. These files are the ONLY Context assembly entry
+// points (builder → renderer → harness → slice → coordinator); materialization
+// remnants (ContextRenderer / transformContextMessages / m0Body / M0_EMPTY_BODY
+// / renderProviderMessages / classifyAndAdvance / HARD / SOFT / ...) are
+// confined to the SUPERSEDED legacy renderer and the Historian integration.
+// ---------------------------------------------------------------------------
+const V2_ASSEMBLY_PATH = [
+  "src/context/v2-generation.ts",
+  "src/context/v2-renderer.ts",
+  "src/runtime/harness-factory.ts",
+  "src/runtime/vertical-slice.ts",
+  "src/runtime/runtime-coordinator.ts",
+  "src/contracts/context-v27.ts",
+];
+
+const MATERIALIZATION_TOKENS = [
+  "m0Body",
+  "m1Body",
+  "M0_EMPTY_BODY",
+  "M1_EMPTY_PLACEHOLDER",
+  "materializeM0",
+  "materializeM1",
+  "ContextRenderer",
+  "transformContextMessages",
+  "renderProviderMessages",
+  "classifyAndAdvance",
+  "rebuildM0Body",
+  "renderHistorySince",
+  "persistRender",
+  "renderForProviderCall",
+  "representedThroughContextSeq",
+  "SessionProjectionUnit",
+  "PreparedInvocationSources",
+  "InvocationSourceBinding",
+  "TransformMessagesInput",
+  "MessageProjectionResult",
+  "hardSignals",
+];
+
+const MATERIALIZATION_WORDS = ["HARD", "SOFT", "SOFT+"];
+
+const structuralViolations = [];
+
+for (const file of V2_ASSEMBLY_PATH) {
+  let content;
+  try {
+    content = readFileSync(file, "utf-8");
+  } catch {
+    continue;
+  }
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const token of MATERIALIZATION_TOKENS) {
+      if (line.includes(token)) {
+        structuralViolations.push({ file, token, line: i + 1 });
+      }
+    }
+    for (const word of MATERIALIZATION_WORDS) {
+      const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp(`\\b${escaped}\\b`).test(line)) {
+        structuralViolations.push({ file, token: word, line: i + 1 });
+      }
+    }
+  }
+}
+
+if (structuralViolations.length > 0) {
+  console.error(
+    `V2 assembly structural check FAILED (${structuralViolations.length} violation(s)):`,
+  );
+  for (const v of structuralViolations) {
+    console.error(`  ${v.file}:${v.line} — ${v.token}`);
+  }
+  console.error(
+    `\nThe V2 assembly path must be m0/m1/SOFT/HARD-free. Materialization ` +
+      `semantics belong to the SUPERSEDED legacy renderer and the Historian.`,
+  );
+  process.exit(1);
+}
+
 console.log("Deprecated-name check passed — no prohibited names in production code.");

@@ -14,7 +14,7 @@ import {
   decodeInputFrames,
   encodeInputFrames,
 } from "../src/runtime/companion.js";
-import { transformContextMessages } from "../src/runtime/context-adapter.js";
+import { foldLiveTurnMessages } from "../src/runtime/context-adapter.js";
 
 function textOf(message: AgentMessage | undefined): string {
   if (message?.role !== "user") {
@@ -89,17 +89,11 @@ test("orphan iris_input_meta is filtered and raw body is not projected", () => {
     timestamp: 2,
   };
 
-  const result = transformContextMessages({
-    invocationId: "invocation-orphan",
-    runtimeSessionId: "session-orphan",
-    messages: [user, orphan],
-    model: { provider: "mock", modelId: "mock" },
-    providerProfileId: "mock-iris-provider-v1",
-  });
+  const result = foldLiveTurnMessages([user, orphan]);
 
-  assert.equal(result.messages.length, 1);
-  assert.equal(result.messages[0]?.role, "user");
-  assert.equal(textOf(result.messages[0]), "[USER REQUEST | UNVERIFIED]");
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.role, "user");
+  assert.equal(textOf(result[0]), "[USER REQUEST | UNVERIFIED]");
 });
 
 test("corrupted companion pair key falls back to untrusted anchor", () => {
@@ -128,17 +122,11 @@ test("corrupted companion pair key falls back to untrusted anchor", () => {
   } as AgentMessage;
   const user: AgentMessage = { role: "user", content: wire, timestamp: 1 };
 
-  const result = transformContextMessages({
-    invocationId: "invocation-corrupt",
-    runtimeSessionId: "session-corrupt",
-    messages: [user, corrupted],
-    model: { provider: "mock", modelId: "mock" },
-    providerProfileId: "mock-iris-provider-v1",
-  });
+  const result = foldLiveTurnMessages([user, corrupted]);
 
-  assert.equal(result.messages.length, 1);
-  assert.equal(result.messages[0]?.role, "user");
-  assert.equal(textOf(result.messages[0]), "[USER REQUEST | UNVERIFIED]");
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.role, "user");
+  assert.equal(textOf(result[0]), "[USER REQUEST | UNVERIFIED]");
 });
 
 test("verified input pair projects the decoded request body", () => {
@@ -158,19 +146,10 @@ test("verified input pair projects the decoded request body", () => {
   );
   const user: AgentMessage = { role: "user", content: wire, timestamp: 1 };
 
-  const result = transformContextMessages({
-    invocationId: "invocation-verified",
-    runtimeSessionId: "session-verified",
-    messages: [user, companion],
-    model: { provider: "mock", modelId: "mock" },
-    providerProfileId: "mock-iris-provider-v1",
-  });
+  const result = foldLiveTurnMessages([user, companion]);
 
-  assert.equal(result.messages.length, 1);
-  assert.equal(
-    textOf(result.messages[0]),
-    "[USER | cli | USER REQUEST | LIMITED]\nverified request",
-  );
+  assert.equal(result.length, 1);
+  assert.equal(textOf(result[0]), "[USER | cli | USER REQUEST | LIMITED]\nverified request");
 });
 
 test("heterogeneous multi-block projection preserves per-block origin", () => {
@@ -203,16 +182,10 @@ test("heterogeneous multi-block projection preserves per-block origin", () => {
   );
   const user: AgentMessage = { role: "user", content: wire, timestamp: 1 };
 
-  const result = transformContextMessages({
-    invocationId: "invocation-multiblock-origin",
-    runtimeSessionId: "session-multiblock-origin",
-    messages: [user, companion],
-    model: { provider: "mock", modelId: "mock" },
-    providerProfileId: "mock-iris-provider-v1",
-  });
+  const result = foldLiveTurnMessages([user, companion]);
 
-  assert.equal(result.messages.length, 1);
-  const text = textOf(result.messages[0]);
+  assert.equal(result.length, 1);
+  const text = textOf(result[0]);
   assert.match(text, /\[USER \| cli \| USER REQUEST \| LIMITED\]\nsummarize the email/);
   assert.match(
     text,
@@ -287,14 +260,8 @@ test("image_ref mixed blocks keep 1:1 frame<->origin correspondence", () => {
 
     // Each frame must be labeled with its own block's origin authority.
     const user: AgentMessage = { role: "user", content: wire, timestamp: 1 };
-    const result = transformContextMessages({
-      invocationId: "invocation-image-mixed",
-      runtimeSessionId: "session-image-mixed",
-      messages: [user, companion],
-      model: { provider: "mock", modelId: "mock" },
-      providerProfileId: "mock-iris-provider-v1",
-    });
-    const text = textOf(result.messages[0]);
+    const result = foldLiveTurnMessages([user, companion]);
+    const text = textOf(result[0]);
     // The image fingerprint frame carries DATA ONLY (image's own origin),
     // and the inline frame carries USER REQUEST — never mislabeled.
     assert.match(text, /\[EXTERNAL_ACTOR \| .+ \| DATA ONLY \| LIMITED\]\nimage\/png:/);
@@ -303,7 +270,7 @@ test("image_ref mixed blocks keep 1:1 frame<->origin correspondence", () => {
   }
 });
 
-test("review-pass7-fix: epoch-bound companion still verifies in transformContextMessages", () => {
+test("review-pass7-fix: epoch-bound companion still verifies in foldLiveTurnMessages", () => {
   // subagent-review fix regression: the runtime context transform must recompute
   // the pairKey with the companion's recorded instanceEpoch — otherwise every
   // epoch-bound pair (all production companions) would project as UNVERIFIED.
@@ -324,14 +291,8 @@ test("review-pass7-fix: epoch-bound companion still verifies in transformContext
   );
   const user: AgentMessage = { role: "user", content: wire, timestamp: 1 };
 
-  const result = transformContextMessages({
-    invocationId: "invocation-epoch",
-    runtimeSessionId: "session-epoch",
-    messages: [user, companion],
-    model: { provider: "mock", modelId: "mock" },
-    providerProfileId: "mock-iris-provider-v1",
-  });
+  const result = foldLiveTurnMessages([user, companion]);
 
-  assert.equal(result.messages.length, 1);
-  assert.equal(textOf(result.messages[0]), "[USER | cli | USER REQUEST | LIMITED]\nepoch verified");
+  assert.equal(result.length, 1);
+  assert.equal(textOf(result[0]), "[USER | cli | USER REQUEST | LIMITED]\nepoch verified");
 });

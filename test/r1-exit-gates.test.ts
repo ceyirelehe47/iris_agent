@@ -65,6 +65,7 @@ test("r1 gate1: Iris provider path never calls Session.buildContext (spy throws)
       epoch.epochId,
       config,
       now,
+      "identity-test",
     );
     const currentInvocation = {
       input,
@@ -197,6 +198,7 @@ test("r40: direct harness.appendMessage produces exactly one ledger message_fina
       epoch.epochId,
       config,
       now,
+      "identity-test",
     );
     const { harness } = createIrisHarness({
       session,
@@ -262,6 +264,7 @@ test("r40: pending-writes flush appends are committed to the ledger exactly once
       epoch.epochId,
       config,
       now,
+      "identity-test",
     );
     const { harness } = createIrisHarness({
       session,

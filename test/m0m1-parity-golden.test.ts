@@ -15,6 +15,7 @@ import {
   renderHistorySince,
   syntheticUserMessage,
 } from "../src/context/context-renderer.js";
+import { M0_EMPTY_BODY, M1_EMPTY_PLACEHOLDER } from "../src/contracts/context.js";
 import { ContextStore } from "../src/context/context-store.js";
 import {
   LKG_UNITS_SLOT_KEY,
@@ -22,9 +23,10 @@ import {
   replayUnitsLkg,
   verifyUnitsLkg,
 } from "../src/context/lkg-units.js";
-import { M0_EMPTY_BODY, M1_EMPTY_PLACEHOLDER } from "../src/contracts/context.js";
+import { buildGenerationV2, verifyGenerationHashesV2 } from "../src/context/v2-generation.js";
+import { renderGenerationV2 } from "../src/context/v2-renderer.js";
 import type { PiSeamEvent } from "../src/contracts/runtime-events.js";
-import { transformContextMessages } from "../src/runtime/context-adapter.js";
+import { foldLiveTurnMessages } from "../src/runtime/context-adapter.js";
 import {
   computeContentLayoutHash,
   createInputMetaCompanion,
@@ -35,7 +37,9 @@ import { runMinimalSlice, sampleAgentInput } from "../src/runtime/vertical-slice
 
 /**
  * R2-P1 m0/m1 golden parity gate（Roadmap v13 canonical chain 的 Provider
- * Renderer 验收）。
+ * Renderer 验收）——legacy behavior tests（v27：正常 assembly 已走 V2
+ * pipeline；本文件保留对 SUPERSEDED ContextRenderer 的历史行为测试，另含
+ * V2 侧的新测试：fold 不二次折叠、slice 产出 validated V2 generation）。
  *
  * 场景（直接驱动 ContextIngest + ContextRenderer，确定性，无时钟依赖）：
  *   Pass A  turn1 first_render HARD：units=[] → m0=M0_EMPTY_BODY、
@@ -429,10 +433,33 @@ test("r2-p1: renderProviderMessages orders [m0, m1, ...p5Tail, ...liveDelta]", (
   }
 });
 
-test("r2-p1: transformContextMessages never double-folds the synthetic m0/m1 head", () => {
-  const m0 = syntheticUserMessage(M0_EMPTY_BODY);
-  const m1 = syntheticUserMessage(M1_EMPTY_PLACEHOLDER);
+test("v27: foldLiveTurnMessages never re-folds V2-rendered units (companion stripped only)", () => {
   const input = sampleAgentInput();
+  const generation = buildGenerationV2({
+    lineageId: "identity-test",
+    runtimeSessionId: SESSION,
+    generationSourceId: "snapshot-1",
+    p0: {
+      systemPromptId: "system-1",
+      text: "IRIS SYSTEM PROMPT V1",
+      sourceHash: "a".repeat(64),
+    },
+    p1: {
+      personaSnapshotId: "persona-default-v1",
+      text: "IRIS PERSONA SNAPSHOT V1",
+      sourceHash: "b".repeat(64),
+    },
+    p2: {
+      declarationVersion: "decl-v1",
+      text: "IRIS DECLARATIONS V1",
+      sourceHash: "c".repeat(64),
+    },
+    p3: [],
+    p4: [],
+    p5: [],
+  });
+  const rendered = renderGenerationV2(generation);
+  assert.ok(rendered.messages.length >= 2, "P1 + P2 synthetic units rendered");
   const steerWire = encodeInputFrames(input.blocks);
   const steerUser: AgentMessage = { role: "user", content: steerWire, timestamp: 1 };
   const companion = createInputMetaCompanion(
@@ -441,32 +468,24 @@ test("r2-p1: transformContextMessages never double-folds the synthetic m0/m1 hea
     "2026-08-01T00:00:00.000Z",
     1,
   );
-  const result = transformContextMessages({
-    invocationId: "inv-1",
-    runtimeSessionId: SESSION,
-    messages: [m0, m1, steerUser, companion],
-    model: { provider: "mock-iris", modelId: "mock-deepseek-v4-flash" },
-    providerProfileId: "mock",
-  });
-  assert.equal(result.messages.length, 3, "m0 + m1 + folded steer (companion stripped)");
+  const folded = foldLiveTurnMessages([...rendered.messages, steerUser, companion]);
   assert.equal(
-    contentOf(expectMessage(result.messages, 0)),
-    M0_EMPTY_BODY,
-    "m0 passes through unchanged",
+    folded.length,
+    rendered.messages.length + 1,
+    "companion stripped; rendered units + folded steer kept",
   );
-  assert.equal(
-    contentOf(expectMessage(result.messages, 1)),
-    M1_EMPTY_PLACEHOLDER,
-    "m1 passes through unchanged",
+  assert.deepEqual(
+    folded.slice(0, rendered.messages.length),
+    rendered.messages,
+    "V2-rendered units pass through the live fold byte-identical (never re-folded)",
   );
-  // 折叠后的 steer 是 text part 数组（transformContextMessages 的折叠形状），
-  // 文本内容必须来自 IRIS_INPUT_V1 wire，且 m0/m1 未被二次折叠。
-  const folded = contentOf(expectMessage(result.messages, 2));
-  const foldedText = Array.isArray(folded)
-    ? (folded as Array<{ type?: string; text?: string }>)
+  const foldedSteer = expectMessage(folded, rendered.messages.length);
+  const foldedContent = contentOf(foldedSteer);
+  const foldedText = Array.isArray(foldedContent)
+    ? (foldedContent as Array<{ type?: string; text?: string }>)
         .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
         .join("\n")
-    : String(folded);
+    : String(foldedContent);
   assert.ok(foldedText.includes("hello iris"), "only the steer pair is folded");
 });
 
@@ -558,15 +577,22 @@ test("r2-p1: lkg-units capture → verify → replay captured prefix + live delt
   }
 });
 
-test("r2-p1: runMinimalSlice persists m0/m1 and the provider snapshot starts with the synthetic head", async () => {
+test("v27: runMinimalSlice builds a validated V2 generation; the provider snapshot starts with the P1/P2 head", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-m0m1-slice-"));
   try {
     const result = await runMinimalSlice({ dataRoot, now: "2026-08-01T00:00:00.000Z" });
-    // 第一次 provider call 的 fold 在空 session 上 → m0 保持 M0_EMPTY_BODY；
-    // m1 覆盖当轮 live 单元的 session-history-since。
-    assert.equal(result.m0Body, M0_EMPTY_BODY);
-    assert.match(result.m1Body, /^<session-history-since>/);
-    assert.ok(result.representedThroughContextSeq >= 1);
+    // 最后一次 provider render 的 generation：P0-P2 恒定，P5 覆盖已提交单元。
+    const generation = result.generation;
+    assert.ok(generation, "slice must produce a V2 generation");
+    assert.equal(generation.schemaId, "iris.context-generation.v2");
+    assert.equal(generation.header.layerEnds[5], generation.units.length);
+    assert.ok(generation.header.layerEnds[0] >= 1, "P0 system prompt present");
+    assert.ok(generation.header.layerEnds[2] >= 3, "P0+P1+P2 present");
+    assert.ok(generation.header.layerEnds[5] >= 3, "P5 covers the committed turn units");
+    assert.equal(generation.units[0]?.header.semanticSchemaId, "iris.system.v1");
+    assert.equal(generation.units[1]?.header.semanticSchemaId, "iris.persona.v1");
+    assert.equal(generation.units[2]?.header.semanticSchemaId, "iris.declarations.v1");
+    assert.equal(verifyGenerationHashesV2(generation), true, "hashes verify");
 
     for (const snapshot of result.observers.providerContextSnapshots) {
       assert.ok(!snapshot.includes("IRIS_INPUT_V1"), "never leaks raw wire to the provider");
@@ -579,10 +605,9 @@ test("r2-p1: runMinimalSlice persists m0/m1 and the provider snapshot starts wit
     const head0 = expectMessage(first, 0);
     const head1 = expectMessage(first, 1);
     assert.equal(head0.role, "user");
-    assert.match(String(contentOf(head0)), /^<session-history>/);
-    assert.equal(contentOf(head0), M0_EMPTY_BODY);
+    assert.match(String(contentOf(head0)), /^IRIS PERSONA SNAPSHOT V1/);
     assert.equal(head1.role, "user");
-    assert.match(String(contentOf(head1)), /^<session-history-since>/);
+    assert.match(String(contentOf(head1)), /^IRIS DECLARATIONS V1/);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
   }

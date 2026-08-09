@@ -1,6 +1,6 @@
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { PreparedV2Sources } from "../contracts/context-v27.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
 
@@ -36,17 +36,18 @@ export interface RuntimeCoordinatorOptions {
   /** Registry providing the current ready Capsule (ActiveRuntimePort). */
   activeRuntime: ActiveRuntimePort;
   /**
-   * Derives InvocationSourceBinding + canonical system prompt for an input,
-   * scoped to the active runtime Session/Epoch. Called before every prompt().
-   * v13：invocation 只绑定 prepared sources（currentInvocation）；m0/m1/P5
-   * 物化由 ContextRenderer/contextController 在 provider render 时完成
-   * （v12 的 ContextRuntimePort.prepare 语义已删除）。
+   * Derives the frozen P0–P2 authoritative sources + canonical system prompt
+   * for an input, scoped to the active runtime Session/Epoch. Called before
+   * every prompt(). v27: invocation 只绑定 prepared V2 sources
+   * （currentInvocation）；Context generation 由 V2 pipeline
+   * （contextController → v2-generation + v2-renderer）在 provider render 时
+   * 构建（m0/m1 物化语义已删除）。
    */
   prepareInvocation: (
     input: AgentInput,
     runtimeSessionId: string,
     epochId: string,
-  ) => Promise<PreparedInvocationSources>;
+  ) => Promise<PreparedV2Sources>;
   /**
    * Fired exactly once per invocation when Pi native settled is observed on
    * the bound active Epoch. The Host uses this to release the invocation and,
@@ -153,9 +154,9 @@ export class RuntimeCoordinator implements AgentRuntimePort {
     try {
       yield { type: "turn_start", invocationId };
 
-      // Prepare + bind InvocationSourceBinding for THIS input, scoped to the
-      // active Session/Epoch (invariant: the bound runtimeSessionId does not
-      // change mid-invocation). The binding is a shared mutable container
+      // Prepare + bind the frozen P0-P2 V2 sources for THIS input, scoped to
+      // the active Session/Epoch (invariant: the bound runtimeSessionId does
+      // not change mid-invocation). The binding is a shared mutable container
       // (the adapter holds the same object reference), so updating its
       // fields keeps companion pairing and the context hook in sync — never
       // a stale input (review blocker #1).
