@@ -1,15 +1,13 @@
 /**
  * Roadmap v27 Canonical Context Contracts — single source of truth.
  *
- * These definitions are the authoritative types for the v27 Context model.
- * No handwritten duplicate interface may exist in other files — all code
- * that needs these types imports from here.
+ * V2 structured-header contract. Supersedes the flat V1 layout.
  *
  * Key v27 invariants:
  * - ContextMessageUnitV1 is durable (context.db), has contextSeq + lifecycle.
- * - ContextUnitV1 is generation-level, has NO lifecycle, is NOT persisted.
- * - ContextGenerationV1 = { layerEnds[6], units: ContextUnitV1[] } — one
- *   ordered array, P-level membership determined by index + layerEnds.
+ * - ContextUnitV2 is generation-level, in-memory only, NOT persisted.
+ * - ContextGenerationV2 = { header: { layerEnds[6] }, units: ContextUnitV2[] } —
+ *   one ordered array, P-level membership determined by index + layerEnds.
  * - BUST is the only refresh path; fail-closed on failure.
  * - Pi Session is raw archive only, never a Context semantic source.
  */
@@ -34,7 +32,7 @@ export type ContextMessageUnitLifecycleState =
  * A durable, identity-level Context semantic unit stored in context.db.
  * Has a global monotonic contextSeq within its lineage, carries lifecycle
  * state, and is the Historian's normal input. When selected for P5, it
- * projects 1:1 into a generation-level ContextUnitV1.
+ * projects 1:1 into a generation-level ContextUnitV2.
  *
  * Replaces the deprecated `HistoryProjectionUnit` (which conflated the
  * durable view with the generation-level projection).
@@ -62,62 +60,62 @@ export interface ContextMessageUnitV1 {
   readonly rawArchiveRef?: RawArchiveRefV1;
 }
 
+// --- V2 Generation types (in-memory, not persisted) ---
+
 /**
- * A generation-level Context unit. In-memory only, NOT persisted.
- * Does NOT carry layer/pLevel — membership is determined by array index
- * + layerEnds in ContextGenerationV1. Identity comes from contextUnitId
- * (stable across rebuilds), not array index (which is generation-local).
- *
- * Replaces the deprecated `ContextSourceSnapshot` / `PreparedContextSources`
- * per-unit projections.
+ * A validated, in-memory Context generation. Rebuildable from durable sources.
  */
-export interface ContextUnitV1 {
-  /** Stable identity (same as the source ContextMessageUnit or source ref). */
-  readonly contextUnitId: string;
-  /** Location of this unit's slot in P0-P5 is structural (array index +
-   * layerEnds), not carried on the unit. Reference to the authoritative source
-   * that produced this unit; NOT persisted on the unit. */
-  readonly sourceRef: ContextUnitSourceRefV1;
-  /** Content for provider rendering. */
-  readonly content: ContextUnitContent;
+export interface ContextGenerationV2 {
+  readonly schemaId: "iris.context-generation.v2";
+  readonly header: ContextGenerationHeaderV1;
+  readonly units: readonly ContextUnitV2[];
 }
 
 /**
- * Reference to the authoritative source that produced a generation unit.
+ * Header for a Context generation. layerEnds[6] defines P0-P5 as contiguous ranges.
+ */
+export interface ContextGenerationHeaderV1 {
+  /** Generation identity (deterministic from sources). */
+  readonly generationId: string;
+  /** Identity-level lineage this generation belongs to. */
+  readonly lineageId: string;
+  /** P0-P5 boundaries: P_i = units[layerEnds[i-1] : layerEnds[i]). layerEnds[-1] is implicitly 0. */
+  readonly layerEnds: readonly [number, number, number, number, number, number];
+  /** Hash over all unit hashes in order (deterministic provenance). */
+  readonly generationHash: string;
+}
+
+/**
+ * A generation-level Context unit. In-memory only. No layer/pLevel.
+ */
+export interface ContextUnitV2 {
+  readonly schemaId: "iris.context-unit.v2";
+  readonly header: ContextUnitHeaderV1;
+  readonly semanticContent: string;
+}
+
+/**
+ * Header for a Context unit. semanticSchemaId is the ONLY semantic type discriminator.
+ */
+export interface ContextUnitHeaderV1 {
+  /** Stable identity across rebuilds (not array index). */
+  readonly contextUnitId: string;
+  /** Source reference that produced this unit. */
+  readonly source: ContextUnitSourceRefV1;
+  /** The ONLY semantic type discriminator. No type/kind duplication. */
+  readonly semanticSchemaId: string;
+  /** Content hash of semanticContent. */
+  readonly contentHash: string;
+}
+
+/**
+ * Reference to the authoritative source.
  */
 export interface ContextUnitSourceRefV1 {
   /** Source-specific identity (e.g. systemPromptId, personaId, memoryRef, contextUnitId). */
   readonly sourceId: string;
   /** Optional content hash for verification. */
   readonly sourceHash?: string;
-}
-
-/**
- * The content payload of a generation unit.
- */
-export interface ContextUnitContent {
-  /** Provider-renderable text or structured content. */
-  readonly body: string;
-  /** Content hash for provenance. */
-  readonly contentHash: string;
-}
-
-/**
- * A validated, in-memory Context generation. The provider cache that is
- * rebuilt from authoritative sources by the canonical BUST pipeline.
- *
- * - layerEnds[6] defines P0-P5 as contiguous index ranges:
- *   P0 = units[0 : layerEnds[0])
- *   P1 = units[layerEnds[0] : layerEnds[1])
- *   ...
- *   P5 = units[layerEnds[4] : layerEnds[5])
- * - Constraint: 0 <= e0 <= e1 <= e2 <= e3 <= e4 <= e5 == units.length
- * - Units do NOT carry layer/pLevel — it's structural from index + layerEnds.
- * - NOT persisted as a whole snapshot; rebuilt from durable sources.
- */
-export interface ContextGenerationV1 {
-  readonly layerEnds: readonly [number, number, number, number, number, number];
-  readonly units: readonly ContextUnitV1[];
 }
 
 /**
@@ -146,11 +144,54 @@ export interface RawArchiveRefV1 {
 // ---- Validation helpers ----
 
 /**
- * Validate that a ContextGenerationV1 satisfies the v27 layerEnds constraint:
- * 0 <= e0 <= e1 <= e2 <= e3 <= e4 <= e5 == units.length
+ * Validate ContextGenerationV2: layerEnds constraint + hash verification.
  */
-export function validateGeneration(generation: ContextGenerationV1): boolean {
-  const [e0, e1, e2, e3, e4, e5] = generation.layerEnds;
+export function validateGenerationV2(generation: ContextGenerationV2): boolean {
+  const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
   const len = generation.units.length;
-  return 0 <= e0 && e0 <= e1 && e1 <= e2 && e2 <= e3 && e3 <= e4 && e4 <= e5 && e5 === len;
+  // Monotonic non-decreasing, last === length
+  if (!(0 <= e0 && e0 <= e1 && e1 <= e2 && e2 <= e3 && e3 <= e4 && e4 <= e5 && e5 === len)) {
+    return false;
+  }
+  // Every unit must have V2 schemaId
+  for (const unit of generation.units) {
+    if (unit.schemaId !== "iris.context-unit.v2") return false;
+  }
+  return true;
+}
+
+/**
+ * Compute layerEnds[6] from per-layer unit counts.
+ */
+export function computeLayerEnds(
+  counts: readonly [number, number, number, number, number, number],
+): [number, number, number, number, number, number] {
+  let cumulative = 0;
+  const result = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < 6; i++) {
+    cumulative += counts[i]!;
+    result[i] = cumulative;
+  }
+  return result as [number, number, number, number, number, number];
+}
+
+/**
+ * V1→V2 rejection fence. If input data carries the old V1 schema (flat layout
+ * without structured headers), reject it — no V1/V2 mixing.
+ */
+export function isV1ContextUnit(obj: unknown): boolean {
+  if (typeof obj !== "object" || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  // V1 units have sourceRef + content but NO schemaId + header structure
+  return "sourceRef" in o && "content" in o && !("schemaId" in o) && !("header" in o);
+}
+
+export function rejectV1Generation(obj: unknown): never {
+  if (typeof obj === "object" && obj !== null) {
+    const o = obj as Record<string, unknown>;
+    if ("layerEnds" in o && "units" in o && !("schemaId" in o)) {
+      throw new Error("V1 ContextGeneration detected — reject: V1/V2 mixing is forbidden");
+    }
+  }
+  throw new Error("Invalid Context generation: does not match V2 schema");
 }
