@@ -266,11 +266,14 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
         const m = result.migrated;
         assert.equal(m.schemaId, CONTEXT_GENERATION_V2_SCHEMA_ID);
         assert.equal(m.units.length, 2);
-        assert.equal(m.units[0]!.header.contextUnitId, "u1");
-        assert.equal(m.units[0]!.header.source.sourceHash, "hash-u1");
-        assert.equal(m.units[1]!.header.source.sourceHash, "ch-2"); // falls back to contentHash
-        assert.equal(m.units[0]!.semanticContent, "hello");
-        assert.equal(m.units[1]!.semanticContent, "world");
+        const m0 = m.units[0];
+        const m1 = m.units[1];
+        assert.ok(m0 && m1, "migrated generation must have 2 units");
+        assert.equal(m0.header.contextUnitId, "u1");
+        assert.equal(m0.header.source.sourceHash, "hash-u1");
+        assert.equal(m1.header.source.sourceHash, "ch-2"); // falls back to contentHash
+        assert.equal(m0.semanticContent, "hello");
+        assert.equal(m1.semanticContent, "world");
         assert.deepEqual([...m.header.layerEnds], [1, 1, 1, 1, 1, 2]);
         assert.ok(validateGenerationV2(m));
       }
