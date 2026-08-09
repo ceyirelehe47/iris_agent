@@ -10,7 +10,13 @@
  *   one ordered array, P-level membership determined by index + layerEnds.
  * - BUST is the only refresh path; fail-closed on failure.
  * - Pi Session is raw archive only, never a Context semantic source.
+ *
+ * Schema identities use the underscore form (e.g. `iris.context_unit.v2`),
+ * matching the Notion v27 canonical contract exactly.
  */
+
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 /**
  * The lifecycle state of a durable ContextMessageUnit.
@@ -66,7 +72,7 @@ export interface ContextMessageUnitV1 {
  * A validated, in-memory Context generation. Rebuildable from durable sources.
  */
 export interface ContextGenerationV2 {
-  readonly schemaId: "iris.context-generation.v2";
+  readonly schemaId: "iris.context_generation.v2";
   readonly header: ContextGenerationHeaderV1;
   readonly units: readonly ContextUnitV2[];
 }
@@ -75,29 +81,38 @@ export interface ContextGenerationV2 {
  * Header for a Context generation. layerEnds[6] defines P0-P5 as contiguous ranges.
  */
 export interface ContextGenerationHeaderV1 {
+  readonly schemaId: "iris.context_generation_header.v1";
   /** Generation identity (deterministic from sources). */
-  readonly generationId: string;
+  readonly contextGenerationId: string;
   /** Identity-level lineage this generation belongs to. */
-  readonly lineageId: string;
+  readonly contextLineageId: string;
+  /** Hash of the frozen P0-P2 source snapshot this generation was built from. */
+  readonly sourceSnapshotHash: string;
   /** P0-P5 boundaries: P_i = units[layerEnds[i-1] : layerEnds[i]). layerEnds[-1] is implicitly 0. */
   readonly layerEnds: readonly [number, number, number, number, number, number];
-  /** Hash over all unit hashes in order (deterministic provenance). */
-  readonly generationHash: string;
+  /**
+   * Hash over: generation schema identity + contextLineageId + sourceSnapshotHash
+   * + ordered unit identity/content hash + layerEnds (excludes itself and createdAt).
+   */
+  readonly contextGenerationHash: string;
+  /** When this generation was built (ISO-8601). Not part of any hash. */
+  readonly createdAt: string;
 }
 
 /**
  * A generation-level Context unit. In-memory only. No layer/pLevel.
  */
 export interface ContextUnitV2 {
-  readonly schemaId: "iris.context-unit.v2";
+  readonly schemaId: "iris.context_unit.v2";
   readonly header: ContextUnitHeaderV1;
-  readonly semanticContent: string;
+  readonly semanticContent: JsonValue;
 }
 
 /**
  * Header for a Context unit. semanticSchemaId is the ONLY semantic type discriminator.
  */
 export interface ContextUnitHeaderV1 {
+  readonly schemaId: "iris.context_unit_header.v1";
   /** Stable identity across rebuilds (not array index). */
   readonly contextUnitId: string;
   /** Source reference that produced this unit. */
@@ -112,10 +127,15 @@ export interface ContextUnitHeaderV1 {
  * Reference to the authoritative source.
  */
 export interface ContextUnitSourceRefV1 {
+  readonly schemaId: "iris.context_unit_source_ref.v1";
+  /** Schema identity of the source itself. */
+  readonly sourceSchemaId: string;
   /** Source-specific identity (e.g. systemPromptId, personaId, memoryRef, contextUnitId). */
   readonly sourceId: string;
-  /** Optional content hash for verification. */
-  readonly sourceHash?: string;
+  /** Optional revision of the source (e.g. durable contextSeq). */
+  readonly sourceRevision?: string;
+  /** Content hash of the source for verification. */
+  readonly sourceHash: string;
 }
 
 /**
@@ -142,6 +162,8 @@ export interface SemanticDerivationRefsV1 {
 export interface PreparedV2Sources {
   /** Identity of this source snapshot (deterministic from the sources). */
   readonly contextSourceSnapshotId: string;
+  /** sha256 over the frozen P0-P2 source contents (deterministic). */
+  readonly sourceSnapshotHash: string;
   readonly runtimeSessionId: string;
   /** Identity-level lineage id the generation belongs to. */
   readonly lineageId: string;
@@ -176,18 +198,26 @@ export interface RawArchiveRefV1 {
 // ---- Validation helpers ----
 
 /**
- * Validate ContextGenerationV2: layerEnds constraint + hash verification.
+ * Validate ContextGenerationV2: schema identities, layerEnds constraint + hash verification.
  */
 export function validateGenerationV2(generation: ContextGenerationV2): boolean {
+  if (generation.schemaId !== "iris.context_generation.v2") {
+    return false;
+  }
+  if (generation.header.schemaId !== "iris.context_generation_header.v1") {
+    return false;
+  }
   const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
   const len = generation.units.length;
   // Monotonic non-decreasing, last === length
   if (!(0 <= e0 && e0 <= e1 && e1 <= e2 && e2 <= e3 && e3 <= e4 && e4 <= e5 && e5 === len)) {
     return false;
   }
-  // Every unit must have V2 schemaId
+  // Every unit must carry the V2 schema identity on unit + header + source ref
   for (const unit of generation.units) {
-    if (unit.schemaId !== "iris.context-unit.v2") return false;
+    if (unit.schemaId !== "iris.context_unit.v2") return false;
+    if (unit.header.schemaId !== "iris.context_unit_header.v1") return false;
+    if (unit.header.source.schemaId !== "iris.context_unit_source_ref.v1") return false;
   }
   return true;
 }

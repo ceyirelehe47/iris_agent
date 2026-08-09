@@ -26,7 +26,7 @@ import { foldLiveTurnMessages } from "./context-adapter.js";
 import type { ContextIngestPort } from "../contracts/context-units.js";
 import {
   buildGenerationV2,
-  canonicalP5SemanticContent,
+  payloadAsJsonValue,
   projectStoreUnitToV1,
 } from "../context/v2-generation.js";
 import { renderGenerationV2 } from "../context/v2-renderer.js";
@@ -142,6 +142,7 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
         lineageId: prepared.lineageId,
         runtimeSessionId,
         generationSourceId: prepared.contextSourceSnapshotId,
+        sourceSnapshotHash: prepared.sourceSnapshotHash,
         p0: {
           systemPromptId: prepared.systemPromptId,
           text: prepared.canonicalSystemPrompt,
@@ -161,7 +162,7 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
         p4: [],
         p5: units.map((unit) => ({
           unit: projectStoreUnitToV1(unit),
-          semanticContent: canonicalP5SemanticContent(unit.payload),
+          semanticContent: payloadAsJsonValue(unit.payload),
         })),
       });
       observers.lastGenerationV2 = generation;

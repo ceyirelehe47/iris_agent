@@ -135,7 +135,7 @@ test("v27: slice produces a validated V2 generation covering P0-P2", async () =>
     const result = await runMinimalSlice({ dataRoot, config, input });
     const generation = result.generation;
     assert.ok(generation, "slice must carry the last built V2 generation");
-    assert.equal(generation.schemaId, "iris.context-generation.v2");
+    assert.equal(generation.schemaId, "iris.context_generation.v2");
     assert.equal(generation.header.layerEnds[5], generation.units.length);
     assert.ok(generation.header.layerEnds[0] >= 1, "P0 system prompt present");
     assert.ok(generation.header.layerEnds[1] >= 2, "P1 persona present");

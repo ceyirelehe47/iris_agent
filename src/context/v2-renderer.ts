@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { validateGenerationV2 } from "../contracts/context-v27.js";
-import type { ContextGenerationV2 } from "../contracts/context-v27.js";
+import type { ContextGenerationV2, JsonValue } from "../contracts/context-v27.js";
 import { verifyGenerationHashesV2 } from "./v2-generation.js";
 
 /**
@@ -13,8 +13,8 @@ import { verifyGenerationHashesV2 } from "./v2-generation.js";
  *   - P0 (iris.system.v1)      → systemPrompt
  *   - P1..P4 (persona/declarations/compartment/memory) → synthetic user
  *     messages (deterministic timestamp 0)
- *   - P5 (iris.message.*.v1)   → the canonical payload restored from its
- *     deterministic JSON serialization (structured messages preserved)
+ *   - P5 (iris.message.*.v1)   → the canonical payload carried as structured
+ *     JsonValue (message objects preserved)
  *
  * The renderer never re-scans layer sources — everything it needs is in the
  * generation. Fail-closed: an invalid or tampered generation throws before
@@ -29,17 +29,17 @@ export interface RenderedGenerationV2 {
   messages: AgentMessage[];
 }
 
-function restorePayload(semanticContent: string): AgentMessage {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(semanticContent);
-  } catch {
-    throw new Error("v2-renderer: P5 semanticContent is not valid JSON — generation is corrupt");
+function restorePayload(semanticContent: JsonValue): AgentMessage {
+  if (
+    typeof semanticContent !== "object" ||
+    semanticContent === null ||
+    Array.isArray(semanticContent)
+  ) {
+    throw new Error(
+      "v2-renderer: P5 semanticContent is not a message object — generation is corrupt",
+    );
   }
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("v2-renderer: P5 semanticContent did not restore a message object");
-  }
-  return parsed as AgentMessage;
+  return semanticContent as unknown as AgentMessage;
 }
 
 export function renderGenerationV2(generation: ContextGenerationV2): RenderedGenerationV2 {
@@ -55,6 +55,9 @@ export function renderGenerationV2(generation: ContextGenerationV2): RenderedGen
   const units = generation.units;
   const p0End = generation.header.layerEnds[0];
   const systemPrompt = p0End > 0 ? (units[0]?.semanticContent ?? "") : "";
+  if (typeof systemPrompt !== "string") {
+    throw new Error("v2-renderer: P0 semanticContent must be a string system prompt");
+  }
 
   const messages: AgentMessage[] = [];
   for (let index = p0End; index < units.length; index += 1) {
@@ -65,6 +68,9 @@ export function renderGenerationV2(generation: ContextGenerationV2): RenderedGen
     if (unit.header.semanticSchemaId.startsWith("iris.message.")) {
       messages.push(restorePayload(unit.semanticContent));
     } else {
+      if (typeof unit.semanticContent !== "string") {
+        throw new Error("v2-renderer: synthetic layer (P1-P4) semanticContent must be a string");
+      }
       messages.push({
         role: "user",
         content: unit.semanticContent,

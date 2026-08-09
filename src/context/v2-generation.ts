@@ -5,6 +5,7 @@ import {
   type ContextGenerationV2,
   type ContextMessageUnitV1,
   type ContextUnitV2,
+  type JsonValue,
   computeLayerEnds,
   isV1ContextUnit,
   validateGenerationV2,
@@ -29,8 +30,10 @@ import { canonicalJson } from "../contracts/tool.js";
  * - Units are in-memory only; nothing here persists.
  * - Identity = contextUnitId (stable across rebuilds, never array index).
  * - Order = P0→P5; within P5, ascending contextSeq (the durable ordering key).
- * - Every unit's contentHash = sha256(semanticContent); generationHash = hash
- *   over all unit content hashes in order.
+ * - Every unit's contentHash = sha256(canonicalJson(semanticContent));
+ *   contextGenerationHash covers generation schema identity + contextLineageId
+ *   + sourceSnapshotHash + ordered unit identity/content hash + layerEnds
+ *   (excludes itself and createdAt).
  * - V1 flat DTOs are rejected (no V1/V2 mixing).
  */
 
@@ -45,6 +48,15 @@ export const SEMANTIC_SCHEMA_MESSAGE_INPUT = "iris.message.input.v1";
 export const SEMANTIC_SCHEMA_MESSAGE_OUTPUT = "iris.message.output.v1";
 export const SEMANTIC_SCHEMA_MESSAGE_TOOL_CALL = "iris.message.tool_call.v1";
 export const SEMANTIC_SCHEMA_MESSAGE_TOOL_RESULT = "iris.message.tool_result.v1";
+
+// ---- Source schema ids (schema identity of each authoritative source) ----
+
+export const SOURCE_SCHEMA_SYSTEM_PROMPT = "iris.system_prompt.v1";
+export const SOURCE_SCHEMA_PERSONA_SNAPSHOT = "iris.persona_snapshot.v1";
+export const SOURCE_SCHEMA_DECLARATIONS_SNAPSHOT = "iris.declarations_snapshot.v1";
+export const SOURCE_SCHEMA_COMPARTMENT = "iris.compartment.v1";
+export const SOURCE_SCHEMA_MEMORY = "iris.memory.v1";
+export const SOURCE_SCHEMA_CONTEXT_MESSAGE_UNIT = "iris.context_message_unit.v1";
 
 /** v27 unitType → semanticSchemaId (P5). Unknown types fail closed. */
 export function semanticSchemaIdForUnitType(unitType: ContextMessageUnitV1["unitType"]): string {
@@ -99,7 +111,7 @@ export interface V2P4Source {
 /** One committed durable unit + its canonical provider-visible content. */
 export interface V2P5Source {
   unit: ContextMessageUnitV1;
-  semanticContent: string;
+  semanticContent: JsonValue;
 }
 
 export interface V2GenerationInput {
@@ -107,6 +119,10 @@ export interface V2GenerationInput {
   runtimeSessionId: string;
   /** contextSourceSnapshotId — identity of the prepared P0-P2 snapshot. */
   generationSourceId: string;
+  /** sha256 over the frozen P0-P2 source contents (PreparedV2Sources.sourceSnapshotHash). */
+  sourceSnapshotHash: string;
+  /** Optional build timestamp (defaults to now). Excluded from all hashes. */
+  createdAt?: string;
   p0: V2P0Source;
   p1: V2P1Source;
   p2: V2P2Source;
@@ -121,9 +137,36 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-/** Canonical (key-sorted) serialization of a provider-visible payload. */
-export function canonicalP5SemanticContent(payload: unknown): string {
-  return canonicalJson(payload);
+/**
+ * Narrow a provider payload to JsonValue. Payloads are JSON wire DTOs by
+ * construction (see ContextMessageUnit.payload), so this cast is lossless.
+ */
+export function payloadAsJsonValue(payload: unknown): JsonValue {
+  return payload as unknown as JsonValue;
+}
+
+/**
+ * v27 contextGenerationHash basis: generation schema identity + contextLineageId
+ * + sourceSnapshotHash + ordered unit identity/content hash + layerEnds.
+ * Excludes itself and createdAt.
+ */
+function contextGenerationHashOf(
+  scope: {
+    contextLineageId: string;
+    sourceSnapshotHash: string;
+    layerEnds: readonly [number, number, number, number, number, number];
+  },
+  units: readonly ContextUnitV2[],
+): string {
+  return sha256(
+    canonicalJson({
+      schemaId: "iris.context_generation.v2",
+      contextLineageId: scope.contextLineageId,
+      sourceSnapshotHash: scope.sourceSnapshotHash,
+      units: units.map((unit) => [unit.header.contextUnitId, unit.header.contentHash]),
+      layerEnds: [...scope.layerEnds],
+    }),
+  );
 }
 
 /**
@@ -190,19 +233,23 @@ export function assertNoLegacyFlatUnitShape(p5: readonly V2P5Source[], context: 
 
 function headerFor(
   contextUnitId: string,
+  sourceSchemaId: string,
   sourceId: string,
-  sourceHash: string | undefined,
+  sourceHash: string,
   semanticSchemaId: string,
-  semanticContent: string,
+  semanticContent: JsonValue,
 ): ContextUnitV2["header"] {
   return {
+    schemaId: "iris.context_unit_header.v1",
     contextUnitId,
     source: {
+      schemaId: "iris.context_unit_source_ref.v1",
+      sourceSchemaId,
       sourceId,
-      ...(sourceHash === undefined ? {} : { sourceHash }),
+      sourceHash,
     },
     semanticSchemaId,
-    contentHash: sha256(semanticContent),
+    contentHash: sha256(canonicalJson(semanticContent)),
   };
 }
 
@@ -217,9 +264,10 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
 
   const units: ContextUnitV2[] = [];
   const p0: ContextUnitV2 = {
-    schemaId: "iris.context-unit.v2",
+    schemaId: "iris.context_unit.v2",
     header: headerFor(
       `system-${input.p0.systemPromptId}`,
+      SOURCE_SCHEMA_SYSTEM_PROMPT,
       input.p0.systemPromptId,
       input.p0.sourceHash,
       SEMANTIC_SCHEMA_SYSTEM,
@@ -230,9 +278,10 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
   units.push(p0);
 
   const p1: ContextUnitV2 = {
-    schemaId: "iris.context-unit.v2",
+    schemaId: "iris.context_unit.v2",
     header: headerFor(
       `persona-${input.p1.personaSnapshotId}`,
+      SOURCE_SCHEMA_PERSONA_SNAPSHOT,
       input.p1.personaSnapshotId,
       input.p1.sourceHash,
       SEMANTIC_SCHEMA_PERSONA,
@@ -243,9 +292,10 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
   units.push(p1);
 
   const p2: ContextUnitV2 = {
-    schemaId: "iris.context-unit.v2",
+    schemaId: "iris.context_unit.v2",
     header: headerFor(
       `declarations-${input.p2.declarationVersion}`,
+      SOURCE_SCHEMA_DECLARATIONS_SNAPSHOT,
       input.p2.declarationVersion,
       input.p2.sourceHash,
       SEMANTIC_SCHEMA_DECLARATIONS,
@@ -257,11 +307,12 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
 
   for (const source of input.p3) {
     units.push({
-      schemaId: "iris.context-unit.v2",
+      schemaId: "iris.context_unit.v2",
       header: headerFor(
         `compartment-${source.compartmentId}`,
+        SOURCE_SCHEMA_COMPARTMENT,
         source.compartmentId,
-        source.sourceHash,
+        source.sourceHash ?? sha256(source.text),
         SEMANTIC_SCHEMA_COMPARTMENT,
         source.text,
       ),
@@ -271,11 +322,12 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
 
   for (const source of input.p4) {
     units.push({
-      schemaId: "iris.context-unit.v2",
+      schemaId: "iris.context_unit.v2",
       header: headerFor(
         `memory-${source.memoryRef}`,
+        SOURCE_SCHEMA_MEMORY,
         source.memoryRef,
-        source.sourceHash,
+        source.sourceHash ?? sha256(source.text),
         SEMANTIC_SCHEMA_MEMORY,
         source.text,
       ),
@@ -297,9 +349,10 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
     }
     seenIds.add(item.unit.contextUnitId);
     units.push({
-      schemaId: "iris.context-unit.v2",
+      schemaId: "iris.context_unit.v2",
       header: headerFor(
         item.unit.contextUnitId,
+        SOURCE_SCHEMA_CONTEXT_MESSAGE_UNIT,
         item.unit.contextUnitId,
         item.unit.contentHash,
         semanticSchemaIdForUnitType(item.unit.unitType),
@@ -310,17 +363,27 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
   }
 
   const layerEnds = computeLayerEnds([1, 1, 1, input.p3.length, input.p4.length, p5Ordered.length]);
-  const generationHash = sha256(units.map((unit) => unit.header.contentHash).join("\0"));
+  const header: ContextGenerationV2["header"] = {
+    schemaId: "iris.context_generation_header.v1",
+    contextGenerationId: `gen-${sha256(
+      `${input.lineageId}\0${input.runtimeSessionId}\0${input.generationSourceId}\0${input.sourceSnapshotHash}`,
+    )}`,
+    contextLineageId: input.lineageId,
+    sourceSnapshotHash: input.sourceSnapshotHash,
+    layerEnds,
+    contextGenerationHash: contextGenerationHashOf(
+      {
+        contextLineageId: input.lineageId,
+        sourceSnapshotHash: input.sourceSnapshotHash,
+        layerEnds,
+      },
+      units,
+    ),
+    createdAt: input.createdAt ?? new Date().toISOString(),
+  };
   const generation: ContextGenerationV2 = {
-    schemaId: "iris.context-generation.v2",
-    header: {
-      generationId: `gen-${sha256(
-        `${input.lineageId}\0${input.runtimeSessionId}\0${input.generationSourceId}\0${generationHash}`,
-      )}`,
-      lineageId: input.lineageId,
-      layerEnds,
-      generationHash,
-    },
+    schemaId: "iris.context_generation.v2",
+    header,
     units,
   };
 
@@ -332,18 +395,20 @@ export function buildGenerationV2(input: V2GenerationInput): ContextGenerationV2
 
 /**
  * Verify generation integrity: every unit's contentHash must be
- * sha256(semanticContent) and generationHash must be the ordered hash over
- * all unit hashes. Also re-runs the structural layerEnds validation.
+ * sha256(canonicalJson(semanticContent)) and contextGenerationHash must be the
+ * v27 basis hash. Also re-runs the structural layerEnds validation.
  */
 export function verifyGenerationHashesV2(generation: ContextGenerationV2): boolean {
   if (!validateGenerationV2(generation)) {
     return false;
   }
   for (const unit of generation.units) {
-    if (unit.header.contentHash !== sha256(unit.semanticContent)) {
+    if (unit.header.contentHash !== sha256(canonicalJson(unit.semanticContent))) {
       return false;
     }
   }
-  const recomputed = sha256(generation.units.map((unit) => unit.header.contentHash).join("\0"));
-  return generation.header.generationHash === recomputed;
+  return (
+    generation.header.contextGenerationHash ===
+    contextGenerationHashOf(generation.header, generation.units)
+  );
 }

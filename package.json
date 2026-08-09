@@ -30,7 +30,7 @@
     "bench:context": "tsx scripts/context-bench-smoke.ts",
     "crash:harness": "tsx scripts/crash-harness.ts",
     "crash:check": "tsx scripts/crash-check.ts",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:context-golden && npm run test:context-migrations && npm run migration:smoke && npm run crash:check && npm run bench:context && npm run build && npm run test:subprocess && npm run test:cli && npm run dist:smoke",
+    "check": "npm run format:check && node scripts/check-deprecated-names.mjs && npm run lint && npm run typecheck && npm test && npm run test:context-golden && npm run test:context-migrations && npm run migration:smoke && npm run crash:check && npm run bench:context && npm run build && npm run test:subprocess && npm run test:cli && npm run dist:smoke",
     "check:production-lock": "tsx --test test/production-lock.test.ts",
     "bootstrap:pi": "node scripts/bootstrap-pi-checkout.mjs --check"
   },

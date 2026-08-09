@@ -439,6 +439,8 @@ test("v27: foldLiveTurnMessages never re-folds V2-rendered units (companion stri
     lineageId: "identity-test",
     runtimeSessionId: SESSION,
     generationSourceId: "snapshot-1",
+    sourceSnapshotHash: "d".repeat(64),
+    createdAt: "2026-08-01T00:00:00.000Z",
     p0: {
       systemPromptId: "system-1",
       text: "IRIS SYSTEM PROMPT V1",
@@ -584,7 +586,7 @@ test("v27: runMinimalSlice builds a validated V2 generation; the provider snapsh
     // 最后一次 provider render 的 generation：P0-P2 恒定，P5 覆盖已提交单元。
     const generation = result.generation;
     assert.ok(generation, "slice must produce a V2 generation");
-    assert.equal(generation.schemaId, "iris.context-generation.v2");
+    assert.equal(generation.schemaId, "iris.context_generation.v2");
     assert.equal(generation.header.layerEnds[5], generation.units.length);
     assert.ok(generation.header.layerEnds[0] >= 1, "P0 system prompt present");
     assert.ok(generation.header.layerEnds[2] >= 3, "P0+P1+P2 present");

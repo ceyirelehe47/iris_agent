@@ -124,6 +124,7 @@ export function prepareContextSources(
   const snapshotSeed = `${canonicalSystemPrompt}\0${renderedPersona}\0${declarationsSerialized}`;
   return {
     contextSourceSnapshotId: `snapshot-${createHash("sha256").update(snapshotSeed).digest("hex").slice(0, 12)}`,
+    sourceSnapshotHash: createHash("sha256").update(snapshotSeed).digest("hex"),
     runtimeSessionId,
     lineageId,
     systemPromptId: `system-${createHash("sha256").update(canonicalSystemPrompt).digest("hex").slice(0, 12)}`,

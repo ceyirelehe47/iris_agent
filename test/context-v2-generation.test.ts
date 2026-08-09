@@ -10,13 +10,16 @@ import type {
   ContextGenerationV2,
   ContextMessageUnitV1,
   ContextUnitV2,
+  JsonValue,
 } from "../src/contracts/context-v27.js";
+import { canonicalJson } from "../src/contracts/tool.js";
 import {
   buildGenerationV2,
-  canonicalP5SemanticContent,
+  payloadAsJsonValue,
   projectStoreUnitToV1,
   verifyGenerationHashesV2,
   type V2GenerationInput,
+  type V2P5Source,
 } from "../src/context/v2-generation.js";
 import { renderGenerationV2, SYNTHETIC_MESSAGE_TIMESTAMP } from "../src/context/v2-renderer.js";
 
@@ -51,12 +54,9 @@ function durableUnit(overrides: Partial<ContextMessageUnitV1> = {}): ContextMess
 
 function p5Source(
   unit: ContextMessageUnitV1,
-  text = "hello",
-): {
-  unit: ContextMessageUnitV1;
-  semanticContent: string;
-} {
-  return { unit, semanticContent: canonicalP5SemanticContent({ role: "user", content: text }) };
+  payload: JsonValue = { role: "user", content: "hello" },
+): V2P5Source {
+  return { unit, semanticContent: payload };
 }
 
 function makeInput(overrides: Partial<V2GenerationInput> = {}): V2GenerationInput {
@@ -64,6 +64,8 @@ function makeInput(overrides: Partial<V2GenerationInput> = {}): V2GenerationInpu
     lineageId: LINEAGE,
     runtimeSessionId: SESSION,
     generationSourceId: "snapshot-abc",
+    sourceSnapshotHash: "d".repeat(64),
+    createdAt: "2026-08-01T00:00:00.000Z",
     p0: {
       systemPromptId: "system-1",
       text: "IRIS SYSTEM PROMPT V1",
@@ -108,32 +110,41 @@ function contentOf(message: AgentMessage): unknown {
 
 test("v2: exact generation shape — P0/P1/P2 units, layerEnds, header", () => {
   const generation = buildGenerationV2(makeInput());
-  assert.equal(generation.schemaId, "iris.context-generation.v2");
+  assert.equal(generation.schemaId, "iris.context_generation.v2");
+  assert.equal(generation.header.schemaId, "iris.context_generation_header.v1");
   assert.deepEqual(
     [...generation.header.layerEnds],
     [1, 2, 3, 3, 3, 3],
     "one unit per P0/P1/P2; empty P3/P4/P5",
   );
-  assert.equal(generation.header.lineageId, LINEAGE);
-  assert.match(generation.header.generationId, /^gen-[0-9a-f]{64}$/);
-  assert.equal(generation.header.generationHash.length, 64);
+  assert.equal(generation.header.contextLineageId, LINEAGE);
+  assert.equal(generation.header.sourceSnapshotHash, "d".repeat(64));
+  assert.equal(generation.header.createdAt, "2026-08-01T00:00:00.000Z");
+  assert.match(generation.header.contextGenerationId, /^gen-[0-9a-f]{64}$/);
+  assert.equal(generation.header.contextGenerationHash.length, 64);
 
   const p0 = expectUnit(generation.units, 0);
-  assert.equal(p0.schemaId, "iris.context-unit.v2");
+  assert.equal(p0.schemaId, "iris.context_unit.v2");
+  assert.equal(p0.header.schemaId, "iris.context_unit_header.v1");
   assert.equal(p0.header.semanticSchemaId, "iris.system.v1");
   assert.equal(p0.header.contextUnitId, "system-system-1");
+  assert.equal(p0.header.source.schemaId, "iris.context_unit_source_ref.v1");
+  assert.equal(p0.header.source.sourceSchemaId, "iris.system_prompt.v1");
   assert.equal(p0.header.source.sourceId, "system-1");
+  assert.equal(typeof p0.header.source.sourceHash, "string", "sourceHash is required");
   assert.equal(p0.header.source.sourceHash, "a".repeat(64));
-  assert.equal(p0.header.contentHash, sha256(p0.semanticContent));
+  assert.equal(p0.header.contentHash, sha256(canonicalJson(p0.semanticContent)));
   assert.equal(p0.semanticContent, "IRIS SYSTEM PROMPT V1");
 
   const p1 = expectUnit(generation.units, 1);
   assert.equal(p1.header.semanticSchemaId, "iris.persona.v1");
   assert.equal(p1.header.contextUnitId, "persona-persona-default-v1");
+  assert.equal(p1.header.source.sourceSchemaId, "iris.persona_snapshot.v1");
 
   const p2 = expectUnit(generation.units, 2);
   assert.equal(p2.header.semanticSchemaId, "iris.declarations.v1");
   assert.equal(p2.header.contextUnitId, "declarations-decl-v1");
+  assert.equal(p2.header.source.sourceSchemaId, "iris.declarations_snapshot.v1");
 });
 
 test("v2: P3/P4/P5 units are appended in layer order with per-layer schema ids", () => {
@@ -170,6 +181,7 @@ test("v2: P3/P4/P5 units are appended in layer order with per-layer schema ids",
   // P5 ordered by contextSeq, identity preserved from the durable unit.
   assert.equal(p5First.header.contextUnitId, "output-8");
   assert.equal(p5First.header.semanticSchemaId, "iris.message.output.v1");
+  assert.equal(p5First.header.source.sourceSchemaId, "iris.context_message_unit.v1");
   assert.equal(p5Second.header.contextUnitId, "input-9");
   assert.equal(p5Second.header.semanticSchemaId, "iris.message.input.v1");
   assert.equal(
@@ -210,8 +222,8 @@ test("v2: hash stability — identical input produces identical hashes and ids",
   const first = buildGenerationV2(makeInput());
   const second = buildGenerationV2(makeInput());
   assert.deepEqual(first, second, "rebuild is byte-identical");
-  assert.equal(first.header.generationId, second.header.generationId);
-  assert.equal(first.header.generationHash, second.header.generationHash);
+  assert.equal(first.header.contextGenerationId, second.header.contextGenerationId);
+  assert.equal(first.header.contextGenerationHash, second.header.contextGenerationHash);
   for (let i = 0; i < first.units.length; i += 1) {
     assert.equal(
       first.units[i]?.header.contentHash,
@@ -243,10 +255,10 @@ test("v2: identity stable / index movable — inserting a unit shifts indexes, n
   assert.equal(afterU2.header.contextUnitId, "u2", "identity preserved");
   assert.equal(afterU1.header.contentHash, beforeU1.header.contentHash, "content hash preserved");
   assert.equal(afterU2.header.contentHash, beforeU2.header.contentHash, "content hash preserved");
-  assert.equal(afterU1.semanticContent, beforeU1.semanticContent);
+  assert.deepEqual(afterU1.semanticContent, beforeU1.semanticContent);
   assert.notEqual(
-    after.header.generationHash,
-    before.header.generationHash,
+    after.header.contextGenerationHash,
+    before.header.contextGenerationHash,
     "generation hash covers the new unit",
   );
 });
@@ -278,7 +290,7 @@ test("v2: layerEnds validation — a tampered generation is rejected by validate
   assert.equal(verifyGenerationHashesV2(invalidNegative), false, "negative layerEnd");
 });
 
-test("v2: hash verification — tampered semanticContent or generationHash fails", () => {
+test("v2: hash verification — tampered semanticContent or contextGenerationHash fails", () => {
   const generation = buildGenerationV2(makeInput());
   assert.equal(verifyGenerationHashesV2(generation), true);
   const tamperedContent = {
@@ -329,7 +341,7 @@ test("v2: sensitivity — a RENAMED legacy flat DTO is still rejected (structure
           p5: [
             {
               unit: renamed as unknown as ContextMessageUnitV1,
-              semanticContent: canonicalP5SemanticContent({ role: "user", content: "x" }),
+              semanticContent: { role: "user", content: "x" },
             },
           ],
         }),
@@ -351,7 +363,7 @@ test("v2: renderer — P0 becomes systemPrompt; P1-P4 synthetic user messages; P
       p5: [
         {
           unit: durableUnit({ contextUnitId: "in-1", contextSeq: 1 }),
-          semanticContent: canonicalP5SemanticContent(payload),
+          semanticContent: payloadAsJsonValue(payload),
         },
       ],
     }),
@@ -456,7 +468,7 @@ test("v2: generation built from projected store units round-trips through the re
     makeInput({
       p5: storeUnits.map((unit) => ({
         unit: projectStoreUnitToV1(unit),
-        semanticContent: canonicalP5SemanticContent(unit.payload),
+        semanticContent: payloadAsJsonValue(unit.payload),
       })),
     }),
   );
@@ -469,24 +481,43 @@ test("v2: generation built from projected store units round-trips through the re
   );
 });
 
-test("v2: generationId is lineage/session-bound — different lineage changes identity", () => {
+test("v2: contextGenerationId/contextGenerationHash are lineage-bound (v27 basis)", () => {
   const a = buildGenerationV2(makeInput({ lineageId: "identity-a" }));
   const b = buildGenerationV2(makeInput({ lineageId: "identity-b" }));
-  assert.notEqual(a.header.generationId, b.header.generationId);
-  assert.equal(a.header.generationHash, b.header.generationHash, "content hash is lineage-free");
+  assert.notEqual(a.header.contextGenerationId, b.header.contextGenerationId);
+  assert.notEqual(
+    a.header.contextGenerationHash,
+    b.header.contextGenerationHash,
+    "v27 hash basis includes contextLineageId",
+  );
 });
 
 test("v2: ContextGenerationV2 satisfies the structural contract types", () => {
   const generation: ContextGenerationV2 = buildGenerationV2(makeInput());
   const header = generation.header;
-  assert.equal(typeof header.generationId, "string");
+  assert.equal(typeof header.contextGenerationId, "string");
   assert.equal(header.layerEnds.length, 6);
-  assert.equal(typeof header.generationHash, "string");
+  assert.equal(typeof header.contextGenerationHash, "string");
   for (const unit of generation.units) {
     const v2Unit: ContextUnitV2 = unit;
-    assert.equal(v2Unit.schemaId, "iris.context-unit.v2");
+    assert.equal(v2Unit.schemaId, "iris.context_unit.v2");
     assert.equal(typeof v2Unit.header.contentHash, "string");
     assert.equal(typeof v2Unit.header.contextUnitId, "string");
     assert.equal(typeof v2Unit.header.semanticSchemaId, "string");
   }
+});
+
+test("v2: semanticContent supports structured JsonValue, not only string", () => {
+  const payload: AgentMessage = {
+    role: "user",
+    content: [{ type: "text", text: "structured steer" }],
+    timestamp: 7,
+  };
+  const generation = buildGenerationV2(
+    makeInput({ p5: [p5Source(durableUnit(), payloadAsJsonValue(payload))] }),
+  );
+  const unit = expectUnit(generation.units, 3);
+  const semanticContent: JsonValue = unit.semanticContent;
+  assert.deepEqual(semanticContent, payload, "P5 semanticContent carries the message object");
+  assert.equal(verifyGenerationHashesV2(generation), true);
 });
