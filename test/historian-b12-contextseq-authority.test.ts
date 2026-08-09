@@ -423,3 +423,371 @@ test("B12-AC5: a frozen batch is replayable — identical window ⇒ identical b
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// iris_agent#94: the lineage cursor must survive REAL process restarts
+// (store close + reopen of the SAME database files), not just Session
+// rollover inside one manager. These tests drive the full
+// close → reopen → new-manager path:
+//
+//  B12-AC94-1  after a restart, Session B claims only N+1..M — A's units
+//              are never re-claimed (the durable lineage cursor is 3, not 0).
+//  B12-AC94-2  a crash AFTER B's freeze claim but BEFORE its commit must not
+//              rewind the cursor; recovery resumes from the durable ceiling.
+//  B12-AC94-3  a restart with no new units is a nothing_new no-op — no
+//              duplicate publication, cursor unchanged.
+//  B12-AC94-4  a legacy DB (migration 0010 not yet applied) backfills the
+//              lineage cursor from pre-#84 data on reopen — no rewind to 0.
+test("B12-AC94-1: Session A commit → process restart → Session B claims only N+1..M (iris_agent#94)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b12-restart-claim-"));
+  try {
+    const store = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    store.createLineage(makeLineageInput(SESSION_A));
+    store.bindCurrentSession(LINEAGE, SESSION_A);
+    for (let seq = 1; seq <= 3; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_A,
+        contextSeq: seq,
+        unitId: `a-${seq}`,
+        entrySeq: seq,
+      });
+    }
+    const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+
+    // PROCESS 1: Session A (1..3) — commits the lineage cursor at 3.
+    const port1 = createContextHistoryReadPort(store);
+    const manager1 = new HistorianManager({
+      store: historian,
+      historyPort: port1,
+      modelProviderProfile: "m",
+      maxQueuedJobs: 4,
+    });
+    await manager1.triggerIncremental(SESSION_A);
+    await manager1.pumpOnce();
+    assert.equal(
+      historian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+      3,
+      "A committed 1..3 before the restart",
+    );
+    assert.equal(historian.countPublications(), 1, "A produced exactly one publication");
+    // PROCESS RESTART: close everything, reopen the SAME database files.
+    manager1.close(); // closes historian too
+    store.close();
+
+    const reopenedStore = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    const reopenedHistorian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    try {
+      // Session B binds after the restart; its Pi entrySeq resets while the
+      // contextSeq continues globally.
+      reopenedStore.bindCurrentSession(LINEAGE, SESSION_B);
+      for (let seq = 4; seq <= 5; seq++) {
+        insertUnit(reopenedStore, {
+          runtimeSessionId: SESSION_B,
+          contextSeq: seq,
+          unitId: `b-${seq}`,
+          entrySeq: seq - 3,
+        });
+      }
+      const port2 = createContextHistoryReadPort(reopenedStore);
+      const manager2 = new HistorianManager({
+        store: reopenedHistorian,
+        historyPort: port2,
+        modelProviderProfile: "m",
+        maxQueuedJobs: 4,
+      });
+      await manager2.triggerIncremental(SESSION_B);
+      await manager2.pumpOnce();
+
+      assert.equal(
+        reopenedHistorian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+        5,
+        "the lineage cursor survived the restart and advanced to 5",
+      );
+      assert.equal(
+        reopenedHistorian.getSessionState(SESSION_B)?.processedThroughContextSeq,
+        5,
+        "B's session cursor reaches the global ceiling 5",
+      );
+      assert.equal(
+        reopenedHistorian.countPublications(),
+        2,
+        "exactly two publications — A's 1..3 and B's 4..5; nothing re-claimed after restart",
+      );
+      // B's claim window starts strictly after A's durable ceiling (3):
+      // only N+1..M is eligible, never A's 1..3.
+      const batch = port2.claimHistorianBatch({
+        afterContextSeqExclusive: 3,
+        throughContextSeqInclusive: Number.MAX_SAFE_INTEGER,
+      });
+      assert.deepEqual(
+        batch.units.map((u) => u.unitId),
+        ["b-4", "b-5"],
+        "restart recovery claims only 4..5, never A's units",
+      );
+      manager2.close();
+    } finally {
+      reopenedHistorian.close();
+      reopenedStore.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B12-AC94-2: B frozen claim → crash/restart → recovery does not rewind cursor (iris_agent#94)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b12-restart-freeze-crash-"));
+  try {
+    const store = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    store.createLineage(makeLineageInput(SESSION_A));
+    store.bindCurrentSession(LINEAGE, SESSION_A);
+    for (let seq = 1; seq <= 3; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_A,
+        contextSeq: seq,
+        unitId: `a-${seq}`,
+        entrySeq: seq,
+      });
+    }
+    const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    const port = createContextHistoryReadPort(store);
+    const manager = new HistorianManager({
+      store: historian,
+      historyPort: port,
+      modelProviderProfile: "m",
+      maxQueuedJobs: 4,
+    });
+    await manager.triggerIncremental(SESSION_A);
+    await manager.pumpOnce();
+    assert.equal(
+      historian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+      3,
+      "A committed 1..3",
+    );
+
+    // Session B claims the head (4..6): triggerIncremental durably writes
+    // the boundary snapshot — but we CRASH before any pumpOnce, so B's
+    // commit never ran.
+    store.bindCurrentSession(LINEAGE, SESSION_B);
+    for (let seq = 4; seq <= 6; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_B,
+        contextSeq: seq,
+        unitId: `b-${seq}`,
+        entrySeq: seq - 3,
+      });
+    }
+    await manager.triggerIncremental(SESSION_B); // freeze claim persisted; NO pumpOnce (crash)
+    assert.equal(
+      historian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+      3,
+      "a freeze claim alone never advances the durable cursor",
+    );
+    manager.close();
+    store.close();
+
+    // Restart: recovery must resume from the durable lineage cursor (3),
+    // never rewind to 0, and never re-publish A's already-committed units.
+    const reopenedStore = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    const reopenedHistorian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    try {
+      const port2 = createContextHistoryReadPort(reopenedStore);
+      const manager2 = new HistorianManager({
+        store: reopenedHistorian,
+        historyPort: port2,
+        modelProviderProfile: "m",
+        maxQueuedJobs: 4,
+      });
+      await manager2.triggerIncremental(SESSION_B);
+      await manager2.pumpOnce();
+      assert.equal(
+        reopenedHistorian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+        6,
+        "the cursor never rewound below A's ceiling; B committed 4..6 after recovery",
+      );
+      assert.equal(
+        reopenedHistorian.countPublications(),
+        2,
+        "A's 1..3 + B's 4..6 — the pre-crash freeze published nothing and left no duplicate",
+      );
+      manager2.close();
+    } finally {
+      reopenedHistorian.close();
+      reopenedStore.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B12-AC94-3: B commit → immediate restart → no duplicate work (iris_agent#94)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b12-restart-idempotent-"));
+  try {
+    const store = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    store.createLineage(makeLineageInput(SESSION_A));
+    store.bindCurrentSession(LINEAGE, SESSION_A);
+    for (let seq = 1; seq <= 3; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_A,
+        contextSeq: seq,
+        unitId: `a-${seq}`,
+        entrySeq: seq,
+      });
+    }
+    const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    const port = createContextHistoryReadPort(store);
+    const manager = new HistorianManager({
+      store: historian,
+      historyPort: port,
+      modelProviderProfile: "m",
+      maxQueuedJobs: 4,
+    });
+    await manager.triggerIncremental(SESSION_A);
+    await manager.pumpOnce();
+    store.bindCurrentSession(LINEAGE, SESSION_B);
+    for (let seq = 4; seq <= 5; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_B,
+        contextSeq: seq,
+        unitId: `b-${seq}`,
+        entrySeq: seq - 3,
+      });
+    }
+    await manager.triggerIncremental(SESSION_B);
+    await manager.pumpOnce();
+    assert.equal(
+      historian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+      5,
+      "A+B committed through 5",
+    );
+    assert.equal(historian.countPublications(), 2, "one publication per processed window");
+    manager.close();
+    store.close();
+
+    // Restart with NOTHING new: the durable lineage cursor (5) is the
+    // watermark; a fresh incremental must be a nothing_new no-op.
+    const reopenedStore = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    const reopenedHistorian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    try {
+      const port2 = createContextHistoryReadPort(reopenedStore);
+      const manager2 = new HistorianManager({
+        store: reopenedHistorian,
+        historyPort: port2,
+        modelProviderProfile: "m",
+        maxQueuedJobs: 4,
+      });
+      await manager2.triggerIncremental(SESSION_B);
+      await manager2.pumpOnce();
+      assert.equal(
+        reopenedHistorian.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+        5,
+        "restart with no new units: cursor stays at 5 — no rewind, no advance",
+      );
+      assert.equal(
+        reopenedHistorian.countPublications(),
+        2,
+        "no new publication after the restart",
+      );
+      manager2.close();
+    } finally {
+      reopenedHistorian.close();
+      reopenedStore.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B12-AC94-4: legacy cursor migration → reopen → no rewind (iris_agent#94)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-b12-restart-legacy-"));
+  try {
+    const store = ContextStore.open(join(dir, "context.db"), { lineageId: LINEAGE });
+    store.createLineage(makeLineageInput(SESSION_A));
+    store.bindCurrentSession(LINEAGE, SESSION_A);
+    for (let seq = 1; seq <= 3; seq++) {
+      insertUnit(store, {
+        runtimeSessionId: SESSION_A,
+        contextSeq: seq,
+        unitId: `a-${seq}`,
+        entrySeq: seq,
+      });
+    }
+    const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+
+    // Downgrade the freshly-opened DB to its pre-#84 legacy shape:
+    //  - no lineage_cursors row (the 0010 table is empty);
+    //  - migration 0010 not recorded as applied (a legacy binary's DB);
+    //  - 0009-era durable data: a session_state row carrying the Context
+    //    cursor and a boundary_snapshots row carrying lineage_id.
+    // 0010's backfill derives lineage_cursors from boundary_snapshots
+    // (session_state cannot be used: it has no lineage_id column).
+    const db = historian.raw();
+    db.exec("DELETE FROM lineage_cursors");
+    db.exec("DELETE FROM schema_migrations WHERE version = '0010_lineage_cursor'");
+    db.prepare(
+      "INSERT INTO session_state " +
+        "(runtime_session_id, processed_through_entry_seq, processed_through_context_seq, status, updated_at) " +
+        "VALUES (?, ?, ?, 'active', ?)",
+    ).run(SESSION_A, 3, 3, "t");
+    db.prepare(
+      "INSERT INTO boundary_snapshots " +
+        "(boundary_snapshot_id, runtime_session_id, lineage_id, observed_head_entry_seq, " +
+        "observed_head_context_seq, eligible_through_entry_seq, eligible_through_context_seq, " +
+        "protected_tail_start_entry_seq, true_raw_eligible_tokens, narratable_eligible_tokens, " +
+        "source_range_hash, model_provider_profile, frozen_at, consumed_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+    ).run("legacy-bsnap-1", SESSION_A, LINEAGE, 3, 3, 3, 3, 4, 100, 100, "legacy-hash", "m", "t");
+    historian.close();
+
+    // "Restart with the upgraded binary": reopening runs the pending 0010
+    // migration, whose backfill seeds lineage_cursors from the legacy
+    // boundary_snapshots — the cursor must be 3, never 0.
+    const reopened = HistorianStore.open({ databasePath: join(dir, "historian.db") });
+    try {
+      assert.equal(
+        reopened.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+        3,
+        "0010 backfilled the lineage cursor from the legacy boundary snapshot — no rewind to 0",
+      );
+
+      // Session B (4..5) then starts from the backfilled 3, not from 0.
+      store.bindCurrentSession(LINEAGE, SESSION_B);
+      for (let seq = 4; seq <= 5; seq++) {
+        insertUnit(store, {
+          runtimeSessionId: SESSION_B,
+          contextSeq: seq,
+          unitId: `b-${seq}`,
+          entrySeq: seq - 3,
+        });
+      }
+      const port = createContextHistoryReadPort(store);
+      const manager = new HistorianManager({
+        store: reopened,
+        historyPort: port,
+        modelProviderProfile: "m",
+        maxQueuedJobs: 4,
+      });
+      await manager.triggerIncremental(SESSION_B);
+      await manager.pumpOnce();
+      assert.equal(
+        reopened.getLineageCursor(LINEAGE)?.processedThroughContextSeq,
+        5,
+        "B advanced the backfilled cursor 3 → 5; the legacy 1..3 was never re-processed",
+      );
+      assert.equal(
+        reopened.getSessionState(SESSION_B)?.processedThroughContextSeq,
+        5,
+        "B's session cursor is the global ceiling",
+      );
+      assert.equal(
+        reopened.countPublications(),
+        1,
+        "only B's 4..5 was published; the legacy A range produced no duplicate work",
+      );
+      manager.close();
+    } finally {
+      reopened.close();
+      store.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

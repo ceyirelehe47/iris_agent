@@ -14,8 +14,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { Model, Models, ToolCall } from "@earendil-works/pi-ai";
 
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-import type { PreparedContextSources } from "../contracts/context.js";
+import type { PreparedInvocationSources } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { computeToolExecutionKey, canonicalJson } from "../contracts/tool.js";
 import {
@@ -62,8 +61,7 @@ export interface HarnessObservers {
  */
 export interface InvocationBinding {
   input: AgentInput;
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  prepared: PreparedContextSources;
+  prepared: PreparedInvocationSources;
   invocationId: string;
 }
 

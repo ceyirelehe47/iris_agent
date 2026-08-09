@@ -1,7 +1,6 @@
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-import type { PreparedContextSources } from "../contracts/context.js";
+import type { PreparedInvocationSources } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
 
@@ -37,7 +36,7 @@ export interface RuntimeCoordinatorOptions {
   /** Registry providing the current ready Capsule (ActiveRuntimePort). */
   activeRuntime: ActiveRuntimePort;
   /**
-   * Derives ContextSourceSnapshot + canonical system prompt for an input, — TODO: R2 v27 migration
+   * Derives InvocationSourceBinding + canonical system prompt for an input,
    * scoped to the active runtime Session/Epoch. Called before every prompt().
    * v13：invocation 只绑定 prepared sources（currentInvocation）；m0/m1/P5
    * 物化由 ContextRenderer/contextController 在 provider render 时完成
@@ -47,8 +46,7 @@ export interface RuntimeCoordinatorOptions {
     input: AgentInput,
     runtimeSessionId: string,
     epochId: string,
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  ) => Promise<PreparedContextSources>;
+  ) => Promise<PreparedInvocationSources>;
   /**
    * Fired exactly once per invocation when Pi native settled is observed on
    * the bound active Epoch. The Host uses this to release the invocation and,
@@ -155,7 +153,7 @@ export class RuntimeCoordinator implements AgentRuntimePort {
     try {
       yield { type: "turn_start", invocationId };
 
-      // Prepare + bind ContextSourceSnapshot for THIS input, scoped to the — TODO: R2 v27 migration
+      // Prepare + bind InvocationSourceBinding for THIS input, scoped to the
       // active Session/Epoch (invariant: the bound runtimeSessionId does not
       // change mid-invocation). The binding is a shared mutable container
       // (the adapter holds the same object reference), so updating its

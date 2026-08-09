@@ -92,28 +92,12 @@ for (const file of trackedFiles) {
       if (regex.test(line)) {
         const trimmed = line.trim();
         const isComment =
-          trimmed.startsWith("//") ||
-          trimmed.startsWith("*") ||
-          trimmed.startsWith("/*");
-        // Check if this line has a v27 exception marker (R2 migration TODO).
-        // A marker may sit inline on a comment line OR on the immediately
-        // preceding comment line (e.g. a // TODO: R2 line placed above a
-        // code line that still uses a deprecated name pending v27 removal).
-        if (isComment && (line.includes("v27-exception") || line.includes("TODO: R2"))) {
-          continue;
-        }
-        const prevLine = i > 0 ? lines[i - 1] : "";
-        const prevTrimmed = prevLine.trim();
-        const prevIsComment =
-          prevTrimmed.startsWith("//") ||
-          prevTrimmed.startsWith("*") ||
-          prevTrimmed.startsWith("/*");
-        if (
-          prevIsComment &&
-          (prevLine.includes("v27-exception") || prevLine.includes("TODO: R2"))
-        ) {
-          continue;
-        }
+          trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*");
+        // Comment lines that describe deprecated/historical/superseded/removed
+        // names in a clearly referential way (e.g. "Replaces the deprecated
+        // `X`") are fine — they document history rather than live usage. No
+        // escape-hatch markers (TODO: R2 / v27-exception) exist anymore: v27
+        // renames are complete, so production code must use current names.
         if (
           isComment &&
           (line.includes("historical") ||

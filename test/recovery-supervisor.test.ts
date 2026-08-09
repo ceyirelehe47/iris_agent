@@ -11,6 +11,7 @@ import {
   RecoveryExhaustedError,
   RecoverySupervisor,
   classifyNativeFailure,
+  extractRetryAfterMs,
 } from "../src/runtime/recovery-supervisor.js";
 import {
   RecoveryStateSnapshot,
@@ -633,4 +634,245 @@ test("semantic failure (BLOCKING/review) is terminal, not retried", async () => 
       (e as { action?: string }).action === "same_model_retry",
   );
   assert.equal(retryEvents.length, 0, "semantic failure must not trigger retry");
+});
+
+// ---------------------------------------------------------------------------
+// iris_agent#89 / #90 regression tests
+// ---------------------------------------------------------------------------
+
+test("production dispatch prefers promptWithModel when the runtime supports it", async () => {
+  const calls: Array<{ model: string | null }> = [];
+  const runtime: AgentRuntimePort = {
+    prompt: () => settledSequence(INVOCATION_ID),
+    abort: async () => undefined,
+    getPhase: () => "idle",
+    promptWithModel: (_input, model) => {
+      calls.push({ model });
+      return settledSequence(INVOCATION_ID);
+    },
+  };
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a"]),
+    sleep: async () => undefined,
+  });
+
+  const events: AgentRuntimeEvent[] = [];
+  // No injected dispatch → the production default must honor the selected model.
+  for await (const event of supervisor.prompt(input)) {
+    events.push(event as AgentRuntimeEvent);
+  }
+
+  assert.equal(calls.length, 1, "promptWithModel should be used when available");
+  assert.equal(calls[0]?.model, "model-a", "selected fallback model must be passed through");
+  const settled = events.filter((e) => (e as { type: string }).type === "settled");
+  assert.equal(settled.length, 1);
+});
+
+test("watchdog stall aborts the exact active invocation", async () => {
+  const aborts: Array<{ invocationId: string; reason: string }> = [];
+  const runtime = new FakeRuntime();
+  (runtime as { abort: (id: string, reason?: string) => Promise<void> }).abort = async (
+    invocationId: string,
+    reason?: string,
+  ) => {
+    aborts.push({ invocationId, reason: reason ?? "" });
+  };
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a"], {
+      fallbackNoProgressTimeoutMs: 30,
+      sameModelRetryBudget: 1,
+    }),
+    sleep: async () => undefined,
+  });
+
+  await assert.rejects(
+    (async () => {
+      for await (const event of supervisor.prompt(input, {
+        dispatch: async function* (): AsyncIterable<AgentRuntimeEvent> {
+          yield { type: "turn_start", invocationId: INVOCATION_ID };
+          yield { type: "message_delta", invocationId: INVOCATION_ID, text: "partial" };
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        },
+      })) {
+        void event;
+      }
+    })(),
+    RecoveryExhaustedError,
+  );
+
+  assert.ok(aborts.length >= 1, "watchdog must abort the active invocation");
+  assert.equal(aborts[0]?.invocationId, INVOCATION_ID, "must abort the EXACT invocation");
+  assert.equal(aborts[0]?.reason, "watchdog_no_progress");
+});
+
+test("subagent watchdog governs even when longer than the fallback timeout", async () => {
+  // #89 Fix 3 regression: while a subagent runs without first progress, the
+  // SUBAGENT timeout must govern. The fallback no-progress timer must NOT
+  // fire spuriously inside the subagent window (previously Math.min always
+  // picked the 50ms fallback window and aborted the slow subagent).
+  const runtime = new FakeRuntime();
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a", "model-b"], {
+      fallbackNoProgressTimeoutMs: 50,
+      subagentFirstProgressMs: 100000,
+      sameModelRetryBudget: 1,
+    }),
+    sleep: async () => undefined,
+  });
+
+  const events: AgentRuntimeEvent[] = [];
+  for await (const event of supervisor.prompt(input, {
+    dispatch: async function* (): AsyncIterable<AgentRuntimeEvent> {
+      yield { type: "turn_start", invocationId: INVOCATION_ID };
+      yield {
+        type: "tool_call",
+        invocationId: INVOCATION_ID,
+        toolCallId: "tc-1",
+        toolName: "slow_tool",
+      };
+      // Subagent runs longer than the 50ms fallback window: only the 100s
+      // subagent watchdog may fire, so this must settle normally.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      yield { type: "message_delta", invocationId: INVOCATION_ID, text: "subagent done" };
+      yield { type: "settled", invocationId: INVOCATION_ID, nextTurnCount: 1 };
+    },
+  })) {
+    events.push(event as AgentRuntimeEvent);
+  }
+
+  const abortEvents = events.filter(
+    (e) =>
+      (e as { type: string; action?: string }).type === "recovery_escalation" &&
+      (e as { action?: string }).action === "abort",
+  );
+  assert.equal(abortEvents.length, 0, "fallback watchdog must not fire during the subagent window");
+  const settled = events.filter((e) => (e as { type: string }).type === "settled");
+  assert.equal(settled.length, 1, "subagent must be allowed to finish");
+});
+
+test("native retry_after hint overrides exponential backoff", async () => {
+  const sleeps: number[] = [];
+  let attempt = 0;
+  const runtime = new FakeRuntime();
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a"], { sameModelRetryBudget: 2 }),
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
+  });
+
+  const events: AgentRuntimeEvent[] = [];
+  for await (const event of supervisor.prompt(input, {
+    dispatch: () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return failedWith(INVOCATION_ID, "429 rate limit retry_after:25");
+      }
+      return settledSequence(INVOCATION_ID);
+    },
+  })) {
+    events.push(event as AgentRuntimeEvent);
+  }
+
+  assert.deepEqual(sleeps, [25], "retry_after hint must replace the 2s default backoff");
+});
+
+test("extractRetryAfterMs parses native Retry-After hints", () => {
+  assert.equal(extractRetryAfterMs("429", "rate limit retry_after:1500"), 1500);
+  assert.equal(extractRetryAfterMs("retry_after=2000", undefined), 2000);
+  assert.equal(extractRetryAfterMs("429", "rate limit"), undefined);
+  assert.equal(extractRetryAfterMs("429", "retry_after:0"), undefined);
+  assert.equal(extractRetryAfterMs(undefined, undefined), undefined);
+});
+
+test("exhausted initial state fails closed with zero dispatch", async () => {
+  const runtime = new FakeRuntime();
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a"]),
+    sleep: async () => undefined,
+  });
+
+  let dispatchCount = 0;
+  await assert.rejects(
+    (async () => {
+      for await (const event of supervisor.prompt(input, {
+        logicalExecutionId: "exec-already-exhausted",
+        initialState: {
+          ...freshRecoveryState("exec-already-exhausted", new Date().toISOString()),
+          exhausted: true,
+        },
+        dispatch: () => {
+          dispatchCount += 1;
+          return settledSequence(INVOCATION_ID);
+        },
+      })) {
+        void event;
+      }
+    })(),
+    (error: unknown) => {
+      assert.ok(error instanceof RecoveryExhaustedError);
+      assert.equal(error.reason, "already_exhausted");
+      return true;
+    },
+  );
+
+  assert.equal(dispatchCount, 0, "exhausted state must not dispatch");
+});
+
+test("overall budget anchors to durable createdAt on restore", async () => {
+  const runtime = new FakeRuntime();
+  const supervisor = new RecoverySupervisor({
+    runtime,
+    config: testConfig(["model-a"]),
+    sleep: async () => undefined,
+  });
+
+  let dispatchCount = 0;
+  await assert.rejects(
+    (async () => {
+      for await (const event of supervisor.prompt(input, {
+        logicalExecutionId: "exec-old-budget",
+        initialState: {
+          ...freshRecoveryState("exec-old-budget", "2020-01-01T00:00:00.000Z"),
+          exhausted: false,
+        },
+        dispatch: () => {
+          dispatchCount += 1;
+          return settledSequence(INVOCATION_ID);
+        },
+      })) {
+        void event;
+      }
+    })(),
+    (error: unknown) => {
+      assert.ok(error instanceof RecoveryExhaustedError);
+      assert.equal(error.reason, "overall_budget_exceeded");
+      return true;
+    },
+  );
+
+  assert.equal(dispatchCount, 0, "restored state past budget must not dispatch");
+});
+
+test("reserved_retries survives restart via the store", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "iris-recovery-")), "recovery.db");
+  const store = new RecoveryStateStore(dbPath);
+  const logicalId = "exec-reserved-durable";
+  const snapshot = {
+    ...freshRecoveryState(logicalId, "2026-08-09T00:00:00.000Z"),
+    reservedRetries: 4,
+  };
+  store.save(snapshot);
+  store.close();
+
+  const restoredStore = new RecoveryStateStore(dbPath);
+  const loaded = restoredStore.load(logicalId);
+  assert.ok(loaded, "state should be loaded after restart");
+  assert.equal(loaded.reservedRetries, 4, "reserved_retries must survive restart");
+  restoredStore.close();
 });

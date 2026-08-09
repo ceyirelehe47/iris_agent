@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-import type { HistoryProjectionUnit, ProjectedLogicalUnits } from "./projection.js";
+import type { SessionProjectionUnit, ProjectedLogicalUnits } from "./projection.js";
 
 /**
  * R2 Feature 6 — Protected tail & tool-arc fences.
@@ -180,8 +179,7 @@ export function findSuffixStartForTokens(rawTokenCounts: number[], targetTokens:
   return 1;
 }
 
-// TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-function unitEntrySeq(unit: HistoryProjectionUnit): number {
+function unitEntrySeq(unit: SessionProjectionUnit): number {
   switch (unit.kind) {
     case "input":
     case "tool_arc":
@@ -196,8 +194,7 @@ function unitEntrySeq(unit: HistoryProjectionUnit): number {
  * projection only emits sealed tool_arc units; unresolved calls remain as
  * assistant units carrying toolCallIds). */
 export function openToolCallIds(
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  units: HistoryProjectionUnit[],
+  units: SessionProjectionUnit[],
 ): Array<{ assistantEntrySeq: number; callId: string }> {
   const resolved = new Set<string>();
   for (const unit of units) {
@@ -218,8 +215,7 @@ export function openToolCallIds(
 }
 
 export interface EstimateTokensArgs {
-  // TODO: R2 — v27 supersedes this; will be replaced by ContextGeneration/ContextMessageUnitView
-  units: HistoryProjectionUnit[];
+  units: SessionProjectionUnit[];
   /** Per-unit token estimates aligned by index; falls back to 512/unit. */
   unitTokenCounts?: number[];
 }

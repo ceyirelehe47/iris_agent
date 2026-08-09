@@ -34,7 +34,7 @@ test("memory contract pin schema set matches the published 0.3.0 manifest", () =
   // the two cannot silently diverge from each other.
   assert.equal(
     MEMORY_CONTRACTS_PIN.manifestSha256,
-    "baab935b69591fe801134ec56f26e105151ec48ff95e36f928178decae24d140",
+    "b55b5e1c8b022063019ce0bd02c26e184749e600f9c2f0cb6c4e737559fae560",
     "manifestSha256 must equal the published iris-memory v0.3.0 artifact manifest hash",
   );
   const publishedSchemas = [
@@ -65,6 +65,8 @@ test("memory contract pin schema set matches the published 0.3.0 manifest", () =
     "graphiti-episode-source-v1.schema.json",
     "historian-publication-v3.schema.json",
     "publication-acceptance-request-v3.schema.json",
+    // iris_memory#14: the focused v2 semantic metadata surface.
+    "graphiti-episode-source-v2.schema.json",
   ];
   assert.deepEqual(
     [...MEMORY_CONTRACTS_PIN.schemas].sort(),

@@ -526,10 +526,23 @@ test("iris_agent#66: Evidence identity is independent of Session segmentation â€
     );
     assert.notEqual(parsedA.contextRange.contextLineageId, `identity-${SESSION}`);
 
-    // Rollover: a SECOND session (new runtimeSessionId) publishes against
+    // Rollover: a SECOND session (new runtimeSessionId) rolls over against
+    // the SAME lineage. v27: the durable cursor is lineage-scoped, so
+    // Session B does NOT re-publish the units Session A already processed â€”
+    // triggering B with no new units must produce NO new publication.
+    const SESSION_B = "iris-runtime-2026-08-01-2";
+    await managerA.triggerIncremental(SESSION_B);
+    await managerA.pumpOnce();
+    assert.equal(
+      store.countPublications(),
+      1,
+      "session B must not re-publish session A's already-processed units (lineage-scoped cursor)",
+    );
+
+    // New units arrive after the rollover: Session B publishes them against
     // the SAME lineage â€” the envelope's Evidence identity (lineage id) is
     // identical, never re-synthesized from the new session id.
-    const SESSION_B = "iris-runtime-2026-08-01-2";
+    mutable.push(u("u-5", "c-2", "gamma"), c("c-3", "u-5"), assistantText("a-2", "c-3", "delta"));
     await managerA.triggerIncremental(SESSION_B);
     await managerA.pumpOnce();
     const envB = store
@@ -538,7 +551,7 @@ test("iris_agent#66: Evidence identity is independent of Session segmentation â€
         "SELECT payload_json FROM publication_outbox WHERE runtime_session_id = ? ORDER BY outbox_sequence DESC LIMIT 1",
       )
       .get(SESSION_B) as { payload_json: string | null } | undefined;
-    assert.ok(envB?.payload_json, "session B published after rollover");
+    assert.ok(envB?.payload_json, "session B published new units after rollover");
     const parsedB = JSON.parse(envB.payload_json) as {
       contextRange: { contextLineageId: string };
     };

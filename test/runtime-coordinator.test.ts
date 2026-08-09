@@ -205,7 +205,7 @@ test("coordinator forwards native tool_call and tool_result events", async () =>
 
 test("second prompt rebinds companion and context to the current input", async () => {
   // Review blocker #1: after A settled, prompting B must pair B's companion
-  // and B's ContextSourceSnapshot — never A's. The canonical system prompt — TODO: R2 v27 migration
+  // and B's InvocationSourceBinding — never A's. The canonical system prompt
   // embeds the inputId, and the session companion metadata carries it.
   const { coordinator, currentInvocation } = await buildCoordinator();
   const inputA = sampleAgentInput();

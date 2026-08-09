@@ -17,8 +17,8 @@
     "fork": {
       "repository": "blueforst/pi",
       "baselineCommit": "ab5f8d88ee1d400c0c8fb5c50ac10b2f4a4851d1",
-      "seamCommit": "44dc7a115a4264b472b907a00fb744b888bfb341",
-      "seamTree": "1c88d49746df3f3c0ac6f6df2fd8da890210b36f",
+      "seamCommit": "edd724be790ec3a73b3a85bb051882a45acc5c72",
+      "seamTree": "b0a87becb5add1f52c571e168918933b8cffe531",
       "acceptedRuntimeRepository": "blueforst/pi",
       "acceptedRuntimeCommit": "66a3ea14616a438f47d3121979c0581c22ea64bb",
       "acceptedRuntimeTree": "a6bdb67ab97a087e3e0285746462545780ea19b3",
@@ -37,7 +37,7 @@
   "memoryContracts": {
     "package": "iris-memory-contracts",
     "version": "0.3.0",
-    "manifestSha256": "baab935b69591fe801134ec56f26e105151ec48ff95e36f928178decae24d140",
+    "manifestSha256": "b55b5e1c8b022063019ce0bd02c26e184749e600f9c2f0cb6c4e737559fae560",
     "owner": "blueforst/iris_memory"
   },
   "graphitiNeo4j": {

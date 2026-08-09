@@ -40,7 +40,7 @@ test("cross-repo: agent reads the manifest from the REAL artifact", () => {
   assert.ok(Array.isArray(manifest["schemas"]));
   assert.ok(Array.isArray(manifest["fixtures"]));
   const schemas = manifest["schemas"] as string[];
-  assert.equal(schemas.length, 26);
+  assert.equal(schemas.length, 27);
 });
 
 test("cross-repo: pinned manifestSha256 equals the REAL artifact manifest hash", () => {
@@ -167,7 +167,7 @@ test("cross-repo: agent does not depend on the Memory Python implementation", ()
   // no Python import anywhere in the agent repo.
   const pin = readContractPin();
   assert.equal(typeof pin.schemaSet, "object");
-  assert.equal(pin.schemaSet.length, 26);
+  assert.equal(pin.schemaSet.length, 27);
 });
 
 test("cross-repo: committed artifact carries provenance and matches its pin", () => {

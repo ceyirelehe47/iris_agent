@@ -4,7 +4,7 @@
   "major": 0,
   "publishStatus": "artifact_ready_pending_release",
   "consumptionRule": "iris_agent must consume this exact major.minor version and must not copy or hand-write memory DTOs.",
-  "manifestSha256": "baab935b69591fe801134ec56f26e105151ec48ff95e36f928178decae24d140",
+  "manifestSha256": "b55b5e1c8b022063019ce0bd02c26e184749e600f9c2f0cb6c4e737559fae560",
   "schemas": [
     "acceptance-receipt-v1.schema.json",
     "acceptance-receipt-v3.schema.json",
@@ -17,6 +17,7 @@
     "expansion-request-v1.schema.json",
     "expansion-response-v1.schema.json",
     "graphiti-episode-source-v1.schema.json",
+    "graphiti-episode-source-v2.schema.json",
     "health-response-v1.schema.json",
     "historian-publication-v1.schema.json",
     "historian-publication-v2.schema.json",
