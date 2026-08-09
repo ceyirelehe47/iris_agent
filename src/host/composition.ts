@@ -14,7 +14,8 @@ import {
 import { createIrisHarness, type InvocationBinding } from "../runtime/harness-factory.js";
 import { PiRuntimeAdapter } from "../runtime/pi-runtime-adapter.js";
 import { ActiveRuntimeRegistry, activeRuntimeHandle } from "../runtime/active-runtime-registry.js";
-import { RuntimeCoordinator } from "../runtime/runtime-coordinator.js";
+import { RuntimeCoordinator, type ModelOverridePort } from "../runtime/runtime-coordinator.js";
+import type { Model } from "@earendil-works/pi-ai";
 import { RuntimeEpochStore } from "../runtime/epoch-manager.js";
 import type { RuntimeSessionEpoch } from "../contracts/runtime.js";
 import { initializeDataRoot, resolveDataRootPaths } from "./data-root.js";
@@ -137,8 +138,24 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     });
     const registry = new ActiveRuntimeRegistry();
     registry.install(activeRuntimeHandle(epoch, adapter, currentInvocation));
+
+    // iris_agent#89: production model override port — lets the Recovery
+    // Supervisor resolve and apply fallback models through the real
+    // PiRuntimeAdapter (harness.setModel()), not a test-injected dispatcher.
+    const modelOverride: ModelOverridePort = {
+      resolveModel(modelId: string) {
+        // Search across all providers for a model with this id.
+        const allModels = models.getModels();
+        return allModels.find((m) => m.id === modelId) as Model<string> | undefined;
+      },
+      async applyModelOverride(model) {
+        await adapter.setModel(model as Model<string>);
+      },
+    };
+
     const coordinator = new RuntimeCoordinator({
       activeRuntime: registry,
+      modelOverride,
       prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
         prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
     });
