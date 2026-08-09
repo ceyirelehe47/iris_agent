@@ -49,6 +49,12 @@ export interface RecoverySignal {
   detail?: string | undefined;
   /** The model that was active when the signal occurred (for cooldown). */
   model?: string | undefined;
+  /**
+   * Native Retry-After hint (iris_agent#89): when the native failure carries
+   * one (e.g. a provider 429 with a retry_after directive), the supervisor
+   * uses this delay instead of the default exponential backoff.
+   */
+  retryAfterMs?: number | undefined;
 }
 
 /**
@@ -183,6 +189,24 @@ export function sameModelBackoffMs(attempt: number): number {
   return 2000 * 2 ** attempt;
 }
 
+/**
+ * Parse a native Retry-After hint embedded in a failure code/message, e.g.
+ * `"429 rate limit retry_after:1500"` or `"retry_after=2000"`. Returns the
+ * delay in milliseconds, or undefined when no hint is present.
+ */
+export function extractRetryAfterMs(
+  code: string | undefined,
+  message: string | undefined,
+): number | undefined {
+  const text = `${code ?? ""} ${message ?? ""}`;
+  const match = /retry_after[=:]\s*(\d+)/i.exec(text);
+  if (match === null) {
+    return undefined;
+  }
+  const ms = Number(match[1]);
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
 export class RecoverySupervisor {
   private readonly runtime: AgentRuntimePort;
   private readonly config: FallbackConfig;
@@ -277,17 +301,37 @@ export class RecoverySupervisor {
       options?.onStateChange?.(snapshot);
     };
 
+    // iris_agent#89 Fix 1: production dispatch must honor the selected
+    // fallback model. Prefer promptWithModel when the runtime supports model
+    // override; fall back to plain prompt() for backward compatibility.
     const dispatch =
       options?.dispatch ??
-      ((inputArg: AgentInput): AsyncIterable<AgentRuntimeEvent> => this.runtime.prompt(inputArg));
+      ((inputArg: AgentInput, model: string | null): AsyncIterable<AgentRuntimeEvent> =>
+        this.runtime.promptWithModel !== undefined
+          ? this.runtime.promptWithModel(inputArg, model)
+          : this.runtime.prompt(inputArg));
+
+    // iris_agent#90 Fix 2: the overall budget is anchored to the DURABLE
+    // creation time — a restart cannot silently reset the recovery budget by
+    // re-anchoring to a fresh wall clock.
+    const budgetDeadline = new Date(this.state.createdAt).getTime() + this.config.overallBudgetMs;
 
     try {
       let fallbackAttempts = 0;
-      let reservedRetries = 0;
 
       for (;;) {
-        // 8. Overall recovery budget check.
-        if (now() - startedAt > this.config.overallBudgetMs) {
+        // iris_agent#90 Fix 1: fail closed before ANY dispatch — a logical
+        // execution restored in the exhausted state must not dispatch again.
+        if (this.state.exhausted) {
+          throw new RecoveryExhaustedError(
+            logicalExecutionId,
+            "already_exhausted",
+            "logical execution loaded in exhausted state — zero dispatch",
+          );
+        }
+
+        // 8. Overall recovery budget check (durable origin).
+        if (now() > budgetDeadline) {
           const exhausted = { ...this.state, exhausted: true };
           persist(exhausted);
           yield {
@@ -308,6 +352,10 @@ export class RecoverySupervisor {
         let nativeFailedCode: string | undefined;
         let nativeFailedMessage: string | undefined;
         let stallDetected: "no_progress" | "subagent" | null = null;
+        // iris_agent#89 Fix 2: the invocation id of the CURRENT dispatch,
+        // captured from the first event the native loop emits, so a watchdog
+        // stall can abort the exact active invocation before advancing.
+        let activeInvocationId: string | null = null;
 
         // --- Dispatch with watchdogs (true Promise.race against timers) ---
         const iter = dispatch(input, model, attempt)[Symbol.asyncIterator]();
@@ -334,6 +382,7 @@ export class RecoverySupervisor {
               break;
             }
             const event = result.value.value;
+            activeInvocationId = event.invocationId;
             // message_delta and tool_call both count as overall progress
             // (resetting the no-progress watchdog). A tool_call *dispatches* a
             // subagent — it does NOT count as the subagent's first progress;
@@ -374,6 +423,15 @@ export class RecoverySupervisor {
 
         // --- Watchdog abort detection ---
         if (stallDetected !== null) {
+          // iris_agent#89 Fix 2: abort the EXACT active invocation before
+          // advancing the fallback chain. When the stall fired before any
+          // native event carried an invocation id, there is no precise target
+          // — the iterator return in the finally block tears the run down.
+          if (activeInvocationId !== null) {
+            await this.runtime
+              .abort(activeInvocationId, `watchdog_${stallDetected}`)
+              .catch(() => undefined);
+          }
           yield {
             type: "recovery_escalation",
             logicalExecutionId,
@@ -386,6 +444,9 @@ export class RecoverySupervisor {
 
         // --- Classify the failure ---
         const classification = classifyNativeFailure(nativeFailedCode, nativeFailedMessage);
+        // iris_agent#89 Fix 5: surface a native Retry-After hint (if any) on
+        // the failure signal so retryable paths can honor it.
+        const retryAfterMs = extractRetryAfterMs(nativeFailedCode, nativeFailedMessage);
 
         // 6. outcome_unknown reconciliation before replay.
         if (classification === "outcome_unknown") {
@@ -400,6 +461,7 @@ export class RecoverySupervisor {
             classification,
             detail: nativeFailedMessage ?? nativeFailedCode,
             ...(model !== undefined ? { model: model ?? undefined } : {}),
+            ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
           });
           const updated: RecoveryStateSnapshot = {
             ...this.state,
@@ -433,19 +495,31 @@ export class RecoverySupervisor {
         }
 
         // 5. Reserved dispatch — bounded linear retry, does NOT consume
-        // fallback budget.
+        // fallback budget. The consumed-retry counter is durable (#90) so a
+        // restart cannot silently reset the acquisition budget.
         if (classification === "reserved_dispatch") {
-          if (reservedRetries < this.config.reservedDispatchRetries) {
-            reservedRetries += 1;
+          if (this.state.reservedRetries < this.config.reservedDispatchRetries) {
+            const updated: RecoveryStateSnapshot = {
+              ...this.state,
+              reservedRetries: this.state.reservedRetries + 1,
+            };
+            persist(updated);
             yield {
               type: "recovery_escalation",
               logicalExecutionId,
               reason: "reserved_dispatch",
               action: "reserved_dispatch_retry",
-              attempt: reservedRetries,
+              attempt: updated.reservedRetries,
             };
-            // Linear backoff (no exponential); small fixed delay.
-            await this.sleep(100);
+            // iris_agent#89 Fix 4: linear backoff 0.5s/1s/1.5s/2s/2.5s/3s
+            // (replaces the previous fixed 100ms delay). The index is clamped
+            // to the array bounds, so the fallback is unreachable in practice.
+            const reservedBackoffMs = [500, 1000, 1500, 2000, 2500, 3000];
+            const delay =
+              reservedBackoffMs[
+                Math.min(updated.reservedRetries - 1, reservedBackoffMs.length - 1)
+              ] ?? 3000;
+            await this.sleep(delay);
             continue;
           }
           // Reserved dispatch exhausted → terminal.
@@ -463,7 +537,10 @@ export class RecoverySupervisor {
 
         // Fallback classifications — skip same-model retry, advance chain.
         if (FALLBACK_CLASSIFICATIONS.has(classification)) {
-          const nextModel = this.advanceFallback();
+          // iris_agent#90 Fix 3: advanceFallback returns the updated snapshot;
+          // persist immediately so the chain position survives restart.
+          const { snapshot: advanced, nextModel } = this.advanceFallback(this.state);
+          persist(advanced);
           if (nextModel === null) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
@@ -500,10 +577,18 @@ export class RecoverySupervisor {
         }
 
         // 1. Transient retryable — same-model retry with exponential backoff.
+        //
+        // iris_agent#89 Fix 6: this loop escalates ONLY after Pi's own native
+        // retry loop has exhausted — the native loop's terminal failure signal
+        // is what reaches the supervisor here. The supervisor must observe
+        // that native retry status rather than blindly resubmitting; it never
+        // duplicates the native loop's retries.
         if (classification === "transient_retryable") {
           const attempts = this.state.sameModelAttempts;
           if (attempts < this.config.sameModelRetryBudget) {
-            const backoff = sameModelBackoffMs(attempts);
+            // iris_agent#89 Fix 5: honor a native Retry-After hint when the
+            // failure signal carries one; otherwise exponential backoff.
+            const backoff = retryAfterMs ?? sameModelBackoffMs(attempts);
             const updated: RecoveryStateSnapshot = {
               ...this.state,
               sameModelAttempts: attempts + 1,
@@ -522,8 +607,12 @@ export class RecoverySupervisor {
             continue;
           }
           // Same-model budget exhausted → advance fallback.
-          this.markModelFailed(model);
-          const nextModel = this.advanceFallback();
+          // iris_agent#90 Fix 3: markModelFailed + advanceFallback return the
+          // updated snapshot; persist immediately so the cooldown and chain
+          // position survive restart.
+          const marked = this.markModelFailed(model, this.state);
+          const { snapshot: advanced, nextModel } = this.advanceFallback(marked);
+          persist(advanced);
           if (nextModel === null) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
@@ -608,34 +697,42 @@ export class RecoverySupervisor {
     return null;
   }
 
-  /** Mark a model as failed with a cooldown. */
-  private markModelFailed(model: string | null): void {
-    if (model === null || this.state === null) {
-      return;
+  /**
+   * Mark a model as failed with a cooldown. Pure: returns the updated
+   * snapshot; the caller persists it (iris_agent#90 Fix 3).
+   */
+  private markModelFailed(
+    model: string | null,
+    snapshot: RecoveryStateSnapshot,
+  ): RecoveryStateSnapshot {
+    if (model === null) {
+      return snapshot;
     }
     const cooldownUntil = new Date(this.now() + this.config.failedModelCooldownMs).toISOString();
-    this.state = {
-      ...this.state,
-      failedModels: { ...this.state.failedModels, [model]: cooldownUntil },
+    return {
+      ...snapshot,
+      failedModels: { ...snapshot.failedModels, [model]: cooldownUntil },
     };
   }
 
   /**
-   * Advance the fallback index to the next available model. Returns the new
-   * model id, or null when the chain is exhausted.
+   * Advance the fallback index to the next available model. Pure: returns the
+   * updated snapshot plus the new model id (or null when the chain is
+   * exhausted); the caller persists it (iris_agent#90 Fix 3).
    */
-  private advanceFallback(): string | null {
-    if (this.state === null) {
-      return null;
-    }
-    const nextIdx = this.state.fallbackIndex + 1;
+  private advanceFallback(snapshot: RecoveryStateSnapshot): {
+    snapshot: RecoveryStateSnapshot;
+    nextModel: string | null;
+  } {
+    const nextIdx = snapshot.fallbackIndex + 1;
     if (nextIdx >= this.config.models.length) {
-      this.state = { ...this.state, fallbackIndex: nextIdx };
-      return null;
+      return { snapshot: { ...snapshot, fallbackIndex: nextIdx }, nextModel: null };
     }
     const nextModel = this.config.models[nextIdx];
-    this.state = { ...this.state, fallbackIndex: nextIdx };
-    return nextModel ?? null;
+    return {
+      snapshot: { ...snapshot, fallbackIndex: nextIdx },
+      nextModel: nextModel ?? null,
+    };
   }
 
   /**
@@ -657,16 +754,18 @@ export class RecoverySupervisor {
     const elapsed = now() - lastProgressAt;
     const flags = getFlags();
 
-    // Determine the active watchdog timeout. If no subagent started, or
-    // subagent already has progress, the no-progress watchdog governs. If a
-    // subagent started but has no progress yet, the shorter of the two wins.
+    // Determine the active watchdog timeout. If no subagent started, or the
+    // subagent already produced first progress, the no-progress watchdog
+    // governs. While a subagent is running WITHOUT first progress, the
+    // subagent watchdog governs INDEPENDENTLY (iris_agent#89 Fix 3): the two
+    // serve different purposes — the 30s no-progress window decides the main
+    // model fallback, the 90s subagent window catches silent subagent stalls.
+    // Taking the min would always pick 30s and make the 90s window dead code.
     let watchdogTimeout = this.config.fallbackNoProgressTimeoutMs;
     let watchdogKind: "no_progress" | "subagent" = "no_progress";
     if (flags.subagentStarted && !flags.subagentFirstProgress) {
-      watchdogTimeout = Math.min(watchdogTimeout, this.config.subagentFirstProgressMs);
-      if (this.config.subagentFirstProgressMs < this.config.fallbackNoProgressTimeoutMs) {
-        watchdogKind = "subagent";
-      }
+      watchdogTimeout = this.config.subagentFirstProgressMs;
+      watchdogKind = "subagent";
     }
     const remaining = watchdogTimeout - elapsed;
     if (remaining <= 0) {

@@ -14,6 +14,13 @@ export interface AgentRuntimePort {
   prompt(input: AgentInput): AsyncIterable<AgentRuntimeEvent>;
   abort(invocationId: string, reason?: string): Promise<void>;
   getPhase(): AgentRuntimePhase;
+  /**
+   * Optional model-override entry point (iris_agent#89): runs `prompt` but
+   * forces the runtime to use the given model id (the recovery supervisor's
+   * selected fallback model). Runtimes that cannot override the model leave
+   * this undefined — callers fall back to `prompt` for backward compatibility.
+   */
+  promptWithModel?(input: AgentInput, model: string | null): AsyncIterable<AgentRuntimeEvent>;
 }
 
 export interface HistorianPublicationOutboxPort {
