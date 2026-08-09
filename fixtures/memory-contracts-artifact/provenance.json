@@ -1,13 +1,13 @@
 {
   "artifact": "iris-memory-contracts-0.3.0",
   "producer": "blueforst/iris_memory",
-  "producerCommit": "3c64832",
-  "producerBranch": "feat/contracts-v3-graphiti-episode-sources",
+  "producerCommit": "c82ed26e58042372d1048b9612b0ce3cd4b09e7e",
+  "producerBranch": "main",
   "builtBy": "iris_memory.contracts.artifact.write_contract_artifact (deterministic, byte-reproducible)",
-  "manifestSha256": "baab935b69591fe801134ec56f26e105151ec48ff95e36f928178decae24d140",
+  "manifestSha256": "b55b5e1c8b022063019ce0bd02c26e184749e600f9c2f0cb6c4e737559fae560",
   "contractVersion": "0.3.0",
-  "schemaCount": 26,
-  "fixtureCount": 46,
+  "schemaCount": 27,
+  "fixtureCount": 48,
   "verification": "iris-agent re-computes the manifest SHA-256 from this directory's own manifest.json (canonical compact JSON, sha256), validates every listed schema/fixture, and recomputes each file's checksum. A byte-reproducible rebuild from producerCommit yields the identical artifact.",
   "note": "Stored OUTSIDE the artifact directory (the artifact is exactly its manifest surface; only manifest.json may live at the artifact root). The authoritative source of truth is the producer repository at producerCommit."
 }
