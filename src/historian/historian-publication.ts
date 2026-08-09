@@ -79,6 +79,29 @@ function unitSemanticMetadata(
   }
 }
 
+/**
+ * iris_agent#92: compute a deterministic range hash for ONE partition's units.
+ * This is separate from the batch-level rangeHash — each focused episode source
+ * carries provenance for exactly the ordered Context units in its partition.
+ */
+function computePartitionRangeHash(
+  lineageId: string,
+  fromSeq: number,
+  toSeq: number,
+  units: ReadonlyArray<{
+    contextSeq: number;
+    contextUnitId: string;
+    unitType: string;
+    payload: unknown;
+    payloadTimestamp?: string;
+  }>,
+): string {
+  const body = units.map((u) => `${u.contextSeq}:${u.contextUnitId}`).join("\n");
+  return createHash("sha256")
+    .update(`${lineageId}|${fromSeq}|${toSeq}|${body}`, "utf8")
+    .digest("hex");
+}
+
 function partitionEpisodeSources(
   payloadUnits: ReadonlyArray<{
     contextSeq: number;
@@ -142,16 +165,20 @@ function partitionEpisodeSources(
     const partFromSeq = part.units[0]?.contextSeq ?? batchFromContextSeq;
     const partToSeq = part.units[part.units.length - 1]?.contextSeq ?? batchToContextSeq;
 
-    const episodeId = `episode:${lineageId}:${partFromSeq}..${partToSeq}:${rangeHash.slice(0, 8)}:p${partitionIndex}`;
+    // iris_agent#92: per-partition provenance — each source's contextRange,
+    // rangeHash, sourceUnitIds, canonicalContent and episode identity must
+    // describe the SAME exact partition, not the enclosing batch.
+    const partRangeHash = computePartitionRangeHash(lineageId, partFromSeq, partToSeq, part.units);
+    const episodeId = `episode:${lineageId}:${partFromSeq}..${partToSeq}:${partRangeHash.slice(0, 8)}:p${partitionIndex}`;
 
     const episodeSourceBase = {
       episodeId,
       lineageId,
       contextRange: {
         contextLineageId: lineageId,
-        fromContextSeq: batchFromContextSeq,
-        toContextSeq: batchToContextSeq,
-        rangeHash,
+        fromContextSeq: partFromSeq,
+        toContextSeq: partToSeq,
+        rangeHash: partRangeHash,
       },
       sourceUnitIds: partUnitIds,
       canonicalContent: partContent,
