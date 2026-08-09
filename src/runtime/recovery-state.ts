@@ -77,6 +77,8 @@ export interface RecoveryStateSnapshot {
   outcomeUnknown: number;
   /** Reserved-dispatch retries consumed (iris_agent#90: durable across restart). */
   reservedRetries: number;
+  /** Fallback attempts consumed (iris_agent#90: durable across restart). */
+  fallbackAttempts: number;
   exhausted: boolean;
   createdAt: string;
   updatedAt: string | null;
@@ -90,6 +92,7 @@ interface RecoveryStateRow {
   failed_models: string;
   outcome_unknown: number;
   reserved_retries: number;
+  fallback_attempts: number;
   exhausted: number;
   created_at: string;
   updated_at: string | null;
@@ -109,6 +112,7 @@ function rowToSnapshot(row: RecoveryStateRow): RecoveryStateSnapshot {
     failedModels,
     outcomeUnknown: row.outcome_unknown,
     reservedRetries: row.reserved_retries,
+    fallbackAttempts: row.fallback_attempts,
     exhausted: row.exhausted === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -121,11 +125,12 @@ function snapshotToRow(snapshot: RecoveryStateSnapshot): {
   current_model: string | null;
   fallback_index: number;
   failed_models: string;
-  outcome_unknown: number;
-  reserved_retries: number;
-  exhausted: number;
-  created_at: string;
-  updated_at: string | null;
+    outcome_unknown: number;
+    reserved_retries: number;
+    fallback_attempts: number;
+    exhausted: number;
+    created_at: string;
+    updated_at: string | null;
 } {
   return {
     logical_execution_id: snapshot.logicalExecutionId,
@@ -135,6 +140,7 @@ function snapshotToRow(snapshot: RecoveryStateSnapshot): {
     failed_models: JSON.stringify(snapshot.failedModels),
     outcome_unknown: snapshot.outcomeUnknown,
     reserved_retries: snapshot.reservedRetries,
+    fallback_attempts: snapshot.fallbackAttempts,
     exhausted: snapshot.exhausted ? 1 : 0,
     created_at: snapshot.createdAt,
     updated_at: snapshot.updatedAt,
@@ -179,8 +185,8 @@ export class RecoveryStateStore {
         `INSERT INTO recovery_state (
            logical_execution_id, same_model_attempts, current_model,
            fallback_index, failed_models, outcome_unknown, reserved_retries,
-           exhausted, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           fallback_attempts, exhausted, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(logical_execution_id) DO UPDATE SET
            same_model_attempts = excluded.same_model_attempts,
            current_model = excluded.current_model,
@@ -188,6 +194,7 @@ export class RecoveryStateStore {
            failed_models = excluded.failed_models,
            outcome_unknown = excluded.outcome_unknown,
            reserved_retries = excluded.reserved_retries,
+           fallback_attempts = excluded.fallback_attempts,
            exhausted = excluded.exhausted,
            updated_at = excluded.updated_at`,
       )
@@ -199,6 +206,7 @@ export class RecoveryStateStore {
         row.failed_models,
         row.outcome_unknown,
         row.reserved_retries,
+        row.fallback_attempts,
         row.exhausted,
         row.created_at,
         row.updated_at,
@@ -227,6 +235,7 @@ export function freshRecoveryState(logicalExecutionId: string, now: string): Rec
     failedModels: {},
     outcomeUnknown: 0,
     reservedRetries: 0,
+    fallbackAttempts: 0,
     exhausted: false,
     createdAt: now,
     updatedAt: null,

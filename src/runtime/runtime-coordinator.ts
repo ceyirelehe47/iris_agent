@@ -213,6 +213,28 @@ export class RuntimeCoordinator implements AgentRuntimePort {
   }
 
   /**
+   * Model-override entry point (iris_agent#89). The active Capsule's model is
+   * injected at creation and cannot be switched at runtime, so any non-null
+   * override FAILS CLOSED instead of being silently ignored — the recovery
+   * supervisor must never believe a fallback model took effect when it did
+   * not. A null override (no fallback selected) delegates to plain prompt().
+   */
+  async *promptWithModel(
+    input: AgentInput,
+    model: string | null,
+  ): AsyncIterable<AgentRuntimeEvent> {
+    if (model !== null) {
+      throw new Error(
+        `RuntimeCoordinator.promptWithModel: model override "${model}" requested but ` +
+          `active Capsule does not support runtime model switch. ` +
+          `This is a production gap — the Capsule must be recreated with the fallback model, ` +
+          `or Pi must provide a model-override seam.`,
+      );
+    }
+    yield* this.prompt(input);
+  }
+
+  /**
    * Explicit recovery after a failed invocation (native settled never
    * observed): releases the latch so the Host may recover or replace the
    * Epoch. No-op when not in failed state.

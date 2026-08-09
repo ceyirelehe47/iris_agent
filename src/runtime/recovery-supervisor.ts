@@ -317,8 +317,6 @@ export class RecoverySupervisor {
     const budgetDeadline = new Date(this.state.createdAt).getTime() + this.config.overallBudgetMs;
 
     try {
-      let fallbackAttempts = 0;
-
       for (;;) {
         // iris_agent#90 Fix 1: fail closed before ANY dispatch — a logical
         // execution restored in the exhausted state must not dispatch again.
@@ -553,9 +551,15 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_chain_exhausted");
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
-            const exhausted = { ...this.state, exhausted: true };
+          // iris_agent#90: durable fallback-attempt counter — increment and
+          // persist so a restart cannot silently reset the fallback budget.
+          const withAttempt: RecoveryStateSnapshot = {
+            ...advanced,
+            fallbackAttempts: advanced.fallbackAttempts + 1,
+          };
+          persist(withAttempt);
+          if (withAttempt.fallbackAttempts > this.config.fallbackAttemptBudget) {
+            const exhausted = { ...withAttempt, exhausted: true };
             persist(exhausted);
             yield {
               type: "recovery_escalation",
@@ -628,9 +632,15 @@ export class RecoverySupervisor {
               "same_model_and_fallback_exhausted",
             );
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
-            const exhausted = { ...this.state, exhausted: true };
+          // iris_agent#90: durable fallback-attempt counter — increment and
+          // persist so a restart cannot silently reset the fallback budget.
+          const withAttempt: RecoveryStateSnapshot = {
+            ...advanced,
+            fallbackAttempts: advanced.fallbackAttempts + 1,
+          };
+          persist(withAttempt);
+          if (withAttempt.fallbackAttempts > this.config.fallbackAttemptBudget) {
+            const exhausted = { ...withAttempt, exhausted: true };
             persist(exhausted);
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_budget_exhausted");
           }
