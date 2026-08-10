@@ -30,6 +30,11 @@ export interface ModelOverridePort {
    * Called before dispatch when the supervisor selects a fallback model.
    */
   applyModelOverride(model: Model<string>): Promise<void>;
+  /**
+   * Return the currently active model's id, or undefined if unknown.
+   * Used to skip redundant setModel calls that can reset provider state.
+   */
+  getActiveModelId?(): string | undefined;
 }
 
 /**
@@ -349,7 +354,12 @@ export class RuntimeCoordinator implements AgentRuntimePort {
           "target is missing from the provider catalog or ambiguous across providers",
         );
       }
-      await this.modelOverride.applyModelOverride(resolved);
+      // Skip applyModelOverride when the model is already active — avoids
+      // unnecessary harness.setModel() calls that can reset provider state
+      // (mock providers, response counters, etc.) on initial dispatch.
+      if (this.modelOverride.getActiveModelId?.() !== resolved.id) {
+        await this.modelOverride.applyModelOverride(resolved);
+      }
     }
     yield* this.prompt(input);
   }

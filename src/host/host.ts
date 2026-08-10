@@ -1008,6 +1008,9 @@ export class IrisHost {
         async applyModelOverride(modelToApply) {
           await adapter.setModel(modelToApply as Model<string>);
         },
+        getActiveModelId() {
+          return model?.id;
+        },
       };
       const coordinator = new RuntimeCoordinator({
         activeRuntime: registry,
