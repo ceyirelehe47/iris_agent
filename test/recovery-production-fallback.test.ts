@@ -156,23 +156,27 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
     );
   });
 
-  it("promptWithModel with unresolvable model falls through gracefully", async () => {
-    const events: AgentRuntimeEvent[] = [];
-    for await (const event of coordinator.promptWithModel(
-      makeInput("test-003"),
-      "nonexistent-model",
-    )) {
-      events.push(event);
-    }
-
-    assert.equal(runtime.modelSetCount, 0, "no model override for unresolvable model");
-    assert.ok(
-      events.some((e) => e.type === "settled"),
-      "settled event was forwarded despite unresolvable model",
+  it("promptWithModel with unresolvable model fails closed (#101)", async () => {
+    // #101: unresolvable fallback target must NOT silently reuse the failed
+    // model. It must throw a typed error.
+    await assert.rejects(
+      async () => {
+        for await (const _event of coordinator.promptWithModel(
+          makeInput("test-003"),
+          "nonexistent-model",
+        )) {
+          // should not produce any events
+        }
+      },
+      (error: unknown) => {
+        return error instanceof Error && error.message.includes("model_not_found");
+      },
+      "should throw model_not_found for unresolvable model",
     );
+    assert.equal(runtime.modelSetCount, 0, "no model override for unresolvable model");
   });
 
-  it("coordinator without modelOverride port still works via fallback prompt", async () => {
+  it("coordinator without modelOverride port fails closed for promptWithModel (#101)", async () => {
     const runtime2 = new FakeRuntime();
     const coordinator2 = new RuntimeCoordinator({
       activeRuntime: makeFakeActiveRuntime(runtime2),
@@ -189,14 +193,19 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
       }),
     });
 
-    const events: AgentRuntimeEvent[] = [];
-    for await (const event of coordinator2.promptWithModel(makeInput("test-004"), "any-model")) {
-      events.push(event);
-    }
-
-    assert.ok(
-      events.some((e) => e.type === "settled"),
-      "settled event forwarded without modelOverride",
+    // Without modelOverride, promptWithModel must fail closed
+    await assert.rejects(
+      async () => {
+        for await (const _event of coordinator2.promptWithModel(
+          makeInput("test-004"),
+          "any-model",
+        )) {
+          // should not produce events
+        }
+      },
+      (error: unknown) => {
+        return error instanceof Error;
+      },
     );
     assert.equal(runtime2.modelSetCount, 0, "no model set without modelOverride");
   });
