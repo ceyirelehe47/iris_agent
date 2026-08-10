@@ -193,9 +193,9 @@ test("fallback model cooldown works", async () => {
   assert.ok(state.failedModels["model-a"], "model-a should be in cooldown");
 });
 
-test("30s no-progress → abort + escalation (tiny timeout)", async () => {
+test("30s no-progress → abort + fallback escalation (tiny timeout)", async () => {
   // The dispatch emits a progress event, then stalls forever (no more events).
-  // With a tiny no-progress timeout, the watchdog should fire.
+  // With a tiny no-progress timeout, the watchdog fires and advances to fallback.
   const runtime = new FakeRuntime();
   const supervisor = new RecoverySupervisor({
     runtime,
@@ -206,32 +206,40 @@ test("30s no-progress → abort + escalation (tiny timeout)", async () => {
     sleep: async () => undefined,
   });
 
-  const events: AgentRuntimeEvent[] = [];
-  await assert.rejects(
-    (async () => {
-      for await (const event of supervisor.prompt(input, {
-        dispatch: async function* (): AsyncIterable<AgentRuntimeEvent> {
-          yield { type: "turn_start", invocationId: INVOCATION_ID };
-          yield { type: "message_delta", invocationId: INVOCATION_ID, text: "partial" };
-          // Stall: keep the generator alive (but not infinitely — an infinite
-          // promise would block iter.return() in the supervisor's finally block
-          // forever). The watchdog (50ms) fires well before this settles.
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        },
-      })) {
-        events.push(event as AgentRuntimeEvent);
-      }
-    })(),
-    RecoveryExhaustedError,
-  );
+  const events: AgentRuntimeEvent[] = {/* collected below */} as unknown as AgentRuntimeEvent[];
+  const collected: AgentRuntimeEvent[] = [];
 
-  // The supervisor should have detected the no-progress stall.
-  const abortEvents = events.filter(
+  try {
+    for await (const event of supervisor.prompt(input, {
+      dispatch: async function* (_i, model): AsyncIterable<AgentRuntimeEvent> {
+        if (model === "model-b") {
+          // Second model succeeds
+          yield { type: "settled", invocationId: INVOCATION_ID, nextTurnCount: 1 };
+          return;
+        }
+        yield { type: "turn_start", invocationId: INVOCATION_ID };
+        yield { type: "message_delta", invocationId: INVOCATION_ID, text: "partial" };
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      },
+    })) {
+      collected.push(event as AgentRuntimeEvent);
+    }
+  } catch {
+    // May throw if budget exhausted — that's fine, we check events below
+  }
+
+  // The supervisor should have detected the no-progress stall and advanced to fallback.
+  const fallbackEvents = collected.filter(
     (e) =>
       (e as { type: string; action?: string }).type === "recovery_escalation" &&
-      (e as { action?: string }).action === "abort",
+      (e as { action?: string }).action === "fallback",
   );
-  assert.ok(abortEvents.length >= 1, "watchdog abort should have been emitted");
+  assert.ok(
+    fallbackEvents.length >= 1,
+    "watchdog stall should advance to fallback (not just abort)",
+  );
+
+  void events;
 });
 
 test("90s subagent stall detection (tiny timeout)", async () => {
@@ -249,36 +257,38 @@ test("90s subagent stall detection (tiny timeout)", async () => {
   });
 
   const events: AgentRuntimeEvent[] = [];
-  await assert.rejects(
-    (async () => {
-      for await (const event of supervisor.prompt(input, {
-        dispatch: async function* (): AsyncIterable<AgentRuntimeEvent> {
-          yield { type: "turn_start", invocationId: INVOCATION_ID };
-          yield {
-            type: "tool_call",
-            invocationId: INVOCATION_ID,
-            toolCallId: "tc-1",
-            toolName: "stalled_tool",
-          };
-          // Subagent started but never produces first progress → watchdog.
-          // Use a finite (but long) delay rather than an infinite promise: an
-          // infinite promise would block iter.return() in the supervisor's
-          // finally block forever. The watchdog (50ms) fires well before this.
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-        },
-      })) {
-        events.push(event as AgentRuntimeEvent);
-      }
-    })(),
-    RecoveryExhaustedError,
-  );
+  const collected: AgentRuntimeEvent[] = [];
+  try {
+    for await (const event of supervisor.prompt(input, {
+      dispatch: async function* (_i, model): AsyncIterable<AgentRuntimeEvent> {
+        if (model === "model-b") {
+          yield { type: "settled", invocationId: INVOCATION_ID, nextTurnCount: 1 };
+          return;
+        }
+        yield { type: "turn_start", invocationId: INVOCATION_ID };
+        yield {
+          type: "tool_call",
+          invocationId: INVOCATION_ID,
+          toolCallId: "tc-1",
+          toolName: "stalled_tool",
+        };
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      },
+    })) {
+      collected.push(event as AgentRuntimeEvent);
+    }
+  } catch {
+    // May throw if budget exhausted
+  }
 
-  const abortEvents = events.filter(
+  // The subagent watchdog should have fired and advanced to fallback.
+  const fallbackEvents = collected.filter(
     (e) =>
       (e as { type: string; action?: string }).type === "recovery_escalation" &&
-      (e as { action?: string }).action === "abort",
+      (e as { action?: string }).action === "fallback",
   );
-  assert.ok(abortEvents.length >= 1, "subagent stall abort should have been emitted");
+  assert.ok(fallbackEvents.length >= 1, "subagent stall should advance to fallback");
+  void events;
 });
 
 test("context overflow → no retry (terminal)", async () => {

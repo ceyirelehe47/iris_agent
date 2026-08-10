@@ -86,6 +86,23 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
   }
 
   /**
+   * iris_agent#89: Apply a model override to the underlying Pi harness.
+   * This is called by the RuntimeCoordinator's ModelOverridePort before a
+   * fallback dispatch. The harness.setModel() call is asynchronous and
+   * atomic from the perspective of the next prompt().
+   */
+  async setModel(model: import("@earendil-works/pi-ai").Model<string>): Promise<void> {
+    await this.harness.setModel(model);
+  }
+
+  /**
+   * iris_agent#89: Get the current model from the harness.
+   */
+  getModel(): import("@earendil-works/pi-ai").Model<string> {
+    return this.harness.getModel() as import("@earendil-works/pi-ai").Model<string>;
+  }
+
+  /**
    * Resolve the committed Pi input pair (UserMessage + iris_input_meta
    * companion) for the CURRENT invocation's inputId, if the pair is durably
    * present. The Host uses this to mark the ingress record session_committed

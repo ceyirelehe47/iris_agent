@@ -317,8 +317,6 @@ export class RecoverySupervisor {
     const budgetDeadline = new Date(this.state.createdAt).getTime() + this.config.overallBudgetMs;
 
     try {
-      let fallbackAttempts = 0;
-
       for (;;) {
         // iris_agent#90 Fix 1: fail closed before ANY dispatch — a logical
         // execution restored in the exhausted state must not dispatch again.
@@ -423,23 +421,76 @@ export class RecoverySupervisor {
 
         // --- Watchdog abort detection ---
         if (stallDetected !== null) {
-          // iris_agent#89 Fix 2: abort the EXACT active invocation before
-          // advancing the fallback chain. When the stall fired before any
-          // native event carried an invocation id, there is no precise target
-          // — the iterator return in the finally block tears the run down.
+          // iris_agent#89: abort the EXACT active invocation before
+          // advancing the fallback chain. The abort is real — it calls
+          // runtime.abort() with the captured invocationId.
+          //
+          // After abort, we must NOT fall through to classifyNativeFailure,
+          // because there is no native failure code/message — the stall is
+          // a no-progress watchdog event, not a provider error. The old code
+          // fell through to classifyNativeFailure(undefined, undefined) which
+          // returned "terminal", making a 30s stall become terminal exhaustion
+          // instead of exact-abort + next-fallback.
+          //
+          // The correct path is:
+          //   no valid progress
+          //   → identify exact invocation (activeInvocationId)
+          //   → abort exact invocation
+          //   → verify/reconcile abort boundary (await runtime.abort)
+          //   → advance fallback (markModelFailed + advanceFallback)
+          //   → dispatch next configured model
           if (activeInvocationId !== null) {
             await this.runtime
               .abort(activeInvocationId, `watchdog_${stallDetected}`)
               .catch(() => undefined);
           }
+          // After abort, advance the fallback chain — this is a no-progress
+          // escalation, not a native failure classification.
+          const stallModel = model;
+          const stallMarked = this.markModelFailed(stallModel, this.state);
+          const { snapshot: stallAdvanced, nextModel: stallNext } =
+            this.advanceFallback(stallMarked);
+          const stallFb = {
+            ...stallAdvanced,
+            fallbackAttempts: stallAdvanced.fallbackAttempts + 1,
+          };
+          persist(stallFb);
+          if (stallNext === null) {
+            const exhausted = { ...this.state, exhausted: true };
+            persist(exhausted);
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "transient_retryable",
+              action: "terminal",
+              detail: "watchdog_fallback_chain_exhausted",
+            };
+            throw new RecoveryExhaustedError(
+              logicalExecutionId,
+              "watchdog_fallback_chain_exhausted",
+            );
+          }
+          if (stallFb.fallbackAttempts > this.config.fallbackAttemptBudget) {
+            const exhausted = { ...this.state, exhausted: true };
+            persist(exhausted);
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "transient_retryable",
+              action: "terminal",
+              detail: "watchdog_budget_exhausted",
+            };
+            throw new RecoveryExhaustedError(logicalExecutionId, "watchdog_budget_exhausted");
+          }
           yield {
             type: "recovery_escalation",
             logicalExecutionId,
             reason: "transient_retryable",
-            action: "abort",
-            detail: stallDetected,
-            ...(model !== null ? { nextModel: model } : {}),
+            action: "fallback",
+            detail: `watchdog_${stallDetected}`,
+            nextModel: stallNext,
           };
+          continue;
         }
 
         // --- Classify the failure ---
@@ -553,8 +604,10 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_chain_exhausted");
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
+          {
+            persist({ ...this.state, fallbackAttempts: this.state.fallbackAttempts + 1 });
+          }
+          if (this.state.fallbackAttempts + 1 > this.config.fallbackAttemptBudget) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             yield {
@@ -628,8 +681,10 @@ export class RecoverySupervisor {
               "same_model_and_fallback_exhausted",
             );
           }
-          fallbackAttempts += 1;
-          if (fallbackAttempts > this.config.fallbackAttemptBudget) {
+          {
+            persist({ ...this.state, fallbackAttempts: this.state.fallbackAttempts + 1 });
+          }
+          if (this.state.fallbackAttempts + 1 > this.config.fallbackAttemptBudget) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_budget_exhausted");
