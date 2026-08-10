@@ -47,9 +47,14 @@ export function contextUnitsFromEntries(entries: SessionTreeEntry[]): ContextMes
       lineageId: "identity-stub",
       runtimeSessionId: (entry as { sessionId?: string }).sessionId ?? "stub-session",
       contextSeq: index + 1,
+      contextUnitId: entry.id,
       unitId: entry.id,
       sourceEventId: entry.id,
       unitType: unitTypeOf(entry),
+      semanticSchemaId:
+        unitTypeOf(entry) === "assistant"
+          ? "iris.semantic.context_message.assistant.v1"
+          : "iris.semantic.context_message.user.v1",
       disposition: "include",
       entryId: entry.id,
       entrySeq: index + 1,

@@ -60,6 +60,7 @@ function insertUnit(
     runtimeSessionId: string;
     contextSeq: number;
     unitId: string;
+    contextUnitId?: string;
     entrySeq?: number;
     contentHash?: string;
   },
@@ -68,10 +69,12 @@ function insertUnit(
     lineageId: LINEAGE,
     runtimeSessionId: input.runtimeSessionId,
     contextSeq: input.contextSeq,
+    contextUnitId: input.contextUnitId ?? input.unitId,
     unitId: input.unitId,
     sourceEventId: `evt-${input.contextSeq}`,
     runtimeEventId: `evt-${input.contextSeq}`,
     unitType: "input",
+    semanticSchemaId: "iris.semantic.context_message.user.v1",
     disposition: "include",
     entryId: input.entrySeq === undefined ? "no-archive-map" : `entry-${input.contextSeq}`,
     ...(input.entrySeq === undefined ? {} : { entrySeq: input.entrySeq }),
@@ -91,9 +94,9 @@ test("B12-AC1: attribution-absent units (no Pi entrySeq) are FULL batch members"
     store.createLineage(makeLineageInput(SESSION_A));
     store.bindCurrentSession(LINEAGE, SESSION_A);
     // Two units WITH entrySeq + one WITHOUT (legacy-recovered shape).
-    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 1, unitId: "u1", entrySeq: 1 });
+    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 1, contextUnitId: "u1", unitId: "u1", entrySeq: 1 });
     insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 2, unitId: "u2" });
-    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 3, unitId: "u3", entrySeq: 3 });
+    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 3, contextUnitId: "u3", unitId: "u3", entrySeq: 3 });
 
     const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
     try {
@@ -150,6 +153,7 @@ test("B12-AC2/AC3: identical batch identity across Session boundaries; rollover 
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -167,6 +171,7 @@ test("B12-AC2/AC3: identical batch identity across Session boundaries; rollover 
       insertUnit(store, {
         runtimeSessionId: SESSION_B,
         contextSeq: seq,
+        contextUnitId: `b-${seq}`,
         unitId: `b-${seq}`,
         entrySeq: seq - 3, // 1, 2 — the reset attribution
       });
@@ -192,13 +197,14 @@ test("B12-AC2/AC3: identical batch identity across Session boundaries; rollover 
     });
     assert.deepEqual(
       batchB.units.map((u) => ({
+        contextUnitId: u.contextUnitId,
         unitId: u.unitId,
         contextSeq: u.contextSeq,
         entrySeq: u.entrySeq,
       })),
       [
-        { unitId: "b-4", contextSeq: 4, entrySeq: 1 },
-        { unitId: "b-5", contextSeq: 5, entrySeq: 2 },
+        { contextUnitId: "b-4", unitId: "b-4", contextSeq: 4, entrySeq: 1 },
+        { contextUnitId: "b-5", unitId: "b-5", contextSeq: 5, entrySeq: 2 },
       ],
       "membership/order by contextSeq only; B's reset entrySeq is attribution",
     );
@@ -248,6 +254,7 @@ test("B12-AC84: process Session A then rollover — Session B must NOT re-claim 
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -282,6 +289,7 @@ test("B12-AC84: process Session A then rollover — Session B must NOT re-claim 
         insertUnit(store, {
           runtimeSessionId: SESSION_B,
           contextSeq: seq,
+          contextUnitId: `b-${seq}`,
           unitId: `b-${seq}`,
           entrySeq: seq - 3,
         });
@@ -349,6 +357,7 @@ test("B12-AC4: legacy session_state (no context cursor) starts from contextSeq 1
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `u-${seq}`,
         unitId: `u-${seq}`,
         entrySeq: seq,
       });
@@ -398,6 +407,7 @@ test("B12-AC5: a frozen batch is replayable — identical window ⇒ identical b
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `u-${seq}`,
         unitId: `u-${seq}`,
         entrySeq: seq,
       });
@@ -447,6 +457,7 @@ test("B12-AC94-1: Session A commit → process restart → Session B claims only
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -483,6 +494,7 @@ test("B12-AC94-1: Session A commit → process restart → Session B claims only
         insertUnit(reopenedStore, {
           runtimeSessionId: SESSION_B,
           contextSeq: seq,
+          contextUnitId: `b-${seq}`,
           unitId: `b-${seq}`,
           entrySeq: seq - 3,
         });
@@ -543,6 +555,7 @@ test("B12-AC94-2: B frozen claim → crash/restart → recovery does not rewind 
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -571,6 +584,7 @@ test("B12-AC94-2: B frozen claim → crash/restart → recovery does not rewind 
       insertUnit(store, {
         runtimeSessionId: SESSION_B,
         contextSeq: seq,
+        contextUnitId: `b-${seq}`,
         unitId: `b-${seq}`,
         entrySeq: seq - 3,
       });
@@ -628,6 +642,7 @@ test("B12-AC94-3: B commit → immediate restart → no duplicate work (iris_age
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -647,6 +662,7 @@ test("B12-AC94-3: B commit → immediate restart → no duplicate work (iris_age
       insertUnit(store, {
         runtimeSessionId: SESSION_B,
         contextSeq: seq,
+        contextUnitId: `b-${seq}`,
         unitId: `b-${seq}`,
         entrySeq: seq - 3,
       });
@@ -706,6 +722,7 @@ test("B12-AC94-4: legacy cursor migration → reopen → no rewind (iris_agent#9
       insertUnit(store, {
         runtimeSessionId: SESSION_A,
         contextSeq: seq,
+        contextUnitId: `a-${seq}`,
         unitId: `a-${seq}`,
         entrySeq: seq,
       });
@@ -754,6 +771,7 @@ test("B12-AC94-4: legacy cursor migration → reopen → no rewind (iris_agent#9
         insertUnit(store, {
           runtimeSessionId: SESSION_B,
           contextSeq: seq,
+          contextUnitId: `b-${seq}`,
           unitId: `b-${seq}`,
           entrySeq: seq - 3,
         });
