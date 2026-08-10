@@ -29,6 +29,7 @@ import {
   CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
   CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
   validateGenerationV2,
+  validateGenerationV2Strict,
   computeContextGenerationHash,
   computeSemanticContentHash,
 } from "../contracts/context-v27.js";
@@ -167,6 +168,14 @@ export function buildContextGenerationV2(
   if (!validateGenerationV2(generation)) {
     throw new Error(
       "buildContextGenerationV2: generated ContextGenerationV2 failed validation (fail-closed)",
+    );
+  }
+
+  // Feature B (#104): also run the strict validator with hash recompute
+  const strictCheck = validateGenerationV2Strict(generation);
+  if (!strictCheck.valid) {
+    throw new Error(
+      `buildContextGenerationV2: strict validation failed: ${strictCheck.reason}`,
     );
   }
 
