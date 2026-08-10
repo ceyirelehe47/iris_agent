@@ -161,11 +161,11 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
     // model. It must throw a typed error.
     await assert.rejects(
       async () => {
-        for await (const _event of coordinator.promptWithModel(
+        for await (const event of coordinator.promptWithModel(
           makeInput("test-003"),
           "nonexistent-model",
         )) {
-          // should not produce any events
+          void event; // should not produce any events
         }
       },
       (error: unknown) => {
@@ -196,11 +196,11 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
     // Without modelOverride, promptWithModel must fail closed
     await assert.rejects(
       async () => {
-        for await (const _event of coordinator2.promptWithModel(
+        for await (const event of coordinator2.promptWithModel(
           makeInput("test-004"),
           "any-model",
         )) {
-          // should not produce events
+          void event; // should not produce events
         }
       },
       (error: unknown) => {

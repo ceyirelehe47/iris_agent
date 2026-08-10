@@ -382,8 +382,6 @@ export class RecoverySupervisor {
         if (this.state.pendingOutcomeUnknown !== null) {
           const outcome = await this.reconcilePendingOutcomeUnknown(
             this.state.pendingOutcomeUnknown,
-            logicalExecutionId,
-            input.inputId,
           );
           if (outcome === "settled") {
             return;
@@ -1082,8 +1080,6 @@ export class RecoverySupervisor {
    */
   private async reconcilePendingOutcomeUnknown(
     pending: PendingOutcomeUnknown,
-    _logicalExecutionId: string,
-    _inputId: string,
   ): Promise<"settled" | "retry" | "ambiguous"> {
     try {
       const result = await this.reconcile({

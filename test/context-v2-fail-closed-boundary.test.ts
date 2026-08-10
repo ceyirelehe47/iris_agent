@@ -92,17 +92,18 @@ test("B2: schemaId tag alone does NOT establish validity", () => {
   };
   const result = validateGenerationV2Strict(malformed);
   assert.ok(!result.valid, "should be rejected");
-  assert.match(result.reason!, /missing or invalid header/i);
+  assert.match(result.reason ?? "", /missing or invalid header/i);
 });
 
 test("B3: missing required header field is rejected", () => {
   const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
   // Delete the field entirely (not just set to undefined)
-  const { contextLineageId: _removed, ...headerWithoutLineage } = gen.header;
-  const malformed = { ...gen, header: headerWithoutLineage };
+  const headerCopy: Record<string, unknown> = { ...gen.header };
+  delete headerCopy["contextLineageId"];
+  const malformed = { ...gen, header: headerCopy };
   const result = validateGenerationV2Strict(malformed);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /missing required header field: contextLineageId/);
+  assert.match(result.reason ?? "", /missing required header field: contextLineageId/);
 });
 
 test("B4: contentHash mismatch is rejected", () => {
@@ -117,7 +118,7 @@ test("B4: contentHash mismatch is rejected", () => {
   const gen = makeValidGeneration([tampered]);
   const result = validateGenerationV2Strict(gen);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /contentHash mismatch/);
+  assert.match(result.reason ?? "", /contentHash mismatch/);
 });
 
 test("B5: contextGenerationHash mismatch is rejected", () => {
@@ -128,7 +129,7 @@ test("B5: contextGenerationHash mismatch is rejected", () => {
   };
   const result = validateGenerationV2Strict(tampered);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /contextGenerationHash mismatch/);
+  assert.match(result.reason ?? "", /contextGenerationHash mismatch/);
 });
 
 test("B6: unknown unit schemaId is rejected", () => {
@@ -138,7 +139,7 @@ test("B6: unknown unit schemaId is rejected", () => {
   // Override with a generation that has a valid hash for the tampered units
   const result = validateGenerationV2Strict(gen);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /unknown unit schemaId/);
+  assert.match(result.reason ?? "", /unknown unit schemaId/);
 });
 
 test("B7: forbidden layer field in unit header is rejected", () => {
@@ -149,7 +150,7 @@ test("B7: forbidden layer field in unit header is rejected", () => {
   };
   const result = validateUnitV2Strict(badUnit);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /forbidden layer\/pLevel\/sourceKind/);
+  assert.match(result.reason ?? "", /forbidden layer\/pLevel\/sourceKind/);
 });
 
 test("B8: canonical JSON key-order independence for hashing", () => {
@@ -201,7 +202,7 @@ test("B11: V2 with valid structure but wrong hash is rejected at fence", () => {
   };
   const result = v1ToF2Fence(tampered, "lineage", "gen-1", "snapshot", "2026-08-11");
   assert.equal(result.outcome, "rejected");
-  assert.match(result.reason!, /V2 tag present but validation failed/);
+  assert.match(result.reason ?? "", /V2 tag present but validation failed/);
 });
 
 test("B12: neither V1 nor V2 shape is rejected", () => {
@@ -221,5 +222,5 @@ test("B13: layerEnds[5] != units.length is rejected", () => {
   };
   const result = validateGenerationV2Strict(tampered);
   assert.ok(!result.valid);
-  assert.match(result.reason!, /layerEnds\[5\]/);
+  assert.match(result.reason ?? "", /layerEnds\[5\]/);
 });

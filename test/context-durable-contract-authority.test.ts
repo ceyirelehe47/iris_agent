@@ -80,7 +80,7 @@ test("Feature A: no handwritten duplicate durable Context unit interface in prod
   for (const f of tsFiles) {
     const content = fs.readFileSync(f, "utf8");
     // Check for a competing interface definition (not just an import or comment)
-    const match = content.match(/export\s+interface\s+ContextMessageUnitV1\b/);
+    const match = /export\s+interface\s+ContextMessageUnitV1\b/.exec(content);
     assert.ok(
       !match,
       `Duplicate ContextMessageUnitV1 interface found in ${f} — only context-v27.ts may define it`,
