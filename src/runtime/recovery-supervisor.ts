@@ -258,6 +258,8 @@ export class RecoverySupervisor {
   private readonly reconcile: (signal: RecoverySignal) => Promise<ReconcileOutcome>;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  /** #102: stored inputId from the current prompt() call for reconciliation. */
+  private currentInputId: string | undefined;
 
   /**
    * In-memory mirror of the durable snapshot. On dispatch, the supervisor loads
@@ -333,6 +335,7 @@ export class RecoverySupervisor {
     this.dispatchInFlight = true;
 
     const logicalExecutionId = options?.logicalExecutionId ?? `exec-${input.inputId}`;
+    this.currentInputId = input.inputId;
     const now = this.now;
     const startedAt = now();
 
@@ -1085,6 +1088,7 @@ export class RecoverySupervisor {
       const result = await this.reconcile({
         classification: "outcome_unknown" as RetryClassification,
         logicalExecutionId: pending.dispatchId,
+        inputId: this.currentInputId,
         detail: pending.detail,
         model: pending.model ?? undefined,
       });

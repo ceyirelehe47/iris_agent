@@ -631,10 +631,13 @@ export function v1ToF2Fence(
       const v1u = v1.units[i];
       if (
         v1u?.contextUnitId === undefined ||
+        v1u?.contextUnitId === null ||
         v1u?.sourceRef === undefined ||
-        v1u?.content === undefined
+        v1u?.sourceRef === null ||
+        v1u?.content === undefined ||
+        v1u?.content === null
       ) {
-        return { outcome: "rejected", reason: `V1 unit[${i}] has missing required fields` };
+        return { outcome: "rejected", reason: `V1 unit[${i}] has missing or null required fields` };
       }
       if (typeof v1u.content.contentHash !== "string" || v1u.content.contentHash.length === 0) {
         return { outcome: "rejected", reason: `V1 unit[${i}] has missing contentHash` };
