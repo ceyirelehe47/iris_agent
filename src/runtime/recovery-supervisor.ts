@@ -388,7 +388,24 @@ export class RecoverySupervisor {
           if (outcome === "settled") {
             return;
           }
-          // "replay" — pending cleared, fall through to the normal dispatch.
+          if (outcome === "ambiguous") {
+            // #102: still ambiguous → durably fail-closed.
+            // Zero replay across repeated restarts.
+            persist({ ...this.state, exhausted: true });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "terminal",
+              detail: "outcome_unknown_ambiguous_fail_closed",
+            };
+            throw new RecoveryExhaustedError(
+              logicalExecutionId,
+              "outcome_unknown_ambiguous_fail_closed",
+            );
+          }
+          // "retry" — clear pending, fall through to the normal dispatch.
+          persist({ ...this.state, pendingOutcomeUnknown: null });
         }
 
         // 8. Overall recovery budget check (durable origin).
@@ -457,14 +474,33 @@ export class RecoverySupervisor {
               subagentStarted = true;
             }
             if (event.type === "settled") {
+              // Consume the FULL native generator: breaking early would
+              // return() the Coordinator generator and skip its phase
+              // transition to idle (leaving the single-writer latch held
+              // forever) plus the onSettledBoundary settled-authorization.
+              // Mirror the Coordinator's own settledSeen pattern. Post-settled
+              // the generator only does local bookkeeping (phase flip, latch
+              // release), so drain it WITHOUT the watchdog race — a stall
+              // timer must never interrupt the latch release.
               nativeSettled = true;
               yield event;
+              let rest = await iter.next();
+              while (!rest.done) {
+                const restEvent = rest.value;
+                if (restEvent.type === "settled") {
+                  nativeSettled = true;
+                } else if (restEvent.type === "failed") {
+                  nativeFailedCode = restEvent.code;
+                }
+                yield restEvent;
+                rest = await iter.next();
+              }
               break;
             }
             if (event.type === "failed") {
               nativeFailedCode = event.code;
-              yield event;
               // Don't break — the iterator may produce more. But classify after.
+              yield event;
             } else {
               yield event;
             }
@@ -478,7 +514,10 @@ export class RecoverySupervisor {
 
         // --- Success: clean exit ---
         if (nativeSettled && nativeFailedCode === undefined) {
-          persist({ ...this.state, currentModel: model });
+          // #102-3: a successful (settled) dispatch resolves any pending
+          // outcome_unknown — the fence must be cleared durably so a
+          // restart after settlement never re-reconciles a stale ambiguity.
+          persist({ ...this.state, currentModel: model, pendingOutcomeUnknown: null });
           return;
         }
 
@@ -935,12 +974,19 @@ export class RecoverySupervisor {
     nextModel: string | null;
   } {
     const nextIdx = snapshot.fallbackIndex + 1;
+    // #101: increment the fallback attempt counter here so the shared
+    // consumeFallbackAttempt budget check works correctly.
+    const incremented = {
+      ...snapshot,
+      fallbackIndex: nextIdx,
+      fallbackAttempts: snapshot.fallbackAttempts + 1,
+    };
     if (nextIdx >= this.config.models.length) {
-      return { snapshot: { ...snapshot, fallbackIndex: nextIdx }, nextModel: null };
+      return { snapshot: incremented, nextModel: null };
     }
     const nextModel = this.config.models[nextIdx];
     return {
-      snapshot: { ...snapshot, fallbackIndex: nextIdx },
+      snapshot: incremented,
       nextModel: nextModel ?? null,
     };
   }
