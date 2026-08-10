@@ -80,7 +80,7 @@ function makeUnit(
     unitId: `unit-${contextSeq}`,
     sourceEventId: `event-${contextSeq}`,
     unitType: "input",
-      semanticSchemaId: "iris.semantic.context_message.user.v1",
+    semanticSchemaId: "iris.semantic.context_message.user.v1",
     disposition: "include",
     contentHash: `hash-${contextSeq}`,
     payload: {

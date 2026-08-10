@@ -52,12 +52,7 @@ export type ContextMessageUnitLifecycleState =
  * tool_call, body_event, operational are new kinds for v27.
  */
 export type RuntimeEventKind =
-  | "user"
-  | "assistant"
-  | "tool_call"
-  | "tool_result"
-  | "body_event"
-  | "operational";
+  "user" | "assistant" | "tool_call" | "tool_result" | "body_event" | "operational";
 
 /**
  * Historian disposition — controls whether a unit enters Historian evidence.
@@ -273,6 +268,10 @@ export const KIND_TO_SEMANTIC_SCHEMA_ID: Record<RuntimeEventKind, string> = {
 /**
  * Validate that a ContextGenerationV2 satisfies the v27 layerEnds constraint:
  * 0 <= e0 <= e1 <= e2 <= e3 <= e4 <= e5 == units.length
+ *
+ * This is a shallow structural check. For the full fail-closed boundary
+ * (hash verification, required field enforcement, unknown schema rejection),
+ * use validateGenerationV2Strict().
  */
 export function validateGenerationV2(generation: ContextGenerationV2): boolean {
   const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
@@ -295,6 +294,226 @@ export function validateGenerationV2(generation: ContextGenerationV2): boolean {
         u.header.source.sourceHash.length > 0,
     )
   );
+}
+
+/**
+ * Known valid schema IDs for V2 generation members.
+ * Used by the strict validator to reject unknown schemas.
+ */
+export const KNOWN_GENERATION_SCHEMA_IDS = new Set<string>([CONTEXT_GENERATION_V2_SCHEMA_ID]);
+export const KNOWN_GENERATION_HEADER_SCHEMA_IDS = new Set<string>([
+  CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID,
+]);
+export const KNOWN_UNIT_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_V2_SCHEMA_ID]);
+export const KNOWN_UNIT_HEADER_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_HEADER_V1_SCHEMA_ID]);
+export const KNOWN_SOURCE_REF_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID]);
+
+/**
+ * Strict fail-closed validation for ContextGenerationV2.
+ *
+ * Per #104 acceptance criteria:
+ * - A schemaId tag alone does NOT establish validity.
+ * - Every required nested field is checked.
+ * - contentHash is recomputed and verified.
+ * - contextGenerationHash is recomputed and verified.
+ * - Unknown schema IDs are rejected.
+ * - Header/payload separation is enforced (no identity/type/hash in payload).
+ * - Missing required fields are rejected.
+ *
+ * Returns { valid: true } or { valid: false, reason: string }.
+ */
+export function validateGenerationV2Strict(generation: unknown): {
+  valid: boolean;
+  reason?: string;
+} {
+  if (typeof generation !== "object" || generation === null) {
+    return { valid: false, reason: "generation is not an object" };
+  }
+  const gen = generation as Record<string, unknown>;
+
+  // Top-level schemaId
+  if (gen["schemaId"] !== CONTEXT_GENERATION_V2_SCHEMA_ID) {
+    return {
+      valid: false,
+      reason: `unknown or missing top-level schemaId: ${String(gen["schemaId"])}`,
+    };
+  }
+
+  // Required header
+  const header = gen["header"];
+  if (typeof header !== "object" || header === null) {
+    return { valid: false, reason: "missing or invalid header" };
+  }
+  const hdr = header as Record<string, unknown>;
+
+  // Header schemaId
+  if (hdr["schemaId"] !== CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID) {
+    return { valid: false, reason: `unknown header schemaId: ${String(hdr["schemaId"])}` };
+  }
+
+  // Required header fields
+  const requiredHeaderFields = [
+    "contextGenerationId",
+    "contextLineageId",
+    "sourceSnapshotHash",
+    "layerEnds",
+    "contextGenerationHash",
+    "createdAt",
+  ];
+  for (const field of requiredHeaderFields) {
+    if (!(field in hdr)) {
+      return { valid: false, reason: `missing required header field: ${field}` };
+    }
+  }
+
+  // Layer ends validation
+  const layerEnds = hdr["layerEnds"];
+  if (!Array.isArray(layerEnds) || layerEnds.length !== 6) {
+    return { valid: false, reason: "layerEnds must be an array of 6 numbers" };
+  }
+  const ends = layerEnds as number[];
+  for (const e of ends) {
+    if (typeof e !== "number" || !Number.isInteger(e) || e < 0) {
+      return { valid: false, reason: "layerEnds must contain non-negative integers" };
+    }
+  }
+  // Check non-decreasing (all elements are validated as integers above)
+  for (let i = 0; i < 5; i++) {
+    const curr = ends[i];
+    const next = ends[i + 1];
+    if (curr !== undefined && next !== undefined && curr > next) {
+      return { valid: false, reason: "layerEnds must be non-decreasing" };
+    }
+  }
+
+  // Required units
+  const units = gen["units"];
+  if (!Array.isArray(units)) {
+    return { valid: false, reason: "units must be an array" };
+  }
+  if (ends[5] !== units.length) {
+    return {
+      valid: false,
+      reason: `layerEnds[5] (${ends[5]}) must equal units.length (${units.length})`,
+    };
+  }
+
+  // Validate each unit
+  for (let i = 0; i < units.length; i++) {
+    const unit: unknown = units[i];
+    const unitCheck = validateUnitV2Strict(unit);
+    if (!unitCheck.valid) {
+      return { valid: false, reason: `unit[${i}]: ${unitCheck.reason}` };
+    }
+
+    // Verify contentHash by recompute
+    const unitRecord = unit as Record<string, unknown>;
+    const unitHeader = unitRecord["header"] as Record<string, unknown>;
+    const semanticContent = unitRecord["semanticContent"] as JsonValue;
+    const expectedHash = computeSemanticContentHash(semanticContent);
+    if (unitHeader["contentHash"] !== expectedHash) {
+      return {
+        valid: false,
+        reason: `unit[${i}]: contentHash mismatch (expected ${expectedHash}, got ${unitHeader["contentHash"]})`,
+      };
+    }
+  }
+
+  // Verify contextGenerationHash by recompute
+  const typedGeneration = generation as ContextGenerationV2;
+  const expectedGenHash = computeContextGenerationHash({
+    schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
+    contextLineageId: hdr["contextLineageId"] as string,
+    sourceSnapshotHash: hdr["sourceSnapshotHash"] as string,
+    units: typedGeneration.units,
+    layerEnds: ends as [number, number, number, number, number, number],
+  });
+  if (hdr["contextGenerationHash"] !== expectedGenHash) {
+    return {
+      valid: false,
+      reason: `contextGenerationHash mismatch (expected ${expectedGenHash}, got ${hdr["contextGenerationHash"]})`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Strict validation for a single ContextUnitV2.
+ * Checks schemaId, required header fields, and header/payload separation.
+ */
+export function validateUnitV2Strict(unit: unknown): { valid: boolean; reason?: string } {
+  if (typeof unit !== "object" || unit === null) {
+    return { valid: false, reason: "unit is not an object" };
+  }
+  const u = unit as Record<string, unknown>;
+
+  // schemaId
+  if (u["schemaId"] !== CONTEXT_UNIT_V2_SCHEMA_ID) {
+    return { valid: false, reason: `unknown unit schemaId: ${String(u["schemaId"])}` };
+  }
+
+  // Required header
+  const header = u["header"];
+  if (typeof header !== "object" || header === null) {
+    return { valid: false, reason: "missing or invalid unit header" };
+  }
+  const hdr = header as Record<string, unknown>;
+
+  // Header schemaId
+  if (hdr["schemaId"] !== CONTEXT_UNIT_HEADER_V1_SCHEMA_ID) {
+    return { valid: false, reason: `unknown unit header schemaId: ${String(hdr["schemaId"])}` };
+  }
+
+  // Required header fields
+  const requiredFields = ["contextUnitId", "source", "semanticSchemaId", "contentHash"];
+  for (const field of requiredFields) {
+    if (!(field in hdr)) {
+      return { valid: false, reason: `missing required header field: ${field}` };
+    }
+  }
+
+  // Validate source ref
+  const source = hdr["source"];
+  if (typeof source !== "object" || source === null) {
+    return { valid: false, reason: "missing or invalid source ref" };
+  }
+  const src = source as Record<string, unknown>;
+  if (src["schemaId"] !== CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID) {
+    return { valid: false, reason: `unknown source ref schemaId: ${String(src["schemaId"])}` };
+  }
+  const requiredSourceFields = ["sourceSchemaId", "sourceId", "sourceHash"];
+  for (const field of requiredSourceFields) {
+    if (!(field in src)) {
+      return { valid: false, reason: `missing required source field: ${field}` };
+    }
+  }
+  if (typeof src["sourceHash"] !== "string" || src["sourceHash"].length === 0) {
+    return { valid: false, reason: "source.sourceHash must be a non-empty string" };
+  }
+
+  // Validate string fields
+  if (typeof hdr["contextUnitId"] !== "string" || hdr["contextUnitId"].length === 0) {
+    return { valid: false, reason: "contextUnitId must be a non-empty string" };
+  }
+  if (typeof hdr["semanticSchemaId"] !== "string" || hdr["semanticSchemaId"].length === 0) {
+    return { valid: false, reason: "semanticSchemaId must be a non-empty string" };
+  }
+  if (typeof hdr["contentHash"] !== "string" || hdr["contentHash"].length === 0) {
+    return { valid: false, reason: "contentHash must be a non-empty string" };
+  }
+
+  // Header/payload separation: semanticContent must exist
+  if (!("semanticContent" in u)) {
+    return { valid: false, reason: "missing semanticContent" };
+  }
+
+  // Check for forbidden fields (layer/pLevel/sourceKind in header)
+  if ("layer" in hdr || "pLevel" in hdr || "sourceKind" in hdr) {
+    return { valid: false, reason: "unit header contains forbidden layer/pLevel/sourceKind field" };
+  }
+
+  return { valid: true };
 }
 
 /**
@@ -387,19 +606,41 @@ export function v1ToF2Fence(
   sourceSnapshotHash: string,
   createdAt: string,
 ): V1FenceResult {
-  // Already V2?
+  // Already V2? — validate strictly, not just by schemaId tag (#104)
   if (
     typeof value === "object" &&
     value !== null &&
     "schemaId" in value &&
     (value as Record<string, unknown>)["schemaId"] === CONTEXT_GENERATION_V2_SCHEMA_ID
   ) {
+    const check = validateGenerationV2Strict(value);
+    if (!check.valid) {
+      return {
+        outcome: "rejected",
+        reason: `V2 tag present but validation failed: ${check.reason}`,
+      };
+    }
     return { outcome: "v2" };
   }
 
   // Legacy flat V1?
   if (isLegacyFlatV1Generation(value)) {
+    // Strict V1 validation: verify each unit has required nested fields
     const v1 = value as LegacyFlatV1Generation;
+    for (let i = 0; i < v1.units.length; i++) {
+      const v1u = v1.units[i];
+      if (
+        v1u?.contextUnitId === undefined ||
+        v1u?.sourceRef === undefined ||
+        v1u?.content === undefined
+      ) {
+        return { outcome: "rejected", reason: `V1 unit[${i}] has missing required fields` };
+      }
+      if (typeof v1u.content.contentHash !== "string" || v1u.content.contentHash.length === 0) {
+        return { outcome: "rejected", reason: `V1 unit[${i}] has missing contentHash` };
+      }
+    }
+
     const units: ContextUnitV2[] = v1.units.map((v1u) => {
       const sourceHash = v1u.sourceRef.sourceHash ?? v1u.content.contentHash;
       const header: ContextUnitHeaderV1 = {
@@ -412,7 +653,7 @@ export function v1ToF2Fence(
           sourceHash,
         },
         semanticSchemaId: "iris.semantic.text_v1",
-        contentHash: v1u.content.contentHash,
+        contentHash: computeSemanticContentHash(v1u.content.body),
       };
       return {
         schemaId: CONTEXT_UNIT_V2_SCHEMA_ID,
@@ -442,6 +683,16 @@ export function v1ToF2Fence(
       },
       units,
     };
+
+    // Migration output must pass the full strict V2 validator (#104)
+    const outputCheck = validateGenerationV2Strict(migrated);
+    if (!outputCheck.valid) {
+      return {
+        outcome: "rejected",
+        reason: `migrated V2 output failed validation: ${outputCheck.reason}`,
+      };
+    }
+
     return { outcome: "migrated", migrated };
   }
 

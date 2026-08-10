@@ -147,7 +147,7 @@ function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistor
         sourceEventId: `evt-${seq}`,
         runtimeEventId: `evt-${seq}`,
         unitType: "input",
-      semanticSchemaId: "iris.semantic.context_message.user.v1",
+        semanticSchemaId: "iris.semantic.context_message.user.v1",
         disposition: "include",
         entryId: `entry-${seq}`,
         entrySeq: seq,
