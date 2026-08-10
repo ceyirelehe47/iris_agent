@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 import type { Session } from "@earendil-works/pi-agent-core";
 import {
@@ -49,7 +50,18 @@ import {
   activeRuntimeHandle,
   type ActiveRuntimeHandle,
 } from "../runtime/active-runtime-registry.js";
-import { RuntimeCoordinator } from "../runtime/runtime-coordinator.js";
+import { RuntimeCoordinator, type ModelOverridePort } from "../runtime/runtime-coordinator.js";
+import type { Model } from "@earendil-works/pi-ai";
+import {
+  RecoverySupervisor,
+  type RecoveryEscalationEvent,
+} from "../runtime/recovery-supervisor.js";
+import {
+  defaultFallbackConfig,
+  freshRecoveryState,
+  logicalExecutionIdFor,
+  RecoveryStateStore,
+} from "../runtime/recovery-state.js";
 
 export interface IrisHostOptions {
   dataRoot: string;
@@ -102,6 +114,7 @@ export interface ArchiveEntryView {
 
 export type HostRuntimeEvent =
   | AgentRuntimeEvent
+  | RecoveryEscalationEvent
   | {
       type: "rollover_completed";
       epochId: string;
@@ -133,6 +146,11 @@ export class IrisHost {
   private readonly ingress: InputAcceptanceLedger;
   private readonly registry: ActiveRuntimeRegistry;
   private readonly coordinator: RuntimeCoordinator;
+  /** iris_agent#99: owns the production dispatch path (bounded retry,
+   * fallback, watchdog, outcome_unknown reconciliation). */
+  private readonly supervisor: RecoverySupervisor;
+  /** SQLite-backed durable recovery state (one row per logical execution). */
+  private readonly recoveryStore: RecoveryStateStore;
   private readonly providerMode: "mock" | "live";
 
   private readyFlag = false;
@@ -159,6 +177,8 @@ export class IrisHost {
     ingress: InputAcceptanceLedger;
     registry: ActiveRuntimeRegistry;
     coordinator: RuntimeCoordinator;
+    supervisor: RecoverySupervisor;
+    recoveryStore: RecoveryStateStore;
     currentEpoch: RuntimeSessionEpoch;
     instanceEpoch: number;
     settledTokenBox: { value: { epochId: string; invocationId: string } | null };
@@ -172,6 +192,8 @@ export class IrisHost {
     this.settledTokenBox = options.settledTokenBox;
     this.registry = options.registry;
     this.coordinator = options.coordinator;
+    this.supervisor = options.supervisor;
+    this.recoveryStore = options.recoveryStore;
     this.currentEpoch = options.currentEpoch;
     this.instanceEpoch = options.instanceEpoch;
   }
@@ -432,28 +454,42 @@ export class IrisHost {
       let settled: (AgentRuntimeEvent & { type: "settled" }) | undefined;
       let failed = false;
       try {
-        for await (const event of this.coordinator.prompt(input)) {
+        // iris_agent#99: production dispatch routes through the
+        // RecoverySupervisor (bounded retry, fallback, watchdog,
+        // outcome_unknown reconciliation) instead of calling the Coordinator
+        // directly. The logical execution identity is stable across
+        // rollover/restart (instanceEpoch + inputId); durable recovery state
+        // is loaded BEFORE any dispatch and persisted after every transition.
+        const logicalExecutionId = logicalExecutionIdFor(instanceEpoch, inputId);
+        const initialState =
+          this.recoveryStore.load(logicalExecutionId) ??
+          freshRecoveryState(logicalExecutionId, new Date().toISOString());
+        const events = this.supervisor.prompt(input, {
+          logicalExecutionId,
+          initialState,
+          onStateChange: (snapshot) => {
+            this.recoveryStore.save(snapshot);
+          },
+        });
+        for await (const event of events) {
           this.emit(event);
-          if (event.type === "failed") {
-            // M2: no native settled. The input stays `accepted` in the ledger
-            // (never committed) and is dropped from in-flight so a later
-            // client retry (accept -> duplicate) or a restart recovery re-
-            // enters it through the normal single-writer path. The Host flips
-            // not-ready and the pump waits for operator recovery; the input is
-            // NOT auto-requeued (a poisoned input must not loop forever).
-            failed = true;
-            this.failedFlag = true;
-            this.ingress.dropInFlight(inputId, instanceEpoch);
-            this.emit({ type: "failed", invocationId: event.invocationId, code: "settle_failed" });
-          }
+          // iris_agent#99: a native `failed` event is an ATTEMPT failure —
+          // the supervisor may escalate past it (same-model retry, fallback)
+          // to a settled outcome. The invocation is failed only when the
+          // supervisor generator throws (budget exhausted / terminal).
           if (event.type === "settled") {
             settled = event;
           }
         }
       } catch (error) {
-        // A harness/encoding/provider error also fails the invocation (M2):
-        // flip not-ready, keep the input durable-accepted (never committed),
-        // keep the pump alive.
+        // M2: no native settled — a harness/encoding/provider error, or a
+        // recovery escalation that exhausted its budget
+        // (RecoveryExhaustedError). The input stays `accepted` in the ledger
+        // (never committed) and is dropped from in-flight so a later client
+        // retry (accept -> duplicate) or a restart recovery re-enters it
+        // through the normal single-writer path. The Host flips not-ready and
+        // the pump waits for operator recovery; the input is NOT auto-requeued
+        // (a poisoned input must not loop forever).
         failed = true;
         this.failedFlag = true;
         this.ingress.dropInFlight(inputId, instanceEpoch);
@@ -806,6 +842,13 @@ export class IrisHost {
       firstError ??= error;
     }
     try {
+      // iris_agent#99: recovery state is durable — flush/close the SQLite
+      // store after the pump drain so no transition is lost mid-write.
+      this.recoveryStore.close();
+    } catch (error) {
+      firstError ??= error;
+    }
+    try {
       this.epochStore.close();
     } catch (error) {
       firstError ??= error;
@@ -832,6 +875,7 @@ export class IrisHost {
 
     let epochStore: RuntimeEpochStore | undefined;
     let ingress: InputAcceptanceLedger | undefined;
+    let recoveryStore: RecoveryStateStore | undefined;
     /** review-pass-2 #4: the Session opened before Capsule construction, so a
      * failed startup can dispose it (it is not yet owned by an adapter). */
     let openedRepo: SqliteSessionRepository | undefined;
@@ -952,8 +996,22 @@ export class IrisHost {
       const settledTokenBox: { value: { epochId: string; invocationId: string } | null } = {
         value: null,
       };
+      // iris_agent#89: production model override port — lets the Recovery
+      // Supervisor resolve and apply fallback models through the real
+      // PiRuntimeAdapter (harness.setModel()), not a test-injected dispatcher.
+      // Without this port, promptWithModel fails closed on every fallback.
+      const modelOverride: ModelOverridePort = {
+        resolveModel(modelId: string) {
+          const allModels = models.getModels();
+          return allModels.find((m) => m.id === modelId) as Model<string> | undefined;
+        },
+        async applyModelOverride(modelToApply) {
+          await adapter.setModel(modelToApply as Model<string>);
+        },
+      };
       const coordinator = new RuntimeCoordinator({
         activeRuntime: registry,
+        modelOverride,
         prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
           prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
         maxQueuedInputs: config.host.input_queue_max ?? 20,
@@ -974,6 +1032,32 @@ export class IrisHost {
 
       const readyEpochStore = epochStore;
       const readyIngress = ingress;
+      // iris_agent#99: the RecoverySupervisor owns the production dispatch
+      // path — it wraps the Coordinator and enforces bounded retry, provider
+      // fallback, watchdog and outcome_unknown reconciliation with DURABLE
+      // state (recovery-state.db in the data root).
+      recoveryStore = new RecoveryStateStore(join(paths.dataRoot, "recovery-state.db"));
+      const readyRecoveryStore = recoveryStore;
+      const supervisor = new RecoverySupervisor({
+        runtime: coordinator,
+        config: defaultFallbackConfig(models.getModels().map((m) => m.id)),
+        // iris_agent#102: the Host is the reconciler for possibly-accepted
+        // dispatches — the ingress ledger is the durable proof of whether the
+        // input's effects landed. session_committed → confirmed applied
+        // (settle, never replay); accepted → not durably applied → replay is
+        // safe (Pi's tool idempotency governs re-execution); unknown identity
+        // → fail closed (ambiguous).
+        reconcileOutcomeUnknown: async (signal) => {
+          if (signal.inputId === undefined) {
+            return "ambiguous";
+          }
+          const record = readyIngress.getRecord(signal.inputId, instanceEpoch);
+          if (record === undefined) {
+            return "ambiguous";
+          }
+          return record.state === "session_committed" ? "confirmed_applied" : "replay_safe";
+        },
+      });
       return new IrisHost({
         dataRoot: options.dataRoot,
         config,
@@ -983,6 +1067,8 @@ export class IrisHost {
         ingress: readyIngress,
         registry,
         coordinator,
+        supervisor,
+        recoveryStore: readyRecoveryStore,
         currentEpoch: epoch,
         instanceEpoch,
         settledTokenBox,
@@ -1002,6 +1088,11 @@ export class IrisHost {
       }
       try {
         ingress?.close();
+      } catch (cleanupError) {
+        firstError ??= cleanupError;
+      }
+      try {
+        recoveryStore?.close();
       } catch (cleanupError) {
         firstError ??= cleanupError;
       }
