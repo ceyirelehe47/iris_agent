@@ -80,10 +80,7 @@ export type UnitDispositionFilter = "include" | "all";
 
 /** Legacy context ingest port. */
 export interface ContextIngestPort {
-  ensureUnitsUpTo(
-    runtimeSessionId: string,
-    options?: { limit?: number },
-  ): ContextMessageUnit[];
+  ensureUnitsUpTo(runtimeSessionId: string, options?: { limit?: number }): ContextMessageUnit[];
   listUnits(
     runtimeSessionId: string,
     options?: {

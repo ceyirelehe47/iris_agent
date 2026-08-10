@@ -51,9 +51,7 @@ function makeValidUnit(id: string, content: JsonValue): ContextUnitV2 {
 }
 
 function makeValidGeneration(units: ContextUnitV2[]): ContextGenerationV2 {
-  const layerEnds: [number, number, number, number, number, number] = [
-    0, 0, 0, 0, 0, units.length,
-  ];
+  const layerEnds: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, units.length];
   const hash = computeContextGenerationHash({
     schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
     contextLineageId: "test-lineage",
@@ -79,7 +77,10 @@ function makeValidGeneration(units: ContextUnitV2[]): ContextGenerationV2 {
 // --- Tests ---
 
 test("B1: valid generation passes strict validation", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello"), makeValidUnit("u2", { text: "world" })]);
+  const gen = makeValidGeneration([
+    makeValidUnit("u1", "hello"),
+    makeValidUnit("u2", { text: "world" }),
+  ]);
   const result = validateGenerationV2Strict(gen);
   assert.ok(result.valid, `should be valid: ${result.reason}`);
 });
@@ -108,7 +109,10 @@ test("B4: contentHash mismatch is rejected", () => {
   const unit = makeValidUnit("u1", "hello");
   const tampered: ContextUnitV2 = {
     ...unit,
-    header: { ...unit.header, contentHash: "0000000000000000000000000000000000000000000000000000000000000000" },
+    header: {
+      ...unit.header,
+      contentHash: "0000000000000000000000000000000000000000000000000000000000000000",
+    },
   };
   const gen = makeValidGeneration([tampered]);
   const result = validateGenerationV2Strict(gen);
@@ -210,7 +214,10 @@ test("B13: layerEnds[5] != units.length is rejected", () => {
   const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
   const tampered = {
     ...gen,
-    header: { ...gen.header, layerEnds: [0, 0, 0, 0, 0, 99] as [number, number, number, number, number, number] },
+    header: {
+      ...gen.header,
+      layerEnds: [0, 0, 0, 0, 0, 99] as [number, number, number, number, number, number],
+    },
   };
   const result = validateGenerationV2Strict(tampered);
   assert.ok(!result.valid);

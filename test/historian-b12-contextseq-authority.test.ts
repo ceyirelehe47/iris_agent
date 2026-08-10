@@ -94,9 +94,21 @@ test("B12-AC1: attribution-absent units (no Pi entrySeq) are FULL batch members"
     store.createLineage(makeLineageInput(SESSION_A));
     store.bindCurrentSession(LINEAGE, SESSION_A);
     // Two units WITH entrySeq + one WITHOUT (legacy-recovered shape).
-    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 1, contextUnitId: "u1", unitId: "u1", entrySeq: 1 });
+    insertUnit(store, {
+      runtimeSessionId: SESSION_A,
+      contextSeq: 1,
+      contextUnitId: "u1",
+      unitId: "u1",
+      entrySeq: 1,
+    });
     insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 2, unitId: "u2" });
-    insertUnit(store, { runtimeSessionId: SESSION_A, contextSeq: 3, contextUnitId: "u3", unitId: "u3", entrySeq: 3 });
+    insertUnit(store, {
+      runtimeSessionId: SESSION_A,
+      contextSeq: 3,
+      contextUnitId: "u3",
+      unitId: "u3",
+      entrySeq: 3,
+    });
 
     const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });
     try {

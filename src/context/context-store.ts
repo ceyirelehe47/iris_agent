@@ -850,15 +850,17 @@ export class ContextStore implements ContextUnitStorePort {
       ...(row.runtime_event_id !== null ? { runtimeEventId: row.runtime_event_id } : {}),
       unitType: row.unit_type as ContextMessageUnit["unitType"],
       // semanticSchemaId from the new column (migration 0005 backfills existing rows)
-      semanticSchemaId: (row as { semantic_schema_id?: string }).semantic_schema_id ?? (() => {
-        // Fallback for pre-migration rows: derive from unit_type
-        const map: Record<string, string> = {
-          input: "iris.semantic.context_message.user.v1",
-          assistant: "iris.semantic.context_message.assistant.v1",
-          tool_result: "iris.semantic.context_message.tool_result.v1",
-        };
-        return map[row.unit_type] ?? "iris.semantic.context_message.unknown.v1";
-      })(),
+      semanticSchemaId:
+        (row as { semantic_schema_id?: string }).semantic_schema_id ??
+        (() => {
+          // Fallback for pre-migration rows: derive from unit_type
+          const map: Record<string, string> = {
+            input: "iris.semantic.context_message.user.v1",
+            assistant: "iris.semantic.context_message.assistant.v1",
+            tool_result: "iris.semantic.context_message.tool_result.v1",
+          };
+          return map[row.unit_type] ?? "iris.semantic.context_message.unknown.v1";
+        })(),
       disposition: row.disposition as ContextMessageUnit["disposition"],
       ...(row.entry_id !== null ? { entryId: row.entry_id } : {}),
       ...(row.entry_seq !== null ? { entrySeq: row.entry_seq } : {}),

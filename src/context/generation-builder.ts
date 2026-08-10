@@ -174,9 +174,7 @@ export function buildContextGenerationV2(
   // Feature B (#104): also run the strict validator with hash recompute
   const strictCheck = validateGenerationV2Strict(generation);
   if (!strictCheck.valid) {
-    throw new Error(
-      `buildContextGenerationV2: strict validation failed: ${strictCheck.reason}`,
-    );
+    throw new Error(`buildContextGenerationV2: strict validation failed: ${strictCheck.reason}`);
   }
 
   return generation;

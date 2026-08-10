@@ -52,12 +52,7 @@ export type ContextMessageUnitLifecycleState =
  * tool_call, body_event, operational are new kinds for v27.
  */
 export type RuntimeEventKind =
-  | "user"
-  | "assistant"
-  | "tool_call"
-  | "tool_result"
-  | "body_event"
-  | "operational";
+  "user" | "assistant" | "tool_call" | "tool_result" | "body_event" | "operational";
 
 /**
  * Historian disposition — controls whether a unit enters Historian evidence.
@@ -305,21 +300,13 @@ export function validateGenerationV2(generation: ContextGenerationV2): boolean {
  * Known valid schema IDs for V2 generation members.
  * Used by the strict validator to reject unknown schemas.
  */
-export const KNOWN_GENERATION_SCHEMA_IDS = new Set<string>([
-  CONTEXT_GENERATION_V2_SCHEMA_ID,
-]);
+export const KNOWN_GENERATION_SCHEMA_IDS = new Set<string>([CONTEXT_GENERATION_V2_SCHEMA_ID]);
 export const KNOWN_GENERATION_HEADER_SCHEMA_IDS = new Set<string>([
   CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID,
 ]);
-export const KNOWN_UNIT_SCHEMA_IDS = new Set<string>([
-  CONTEXT_UNIT_V2_SCHEMA_ID,
-]);
-export const KNOWN_UNIT_HEADER_SCHEMA_IDS = new Set<string>([
-  CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
-]);
-export const KNOWN_SOURCE_REF_SCHEMA_IDS = new Set<string>([
-  CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
-]);
+export const KNOWN_UNIT_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_V2_SCHEMA_ID]);
+export const KNOWN_UNIT_HEADER_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_HEADER_V1_SCHEMA_ID]);
+export const KNOWN_SOURCE_REF_SCHEMA_IDS = new Set<string>([CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID]);
 
 /**
  * Strict fail-closed validation for ContextGenerationV2.
@@ -346,7 +333,10 @@ export function validateGenerationV2Strict(generation: unknown): {
 
   // Top-level schemaId
   if (gen["schemaId"] !== CONTEXT_GENERATION_V2_SCHEMA_ID) {
-    return { valid: false, reason: `unknown or missing top-level schemaId: ${String(gen["schemaId"])}` };
+    return {
+      valid: false,
+      reason: `unknown or missing top-level schemaId: ${String(gen["schemaId"])}`,
+    };
   }
 
   // Required header
@@ -402,7 +392,10 @@ export function validateGenerationV2Strict(generation: unknown): {
     return { valid: false, reason: "units must be an array" };
   }
   if (ends[5] !== units.length) {
-    return { valid: false, reason: `layerEnds[5] (${ends[5]}) must equal units.length (${units.length})` };
+    return {
+      valid: false,
+      reason: `layerEnds[5] (${ends[5]}) must equal units.length (${units.length})`,
+    };
   }
 
   // Validate each unit
@@ -622,7 +615,10 @@ export function v1ToF2Fence(
   ) {
     const check = validateGenerationV2Strict(value);
     if (!check.valid) {
-      return { outcome: "rejected", reason: `V2 tag present but validation failed: ${check.reason}` };
+      return {
+        outcome: "rejected",
+        reason: `V2 tag present but validation failed: ${check.reason}`,
+      };
     }
     return { outcome: "v2" };
   }
@@ -633,7 +629,11 @@ export function v1ToF2Fence(
     const v1 = value as LegacyFlatV1Generation;
     for (let i = 0; i < v1.units.length; i++) {
       const v1u = v1.units[i];
-      if (v1u?.contextUnitId === undefined || v1u?.sourceRef === undefined || v1u?.content === undefined) {
+      if (
+        v1u?.contextUnitId === undefined ||
+        v1u?.sourceRef === undefined ||
+        v1u?.content === undefined
+      ) {
         return { outcome: "rejected", reason: `V1 unit[${i}] has missing required fields` };
       }
       if (typeof v1u.content.contentHash !== "string" || v1u.content.contentHash.length === 0) {
@@ -687,7 +687,10 @@ export function v1ToF2Fence(
     // Migration output must pass the full strict V2 validator (#104)
     const outputCheck = validateGenerationV2Strict(migrated);
     if (!outputCheck.valid) {
-      return { outcome: "rejected", reason: `migrated V2 output failed validation: ${outputCheck.reason}` };
+      return {
+        outcome: "rejected",
+        reason: `migrated V2 output failed validation: ${outputCheck.reason}`,
+      };
     }
 
     return { outcome: "migrated", migrated };

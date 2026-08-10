@@ -37,12 +37,16 @@ test("Feature A: ContextMessageUnitV1 schemaId constant exists", () => {
 
 test("Feature A: KIND_TO_SEMANTIC_SCHEMA_ID maps all RuntimeEventKind values", () => {
   const map = KIND_TO_SEMANTIC_SCHEMA_ID as Record<string, string>;
-  const expectedKinds = ["user", "assistant", "tool_call", "tool_result", "body_event", "operational"];
+  const expectedKinds = [
+    "user",
+    "assistant",
+    "tool_call",
+    "tool_result",
+    "body_event",
+    "operational",
+  ];
   for (const kind of expectedKinds) {
-    assert.ok(
-      map[kind],
-      `KIND_TO_SEMANTIC_SCHEMA_ID must map kind "${kind}"`,
-    );
+    assert.ok(map[kind], `KIND_TO_SEMANTIC_SCHEMA_ID must map kind "${kind}"`);
     assert.ok(
       map[kind].startsWith("iris.semantic."),
       `Semantic schema ID for "${kind}" must follow the iris.semantic.* convention`,
@@ -54,7 +58,11 @@ test("Feature A: computeSemanticContentHash is canonical (key-order independent)
   // Two objects with same content but different key insertion order must hash identically
   const hash1 = computeSemanticContentHash({ a: 1, b: 2, c: 3 });
   const hash2 = computeSemanticContentHash({ c: 3, b: 2, a: 1 });
-  assert.equal(hash1, hash2, "Objects with same content but different key order must hash identically");
+  assert.equal(
+    hash1,
+    hash2,
+    "Objects with same content but different key order must hash identically",
+  );
 });
 
 test("Feature A: no handwritten duplicate durable Context unit interface in production src/", () => {
