@@ -1,65 +1,96 @@
+/**
+ * R2: ContextMessageUnit legacy interface.
+ *
+ * @deprecated Use ContextMessageUnitV1 from context-v27.ts directly.
+ * This file is kept ONLY as a thin compatibility layer for code that
+ * has not yet been migrated. The canonical durable Context unit is
+ * ContextMessageUnitV1 in context-v27.ts.
+ *
+ * All new code MUST import from context-v27.ts.
+ */
+
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { RuntimeEventDerivationRefs } from "./runtime-events.js";
-
-/** R2：不可变 ContextMessageUnit（Roadmap v13 canonical chain 的语义单元）。 */
-export type ContextUnitType = "input" | "assistant" | "tool_result";
+// Re-export the canonical types for backward compatibility
+export type { ContextMessageUnitV1 } from "./context-v27.js";
+export type {
+  RuntimeEventKind,
+  HistorianDisposition,
+  ContextMessageUnitLifecycleState,
+  JsonValue,
+  SemanticDerivationRefsV1,
+} from "./context-v27.js";
 
 /**
- * R2-P3：listUnits 的 disposition 读取过滤。
- *  - "include"（默认）：只返回 disposition="include" 的单元 —— provider 视图；
- *  - "all"：返回全部行（含 excluded / reference_only）—— R3 Historian 裁剪候选。
+ * Legacy unit type used by the existing persistence layer.
+ * Maps the old field names to the canonical ContextMessageUnitV1 semantics.
+ *
+ * Production code should migrate to use ContextMessageUnitV1 directly.
+ * This type exists to allow incremental migration without breaking the
+ * existing SQLite schema and ingest pipeline.
  */
-export type UnitDispositionFilter = "include" | "all";
-
 export interface ContextMessageUnit {
-  /** R2 (iris_agent#9)：identity-level lineage id（one per data root）。 */
-  lineageId: string;
-  /** 源 Pi Runtime Session（archive attribution；非 Context 身份/顺序）。 */
-  runtimeSessionId: string;
-  /** lineage 内全局单调（跨 Runtime Session 连续；R3 Historian 读取序）。 */
-  contextSeq: number;
+  // Canonical identity — the authoritative durable unit ID.
+  // contextUnitId is the v27 canonical name; unitId is kept as a
+  // compatibility alias for the physical DB column name.
+  contextUnitId: string;
   unitId: string;
-  /** 源 runtime event（exactly-once：一个事件最多一个单元）。 */
-  sourceEventId: string;
-  /** 稳定的 runtime event id（跨 session 不变的 attribution）。 */
+  lineageId: string;
+  contextSeq: number;
   runtimeEventId?: string;
-  unitType: ContextUnitType;
+  sourceEventId: string;
+  runtimeSessionId: string;
+
+  // Semantic type — maps to RuntimeEventKind
+  unitType: "input" | "assistant" | "tool_result";
+  // Semantic schema ID — the canonical discriminator (reused in P5 projection)
+  semanticSchemaId: string;
+
+  // Disposition (maps to HistorianDisposition)
   disposition: "include" | "reference_only" | "exclude" | "retired";
-  entryId?: string;
-  /** 窄归档映射（可选）：Pi Session-local entry 序号，非 Context 权威顺序。 */
-  entrySeq?: number;
+
+  // Content
   contentHash: string;
-  /** canonical provider-visible 序列化（非 raw 原文副本）。 */
   payload: AgentMessage;
+
+  // Pi Session archive reference
+  entryId?: string;
+  entrySeq?: number;
+  rawArchiveRef?: string;
+
+  // Companion pairing
   companionEntryId?: string;
   pairKey?: string;
-  /** companion 配对是否在 ingest 时验证通过。 */
   paired: boolean;
-  derivationRefs: RuntimeEventDerivationRefs;
-  /** R2 (iris_agent#9)：语义单元 schema 版本。 */
+
+  // Provenance
+  derivationRefs: {
+    memoryRefs: string[];
+    compartmentIds: string[];
+    sourceContextMessageUnitIds: string[];
+  };
+
+  // Schema version
   schemaVersion: string;
-  /** R2 (iris_agent#9)：窄归档定位（Pi Session raw archive），非 Context 数据副本。 */
-  rawArchiveRef?: string;
   createdAt: string;
 }
 
-/** R2：Context ingest 的窄、版本化契约（可重放、exactly-once）。 */
+/** Legacy filter type. */
+export type UnitDispositionFilter = "include" | "all";
+
+/** Legacy context ingest port. */
 export interface ContextIngestPort {
-  /**
-   * 确定性可重放投影：从 runtime-event ledger 读取已提交事件，为缺失的
-   * message_finalized 事件创建 ContextMessageUnit（含 companion 配对折叠），
-   * 返回该 session 的 provider-visible（disposition="include"）单元。跨库崩溃
-   * （事件已提交、单元未建）由下一次 ensureUnitsUpTo 自愈。
-   *
-   * R2-P3 fail-closed：若该 session 单元总数已超过硬 cap（HARD_UNITS_CAP），
-   * insertUnit 抛 ContextBoundsExceededError（typed），本方法不捕获、原样向上
-   * 传播 → seam → harness.prompt → slice 大声失败。
-   */
-  ensureUnitsUpTo(runtimeSessionId: string, options?: { limit?: number }): ContextMessageUnit[];
+  ensureUnitsUpTo(
+    runtimeSessionId: string,
+    options?: { limit?: number },
+  ): ContextMessageUnit[];
   listUnits(
     runtimeSessionId: string,
-    options?: { afterContextSeq?: number; limit?: number; disposition?: UnitDispositionFilter },
+    options?: {
+      afterContextSeq?: number;
+      limit?: number;
+      disposition?: UnitDispositionFilter;
+    },
   ): ContextMessageUnit[];
   close(): void;
 }

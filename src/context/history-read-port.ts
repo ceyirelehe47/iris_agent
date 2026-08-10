@@ -28,7 +28,10 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { ContextMessageUnit, ContextUnitType } from "../contracts/context-units.js";
+import type { ContextMessageUnit } from "../contracts/context-units.js";
+
+/** Legacy unit type — the old ContextUnitType values. */
+export type ContextUnitType = "input" | "assistant" | "tool_result";
 import { historianBatchHash, type HistorianBatchV1 } from "../contracts/historian.js";
 import type { RuntimeEventDerivationRefs } from "../contracts/runtime-events.js";
 import type { ContextLineage, ContextStore } from "./context-store.js";

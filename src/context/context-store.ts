@@ -549,17 +549,6 @@ export class ContextStore implements ContextUnitStorePort {
       verifySessionBinding?: boolean;
     },
   ): void {
-    // R2-P3：双级 cap 有界策略（append-only 不变量不变——绝不 DELETE）：
-    //  1) 硬 cap：count >= hardUnitsCap → 记录 lineage 紧急态 emergency_fail_closed
-    //     （best-effort：lineage 缺失时不掩盖 typed 错误）并抛
-    //     ContextBoundsExceededError，拒绝继续写入。错误经 ingest → seam 的
-    //     subscribe 回调（emitOwn rethrow）自然传播，使 harness.prompt /
-    //     runMinimalSlice 大声失败（fail-closed）。紧急态记录放在权威 owner
-    //     （ContextStore 同时拥有 context_units 与 context_lineages）而非 seam：
-    //     runtime-event-seam 受 R2-P3 边界约束不可修改。
-    //  2) 软 cap：count >= maxUnitsPerSession → 强制 disposition="exclude"
-    //     （行照写；provider 视图经 listUnits 默认过滤不可见；R3 Historian
-    //     以此为裁剪候选）。
     const verify = options?.verifySessionBinding !== false;
     const count = verify
       ? this.countUnits(unit.runtimeSessionId)
@@ -570,10 +559,6 @@ export class ContextStore implements ContextUnitStorePort {
         ? this.getLineage(unit.runtimeSessionId)
         : this.getLineageByLineageId(unit.lineageId);
       if (lineage !== undefined) {
-        // iris_agent#52: recovery mode passes the lineage id explicitly so a
-        // historical session's hard-cap failure records the emergency state
-        // WITHOUT session resolution (which would fail closed and MASK the
-        // ContextBoundsExceededError - review finding).
         this.setEmergencyState(
           unit.runtimeSessionId,
           "emergency_fail_closed",
@@ -584,11 +569,6 @@ export class ContextStore implements ContextUnitStorePort {
       throw error;
     }
     const disposition = count >= this.maxUnitsPerSession ? "exclude" : unit.disposition;
-    // F4 (iris_agent#9 / feature 4.3): the unit carries its identity-level
-    // lineageId explicitly — write under THAT id, never a session-derived
-    // lookup. The session binding is still validated fail-closed first so an
-    // unknown/stale/wrong-data-root session cannot write into ANY lineage,
-    // even one supplied by the caller.
     const boundLineageId = verify ? this.resolveLineageId(unit.runtimeSessionId) : unit.lineageId;
     if (verify && unit.lineageId !== boundLineageId) {
       throw new ContextLineageResolutionError(unit.runtimeSessionId);
@@ -599,13 +579,13 @@ export class ContextStore implements ContextUnitStorePort {
           context_lineage_id, context_seq, unit_id, runtime_event_id, source_event_id,
           unit_type, disposition, entry_id, entry_seq, content_hash, payload,
           companion_entry_id, pair_key, paired, derivation_refs, schema_version,
-          raw_archive_ref, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          raw_archive_ref, created_at, semantic_schema_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         boundLineageId,
         unit.contextSeq,
-        unit.unitId,
+        unit.contextUnitId,
         unit.runtimeEventId ?? null,
         unit.sourceEventId,
         unit.unitType,
@@ -621,6 +601,7 @@ export class ContextStore implements ContextUnitStorePort {
         unit.schemaVersion,
         unit.rawArchiveRef ?? null,
         unit.createdAt,
+        unit.semanticSchemaId,
       );
   }
 
@@ -863,10 +844,21 @@ export class ContextStore implements ContextUnitStorePort {
       lineageId: row.context_lineage_id,
       runtimeSessionId: row.context_lineage_id,
       contextSeq: row.context_seq,
+      contextUnitId: row.unit_id,
       unitId: row.unit_id,
       sourceEventId: row.source_event_id,
       ...(row.runtime_event_id !== null ? { runtimeEventId: row.runtime_event_id } : {}),
       unitType: row.unit_type as ContextMessageUnit["unitType"],
+      // semanticSchemaId from the new column (migration 0005 backfills existing rows)
+      semanticSchemaId: (row as { semantic_schema_id?: string }).semantic_schema_id ?? (() => {
+        // Fallback for pre-migration rows: derive from unit_type
+        const map: Record<string, string> = {
+          input: "iris.semantic.context_message.user.v1",
+          assistant: "iris.semantic.context_message.assistant.v1",
+          tool_result: "iris.semantic.context_message.tool_result.v1",
+        };
+        return map[row.unit_type] ?? "iris.semantic.context_message.unknown.v1";
+      })(),
       disposition: row.disposition as ContextMessageUnit["disposition"],
       ...(row.entry_id !== null ? { entryId: row.entry_id } : {}),
       ...(row.entry_seq !== null ? { entrySeq: row.entry_seq } : {}),
