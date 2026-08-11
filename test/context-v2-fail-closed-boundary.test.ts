@@ -44,7 +44,7 @@ function makeValidUnit(id: string, content: JsonValue): ContextUnitV2 {
       sourceId: id,
       sourceHash: contentHash,
     },
-    semanticSchemaId: "iris.semantic.context_message.user.v1",
+    semanticSchemaId: "iris.semantic.text_v1",
     contentHash,
   };
   return { schemaId: CONTEXT_UNIT_V2_SCHEMA_ID, header, semanticContent: content };

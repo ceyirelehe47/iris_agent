@@ -262,6 +262,228 @@ export const KIND_TO_SEMANTIC_SCHEMA_ID: Record<RuntimeEventKind, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Semantic schema registry (#106)
+// ---------------------------------------------------------------------------
+
+/**
+ * A semantic schema specification registered for validation dispatch.
+ * Each known semanticSchemaId has a spec that defines what semanticContent
+ * shapes are valid and what control metadata is forbidden in the payload.
+ */
+export interface SemanticSchemaSpecV1 {
+  readonly schemaId: string;
+  /** Fields that MUST NOT appear in semanticContent (control metadata). */
+  readonly forbiddenPayloadFields: readonly string[];
+  /** Optional content shape validator. Returns error string or null. */
+  readonly validateContent?: (content: unknown) => string | null;
+}
+
+/**
+ * The registry of known semantic schemas. The strict V2 validator dispatches
+ * through this map by header.semanticSchemaId. Unknown schemas fail closed.
+ *
+ * To add a new semantic schema: register it here with its forbidden fields
+ * and optional content validator. Do NOT bypass the registry.
+ */
+const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
+  "iris.semantic.context_message.user.v1": {
+    schemaId: "iris.semantic.context_message.user.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "runtimeEventId",
+      "semanticSchemaId",
+      "contentHash",
+      "lifecycleState",
+      "historianDisposition",
+      "layer",
+      "pLevel",
+      "sourceKind",
+    ],
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "user semanticContent must be an object";
+      }
+      const obj = content as Record<string, unknown>;
+      if (typeof obj["role"] !== "string" || (obj["role"] !== "user" && obj["role"] !== "custom")) {
+        return "user semanticContent.role must be 'user' or 'custom'";
+      }
+      return null;
+    },
+  },
+  "iris.semantic.context_message.assistant.v1": {
+    schemaId: "iris.semantic.context_message.assistant.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "runtimeEventId",
+      "semanticSchemaId",
+      "contentHash",
+      "lifecycleState",
+      "historianDisposition",
+      "layer",
+      "pLevel",
+      "sourceKind",
+    ],
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "assistant semanticContent must be an object";
+      }
+      const obj = content as Record<string, unknown>;
+      if (obj["role"] !== "assistant") {
+        return "assistant semanticContent.role must be 'assistant'";
+      }
+      return null;
+    },
+  },
+  "iris.semantic.context_message.tool_call.v1": {
+    schemaId: "iris.semantic.context_message.tool_call.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+  "iris.semantic.context_message.tool_result.v1": {
+    schemaId: "iris.semantic.context_message.tool_result.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+  "iris.semantic.context_message.body_event.v1": {
+    schemaId: "iris.semantic.context_message.body_event.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+  "iris.semantic.context_message.operational.v1": {
+    schemaId: "iris.semantic.context_message.operational.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+  "iris.semantic.text_v1": {
+    schemaId: "iris.semantic.text_v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+    // Migrated V1 content is a plain string — no structural requirements.
+  },
+  "iris.semantic.p5.unknown.v1": {
+    schemaId: "iris.semantic.p5.unknown.v1",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+  "iris.legacy_flat_v1.source": {
+    schemaId: "iris.legacy_flat_v1.source",
+    forbiddenPayloadFields: [
+      "contextUnitId",
+      "contextLineageId",
+      "contextSeq",
+      "semanticSchemaId",
+      "contentHash",
+      "layer",
+      "pLevel",
+    ],
+  },
+};
+
+/**
+ * Look up a semantic schema spec by semanticSchemaId.
+ * Returns undefined for unknown schemas.
+ */
+export function getSemanticSchemaSpec(semanticSchemaId: string): SemanticSchemaSpecV1 | undefined {
+  return SEMANTIC_SCHEMA_REGISTRY[semanticSchemaId];
+}
+
+/**
+ * Check if a semanticSchemaId is known/registered.
+ */
+export function isKnownSemanticSchemaId(semanticSchemaId: string): boolean {
+  return semanticSchemaId in SEMANTIC_SCHEMA_REGISTRY;
+}
+
+/**
+ * Validate semanticContent against the schema selected by semanticSchemaId.
+ * Returns an error string if invalid, null if valid.
+ *
+ * Checks:
+ * - Unknown semanticSchemaId → fail
+ * - Forbidden control metadata fields in semanticContent → fail
+ * - Content shape validation (if the schema spec defines one)
+ */
+export function validateSemanticContentForSchema(
+  semanticSchemaId: string,
+  semanticContent: unknown,
+): string | null {
+  const spec = getSemanticSchemaSpec(semanticSchemaId);
+  if (spec === undefined) {
+    return `unknown semanticSchemaId: ${semanticSchemaId}`;
+  }
+
+  // Check for forbidden control metadata fields in payload
+  if (
+    semanticContent !== null &&
+    typeof semanticContent === "object" &&
+    !Array.isArray(semanticContent)
+  ) {
+    const contentRecord = semanticContent as Record<string, unknown>;
+    for (const forbidden of spec.forbiddenPayloadFields) {
+      if (forbidden in contentRecord) {
+        return `semanticContent contains forbidden control metadata field: ${forbidden}`;
+      }
+    }
+  }
+
+  // Run content-specific validator if defined
+  if (spec.validateContent !== undefined) {
+    const contentError = spec.validateContent(semanticContent);
+    if (contentError !== null) {
+      return contentError;
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
 
@@ -511,6 +733,16 @@ export function validateUnitV2Strict(unit: unknown): { valid: boolean; reason?: 
   // Check for forbidden fields (layer/pLevel/sourceKind in header)
   if ("layer" in hdr || "pLevel" in hdr || "sourceKind" in hdr) {
     return { valid: false, reason: "unit header contains forbidden layer/pLevel/sourceKind field" };
+  }
+
+  // #106: schema-driven semanticContent validation by semanticSchemaId.
+  // Dispatch through the semantic schema registry. Unknown schema → fail closed.
+  // Forbidden control metadata in payload → fail closed.
+  const semanticSchemaId = hdr["semanticSchemaId"] as string;
+  const semanticContent = u["semanticContent"];
+  const schemaError = validateSemanticContentForSchema(semanticSchemaId, semanticContent);
+  if (schemaError !== null) {
+    return { valid: false, reason: `semantic validation failed: ${schemaError}` };
   }
 
   return { valid: true };
