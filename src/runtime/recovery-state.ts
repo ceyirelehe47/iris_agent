@@ -80,8 +80,25 @@ export function defaultFallbackConfig(models: string[]): FallbackConfig {
  * clears it while the outcome is still ambiguous.
  */
 export interface PendingOutcomeUnknown {
-  /** Stable logical dispatch identity (the native invocationId). */
+  /**
+   * Stable logical dispatch identity (the native invocationId).
+   * This is the dispatch-level id, NOT the logical execution id.
+   */
   dispatchId: string;
+  /**
+   * #107: The stable logical execution id for this pending ambiguity.
+   * This is the same id used by the RecoveryStateSnapshot and persists
+   * across restarts. On restart, reconciliation MUST use this id —
+   * never the dispatchId or a borrowed current input id.
+   */
+  logicalExecutionId: string;
+  /**
+   * #107: The input/effect idempotency identity for this pending dispatch.
+   * Carries the stable input identity needed for same-logical-execution
+   * reconciliation. On restart, this is read from the pending record,
+   * not reconstructed from the current prompt.
+   */
+  inputId: string;
   /** The model that was active for the possibly-accepted dispatch. */
   model: string | null;
   /** ISO-8601 timestamp of when the ambiguity was recorded. */
@@ -173,12 +190,18 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
       typeof (parsed as { dispatchId?: unknown }).dispatchId === "string" &&
       typeof (parsed as { occurredAt?: unknown }).occurredAt === "string"
     ) {
-      const pending = parsed as PendingOutcomeUnknown;
+      const p = parsed as Record<string, unknown>;
       return {
-        dispatchId: pending.dispatchId,
-        model: typeof pending.model === "string" ? pending.model : null,
-        occurredAt: pending.occurredAt,
-        ...(pending.detail !== undefined ? { detail: pending.detail } : {}),
+        dispatchId: p["dispatchId"] as string,
+        // #107: carry durable logical execution + input identity
+        logicalExecutionId:
+          typeof p["logicalExecutionId"] === "string"
+            ? p["logicalExecutionId"]
+            : (p["dispatchId"] as string),
+        inputId: typeof p["inputId"] === "string" ? p["inputId"] : "unknown-missing-input-id",
+        model: typeof p["model"] === "string" ? p["model"] : null,
+        occurredAt: p["occurredAt"] as string,
+        ...(p["detail"] !== undefined ? { detail: p["detail"] as string } : {}),
       };
     }
     // iris_agent#107 finding 4: structurally malformed JSON (parses but
@@ -187,15 +210,17 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
     // fail-closed pending so reconciliation runs and stays fail-closed.
     return {
       dispatchId: "unknown-malformed-pending",
+      logicalExecutionId: "unknown-malformed-pending",
+      inputId: "unknown-malformed-pending",
       model: null,
       occurredAt: new Date(0).toISOString(),
       detail: `malformed pending_outcome_unknown payload (missing/wrong fields): ${raw.slice(0, 200)}`,
     };
   } catch {
-    // Corrupt JSON must not silently drop the ambiguity fence: surface it as
-    // a pending record whose identity is unknown so reconciliation still runs.
     return {
       dispatchId: "unknown-corrupt-pending",
+      logicalExecutionId: "unknown-corrupt-pending",
+      inputId: "unknown-corrupt-pending",
       model: null,
       occurredAt: new Date(0).toISOString(),
       detail: `corrupt pending_outcome_unknown payload: ${raw.slice(0, 200)}`,
