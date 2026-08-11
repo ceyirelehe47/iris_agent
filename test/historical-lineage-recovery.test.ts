@@ -123,7 +123,8 @@ test("c1: crash -> rollover -> restart recovers Session A into the SAME lineage 
     // by existing rowToUnit semantics; attribution lives in the archive ref
     // and in the RuntimeEvent ledger row, which stays on A).
     assert.match(
-      ((reconciled.units[0]?.rawArchiveRef as { runtimeSessionId?: string } | string | undefined) instanceof Object
+      ((reconciled.units[0]?.rawArchiveRef as
+        { runtimeSessionId?: string } | string | undefined) instanceof Object
         ? (reconciled.units[0]?.rawArchiveRef as { runtimeSessionId?: string }).runtimeSessionId
         : (reconciled.units[0]?.rawArchiveRef as string | undefined)) ?? "",
       new RegExp(s.epoch.runtimeSessionId),

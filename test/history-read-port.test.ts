@@ -128,7 +128,12 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
       makeUnit({
         contextSeq: 1,
         contextUnitId: "u-1",
-        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 3, entryIds: ["entry-1"] },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 3,
+          entryIds: ["entry-1"],
+        },
       }),
       { runtimeSessionId: SESSION },
     );
@@ -136,7 +141,12 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
       makeUnit({
         contextSeq: 2,
         contextUnitId: "a-2",
-        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 8, entryIds: ["entry-2"] },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 8,
+          entryIds: ["entry-2"],
+        },
       }),
       { runtimeSessionId: SESSION },
     );
@@ -183,7 +193,10 @@ test("R3-P1 port: units with NULL entry_seq inside the prefix are skipped (MAX o
     // 无 entry_seq → 不参与，MAX 仍为 5。
     store.insertUnit(
       makeUnit({
-        contextSeq: 1, contextUnitId: "u-1", unitId: "u-1", sourceEventId: "e-1",
+        contextSeq: 1,
+        contextUnitId: "u-1",
+        unitId: "u-1",
+        sourceEventId: "e-1",
       }),
       { runtimeSessionId: SESSION },
     );
@@ -193,7 +206,12 @@ test("R3-P1 port: units with NULL entry_seq inside the prefix are skipped (MAX o
         contextUnitId: "a-2",
         unitId: "a-2",
         sourceEventId: "e-2",
-        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 5, entryIds: ["entry-2"] },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 5,
+          entryIds: ["entry-2"],
+        },
       }),
       { runtimeSessionId: SESSION },
     );
