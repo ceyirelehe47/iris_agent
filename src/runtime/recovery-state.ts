@@ -181,6 +181,16 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
         ...(pending.detail !== undefined ? { detail: pending.detail } : {}),
       };
     }
+    // iris_agent#107 finding 4: structurally malformed JSON (parses but
+    // missing required fields) must NOT return null — that would silently
+    // drop the ambiguity fence and permit normal dispatch. Return a synthetic
+    // fail-closed pending so reconciliation runs and stays fail-closed.
+    return {
+      dispatchId: "unknown-malformed-pending",
+      model: null,
+      occurredAt: new Date(0).toISOString(),
+      detail: `malformed pending_outcome_unknown payload (missing/wrong fields): ${raw.slice(0, 200)}`,
+    };
   } catch {
     // Corrupt JSON must not silently drop the ambiguity fence: surface it as
     // a pending record whose identity is unknown so reconciliation still runs.
@@ -191,7 +201,6 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
       detail: `corrupt pending_outcome_unknown payload: ${raw.slice(0, 200)}`,
     };
   }
-  return null;
 }
 
 function snapshotToRow(snapshot: RecoveryStateSnapshot): {
