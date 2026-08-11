@@ -103,6 +103,20 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
   }
 
   /**
+   * iris_agent#107: Get the current active model's id from the harness.
+   * Used by the ModelOverridePort to detect when setModel is redundant
+   * and to reflect the current model after fallback/rollover.
+   */
+  getCurrentModelId(): string | undefined {
+    try {
+      const m = this.harness.getModel() as { id?: string } | undefined;
+      return m?.id;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Resolve the committed Pi input pair (UserMessage + iris_input_meta
    * companion) for the CURRENT invocation's inputId, if the pair is durably
    * present. The Host uses this to mark the ingress record session_committed
