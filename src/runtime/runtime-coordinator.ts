@@ -357,7 +357,12 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       // Skip applyModelOverride when the model is already active — avoids
       // unnecessary harness.setModel() calls that can reset provider state
       // (mock providers, response counters, etc.) on initial dispatch.
-      if (this.modelOverride.getActiveModelId?.() !== resolved.id) {
+      // iris_agent#111: compare using QUALIFIED identity (provider/model),
+      // not just model.id — the same model id across providers must still
+      // trigger setModel.
+      const currentQualified = this.modelOverride.getActiveModelId?.();
+      const resolvedQualified = `${resolved.provider}/${resolved.id}`;
+      if (currentQualified !== resolvedQualified) {
         await this.modelOverride.applyModelOverride(resolved);
       }
     }

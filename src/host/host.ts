@@ -1068,7 +1068,7 @@ export class IrisHost {
       const readyRecoveryStore = recoveryStore;
       const supervisor = new RecoverySupervisor({
         runtime: coordinator,
-        config: defaultFallbackConfig(models.getModels().map((m) => m.id)),
+        config: defaultFallbackConfig(models.getModels().map((m) => `${m.provider}/${m.id}`)),
         // iris_agent#107: the Host reconciler must NOT use ingress
         // session_committed as proof that provider/tool/Memory/Body effects
         // were applied. Ingress only proves user input + companion entered
