@@ -662,6 +662,10 @@ export class RecoverySupervisor {
           // counter. Reconciliation only ever runs on the persisted record.
           const pending: PendingOutcomeUnknown = {
             dispatchId: activeInvocationId ?? `invocation-${input.inputId}`,
+            // #107: persist stable logical execution + input identity so
+            // restart reconciliation uses durable fields, not borrowed state.
+            logicalExecutionId: this.state.logicalExecutionId,
+            inputId: input.inputId,
             model,
             occurredAt: new Date(this.now()).toISOString(),
             ...(nativeFailedMessage !== undefined
@@ -1087,8 +1091,11 @@ export class RecoverySupervisor {
     try {
       const result = await this.reconcile({
         classification: "outcome_unknown" as RetryClassification,
-        logicalExecutionId: pending.dispatchId,
-        inputId: this.currentInputId,
+        // #107: use the DURABLE logical execution id and input id from the
+        // persisted pending record — never substitute dispatchId for
+        // logicalExecutionId, never borrow the current prompt's inputId.
+        logicalExecutionId: pending.logicalExecutionId,
+        inputId: pending.inputId,
         detail: pending.detail,
         model: pending.model ?? undefined,
       });
