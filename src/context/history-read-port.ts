@@ -28,10 +28,12 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { ContextMessageUnit } from "../contracts/context-units.js";
+import type {
+  ContextMessageUnitV1,
+  HistorianDisposition,
+  RuntimeEventKind,
+} from "../contracts/context-v27.js";
 
-/** Legacy unit type — the old ContextUnitType values. */
-export type ContextUnitType = "input" | "assistant" | "tool_result";
 import { historianBatchHash, type HistorianBatchV1 } from "../contracts/historian.js";
 import type { RuntimeEventDerivationRefs } from "../contracts/runtime-events.js";
 import type { ContextLineage, ContextStore } from "./context-store.js";
@@ -73,8 +75,8 @@ export interface ContextHistoryReadPort {
 
   /**
    * R3 (anti-echo)：读取 lineage 内 [fromContextSeq, toContextSeq] 闭区间的
-   * ContextMessageUnit 窄视图（values-only：contextSeq / disposition /
-   * derivationRefs / contentHash / runtimeEventId / unitType）。供 Historian
+   * ContextMessageUnitV1 窄视图（values-only：contextSeq / historianDisposition /
+   * derivationRefs / contentHash / runtimeEventId / kind）。供 Historian
    * 在构建 Evidence 时做 anti-echo 分类；不泄漏 context.db 句柄。
    * 越界（toContextSeq 超过当前物化边界）→ 由调用方负责（只读语义）。
    */
@@ -86,8 +88,8 @@ export interface ContextHistoryReadPort {
     contextUnitId: string;
     contextSeq: number;
     runtimeEventId: string;
-    unitType: ContextUnitType;
-    disposition: ContextMessageUnit["disposition"];
+    kind: RuntimeEventKind;
+    historianDisposition: HistorianDisposition;
     contentHash: string;
     derivationRefs: RuntimeEventDerivationRefs;
   }>;
@@ -108,8 +110,8 @@ export interface ContextHistoryReadPort {
     contextUnitId: string;
     contextSeq: number;
     runtimeEventId: string;
-    unitType: ContextUnitType;
-    disposition: ContextMessageUnit["disposition"];
+    kind: RuntimeEventKind;
+    historianDisposition: HistorianDisposition;
     contentHash: string;
     derivationRefs: RuntimeEventDerivationRefs;
     payload: AgentMessage;
@@ -176,6 +178,32 @@ export function resolveEntrySeqForWatermark(
   return max;
 }
 
+/**
+ * Feature A (#110): project canonical V1 derivation refs to the Historian's
+ * values-only legacy-shaped RuntimeEventDerivationRefs (non-optional arrays
+ * with empty defaults — the anti-echo layer never sees undefined refs).
+ */
+function toRuntimeEventDerivationRefs(
+  refs: ContextMessageUnitV1["derivationRefs"],
+): RuntimeEventDerivationRefs {
+  if (refs === undefined) {
+    return { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] };
+  }
+  return {
+    memoryRefs: [...(refs.memoryRefs ?? [])],
+    compartmentIds: [...(refs.compartmentIds ?? [])],
+    ...(refs.workSnapshotVersion !== undefined
+      ? { workSnapshotVersion: String(refs.workSnapshotVersion) }
+      : {}),
+    sourceContextMessageUnitIds: [...(refs.sourceContextMessageUnitIds ?? [])],
+  };
+}
+
+/** Feature A (#110): canonical AgentMessage-shaped semanticContent cast. */
+function payloadOf(unit: ContextMessageUnitV1): AgentMessage {
+  return unit.semanticContent as unknown as AgentMessage;
+}
+
 /** Adapter：把 ContextStore（context.db 权威 owner）适配为窄读取端口。 */
 export function createContextHistoryReadPort(store: ContextStore): ContextHistoryReadPort {
   return {
@@ -206,13 +234,13 @@ export function createContextHistoryReadPort(store: ContextStore): ContextHistor
     listUnitsForHistorian(lineageId, fromContextSeq, toContextSeq) {
       // 只读 lineage 内闭区间的单元窄视图;按 contextSeq 升序返回。
       return store.listUnitsByLineageRange(lineageId, fromContextSeq, toContextSeq).map((unit) => ({
-        contextUnitId: unit.unitId,
+        contextUnitId: unit.contextUnitId,
         contextSeq: unit.contextSeq,
-        runtimeEventId: unit.runtimeEventId ?? unit.sourceEventId,
-        unitType: unit.unitType,
-        disposition: unit.disposition,
+        runtimeEventId: unit.runtimeEventId,
+        kind: unit.kind,
+        historianDisposition: unit.historianDisposition,
         contentHash: unit.contentHash,
-        derivationRefs: unit.derivationRefs,
+        derivationRefs: toRuntimeEventDerivationRefs(unit.derivationRefs),
       }));
     },
     listUnitsWithPayload(lineageId, fromContextSeq, toContextSeq) {
@@ -220,14 +248,14 @@ export function createContextHistoryReadPort(store: ContextStore): ContextHistor
       // provider-visible 序列化，非 raw 原文副本）——只用于 publication
       // envelope 的 episode content 渲染。
       return store.listUnitsByLineageRange(lineageId, fromContextSeq, toContextSeq).map((unit) => ({
-        contextUnitId: unit.unitId,
+        contextUnitId: unit.contextUnitId,
         contextSeq: unit.contextSeq,
-        runtimeEventId: unit.runtimeEventId ?? unit.sourceEventId,
-        unitType: unit.unitType,
-        disposition: unit.disposition,
+        runtimeEventId: unit.runtimeEventId,
+        kind: unit.kind,
+        historianDisposition: unit.historianDisposition,
         contentHash: unit.contentHash,
-        derivationRefs: unit.derivationRefs,
-        payload: unit.payload,
+        derivationRefs: toRuntimeEventDerivationRefs(unit.derivationRefs),
+        payload: payloadOf(unit),
         payloadTimestamp: unit.createdAt,
       }));
     },

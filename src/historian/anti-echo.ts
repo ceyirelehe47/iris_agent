@@ -16,16 +16,19 @@
  * (ContextHistoryReadPort 暴露的值,不持有 context.db 句柄)。
  */
 
-import type { ContextUnitType } from "../context/history-read-port.js";
+import type { HistorianDisposition, RuntimeEventKind } from "../contracts/context-v27.js";
 import type { RuntimeEventDerivationRefs } from "../contracts/runtime-events.js";
 
-/** Historian 消费的单元视图(ContextHistoryReadPort 暴露的 values-only 窄视图)。 */
+/**
+ * Historian 消费的单元视图(ContextHistoryReadPort 暴露的 values-only 窄视图)。
+ * Feature A (#110): carries the canonical V1 fields — kind + historianDisposition.
+ */
 export interface HistorianUnitView {
   contextUnitId: string;
   contextSeq: number;
   runtimeEventId: string;
-  unitType: ContextUnitType;
-  disposition: "include" | "reference_only" | "exclude" | "retired";
+  kind: RuntimeEventKind;
+  historianDisposition: HistorianDisposition;
   contentHash: string;
   derivationRefs: RuntimeEventDerivationRefs;
 }
@@ -70,9 +73,9 @@ export function hasAnyDerivationRefs(refs: RuntimeEventDerivationRefs): boolean 
  * 新单元来判定;本函数只做单元级保守分类。
  */
 export function isDerivedOnlyUnit(
-  unit: Pick<HistorianUnitView, "unitType" | "derivationRefs">,
+  unit: Pick<HistorianUnitView, "kind" | "derivationRefs">,
 ): boolean {
-  if (unit.unitType === "input" || unit.unitType === "tool_result") {
+  if (unit.kind === "user" || unit.kind === "tool_result") {
     return false;
   }
   // assistant:存在任何既有引用 → 视为派生内容(anti-echo 保守面)。
@@ -85,7 +88,7 @@ export function isDerivedOnlyUnit(
  *  - 且不是 derived-only(纯回显不产生新 Evidence)。
  */
 export function isEvidenceEligibleUnit(unit: HistorianUnitView): boolean {
-  if (unit.disposition !== "include") {
+  if (unit.historianDisposition !== "include") {
     return false;
   }
   return !isDerivedOnlyUnit(unit);
@@ -96,7 +99,7 @@ export function isEvidenceEligibleUnit(unit: HistorianUnitView): boolean {
  * 返回 undefined 当单元不是 include(不进入 basis)。
  */
 export function toEvidenceBasisRef(unit: HistorianUnitView): EvidenceBasisRef | undefined {
-  if (unit.disposition !== "include" || isDerivedOnlyUnit(unit)) {
+  if (unit.historianDisposition !== "include" || isDerivedOnlyUnit(unit)) {
     return undefined;
   }
   const ref: EvidenceBasisRef = {
@@ -132,10 +135,10 @@ export function classifyEvidenceBasis(units: HistorianUnitView[]): {
   // include 且无派生引用)。
   const newObservationIds = new Set<string>();
   for (const unit of units) {
-    if (unit.disposition !== "include") {
+    if (unit.historianDisposition !== "include") {
       continue;
     }
-    if (unit.unitType === "input" || unit.unitType === "tool_result") {
+    if (unit.kind === "user" || unit.kind === "tool_result") {
       if (!hasAnyDerivationRefs(unit.derivationRefs)) {
         newObservationIds.add(unit.contextUnitId);
       }
@@ -143,11 +146,11 @@ export function classifyEvidenceBasis(units: HistorianUnitView[]): {
   }
   // 第二遍:分类。assistant 引用本批新单元 → 不判 derived-only。
   for (const unit of units) {
-    if (unit.disposition !== "include") {
+    if (unit.historianDisposition !== "include") {
       continue;
     }
     const groundedInNewObservations =
-      unit.unitType === "assistant" &&
+      unit.kind === "assistant" &&
       unit.derivationRefs.sourceContextMessageUnitIds.some((id) => newObservationIds.has(id));
     if (groundedInNewObservations) {
       // 基于本批新观察的回答:即使携带派生引用也不是纯回显,直接进入

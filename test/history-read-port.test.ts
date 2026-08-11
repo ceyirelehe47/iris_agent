@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { ContextMessageUnit } from "../src/contracts/context-units.js";
+import type { ContextMessageUnitV1, JsonValue } from "../src/contracts/context-v27.js";
 import { ContextStore } from "../src/context/context-store.js";
 import {
   createContextHistoryReadPort,
@@ -60,22 +60,20 @@ function closeStore(store: ContextStore, dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function makeUnit(overrides: Partial<ContextMessageUnit>): ContextMessageUnit {
+function makeUnit(overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>): ContextMessageUnitV1 {
   return {
-    lineageId: "identity-test",
-    runtimeSessionId: SESSION,
-    contextSeq: 0,
+    schemaId: "iris.context_message_unit.v1",
     contextUnitId: "unit-x",
-    unitId: "unit-x",
-    sourceEventId: "evt-x",
-    unitType: "input",
+    contextLineageId: "identity-test",
+    contextSeq: 0,
+    runtimeEventId: "evt-x",
+    kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
-    disposition: "include",
+    historianDisposition: "include",
     contentHash: "h",
-    payload: { role: "user", content: "x", timestamp: 0 } as AgentMessage,
-    paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-    schemaVersion: "context-unit-v1",
+    semanticContent: { role: "user", content: "x", timestamp: 0 } as unknown as JsonValue,
+    lifecycleState: "committed",
+    derivationRefs: { schemaId: "iris.semantic_derivation_refs.v1", memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     createdAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
   };
@@ -139,7 +137,7 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
     store.insertUnit(
       makeUnit({
         contextSeq: 3,
-        unitType: "assistant",
+        kind: "assistant",
         semanticSchemaId: "iris.semantic.context_message.assistant.v1",
         contextUnitId: "a-3",
         unitId: "a-3",

@@ -117,6 +117,31 @@ export interface ContextMessageUnitV1 {
 }
 
 // ---------------------------------------------------------------------------
+// Durable unit ingest/filter contracts (Feature A, #110)
+// ---------------------------------------------------------------------------
+
+/** Filter for unit listing by disposition. */
+export type UnitDispositionFilter = "include" | "all";
+
+/**
+ * Context ingest port — the narrow contract the ingest layer exposes to the
+ * runtime seam and harness. Carries canonical ContextMessageUnitV1 end to
+ * end (Feature A: the legacy Context DTO is gone; no second durable DTO).
+ */
+export interface ContextIngestPort {
+  ensureUnitsUpTo(runtimeSessionId: string, options?: { limit?: number }): ContextMessageUnitV1[];
+  listUnits(
+    runtimeSessionId: string,
+    options?: {
+      afterContextSeq?: number;
+      limit?: number;
+      disposition?: UnitDispositionFilter;
+    },
+  ): ContextMessageUnitV1[];
+  close(): void;
+}
+
+// ---------------------------------------------------------------------------
 // V2 Generation Contract (in-memory, validated, not persisted)
 // ---------------------------------------------------------------------------
 

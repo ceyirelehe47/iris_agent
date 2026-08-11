@@ -23,7 +23,7 @@ import {
   encodeInputFrames,
 } from "./companion.js";
 import { transformContextMessages } from "./context-adapter.js";
-import type { ContextIngestPort } from "../contracts/context-units.js";
+import type { ContextIngestPort } from "../contracts/context-v27.js";
 import type { ContextRenderer } from "../context/context-renderer.js";
 import type { HardSignals } from "../context/pass-taxonomy.js";
 
@@ -140,7 +140,9 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
       if (options.contextRenderer === undefined) {
         return {
           systemPrompt: systemPromptResolver(),
-          messages: units.map((unit) => unit.payload),
+          // Feature A (#110): the canonical semanticContent IS the
+          // AgentMessage-shaped payload plane.
+          messages: units.map((unit) => unit.semanticContent as unknown as AgentMessage),
         };
       }
       // R2-P1：Provider Renderer 渲染 [m0, m1, ...p5Tail]。

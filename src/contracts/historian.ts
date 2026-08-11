@@ -229,7 +229,7 @@ export interface HistorianBatchV1 {
   afterContextSeqExclusive: number;
   throughContextSeqInclusive: number;
   /** Immutable snapshot of the claimed units, ascending contextSeq order. */
-  units: Array<import("./context-units.js").ContextMessageUnit>;
+  units: Array<import("./context-v27.js").ContextMessageUnitV1>;
   /** sha256 over (lineageId, endpoints, unit contextSeq+unitId+contentHash). */
   batchHash: string;
   frozenAt: string;
@@ -241,11 +241,11 @@ export function historianBatchHash(input: {
   afterContextSeqExclusive: number;
   throughContextSeqInclusive: number;
   units: ReadonlyArray<
-    Pick<import("./context-units.js").ContextMessageUnit, "contextSeq" | "unitId" | "contentHash">
+    Pick<import("./context-v27.js").ContextMessageUnitV1, "contextSeq" | "contextUnitId" | "contentHash">
   >;
 }): string {
   const body = input.units
-    .map((unit) => `${unit.contextSeq}:${unit.unitId}:${unit.contentHash}`)
+    .map((unit) => `${unit.contextSeq}:${unit.contextUnitId}:${unit.contentHash}`)
     .join("\n");
   return createHash("sha256")
     .update(

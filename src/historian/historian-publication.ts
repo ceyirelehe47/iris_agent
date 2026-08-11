@@ -24,14 +24,14 @@ import type { ContextHistoryReadPort } from "../context/history-read-port.js";
 function renderEpisodeUnitLine(unit: {
   contextSeq: number;
   contextUnitId: string;
-  unitType: string;
+  kind: string;
   payload: unknown;
 }): string {
   const candidate = unit.payload as {
     message?: { role?: string; content?: unknown };
   };
   const message = candidate?.message;
-  const role = message?.role ?? unit.unitType;
+  const role = message?.role ?? unit.kind;
   const content = message?.content;
   let text = "";
   if (typeof content === "string") {
@@ -62,11 +62,11 @@ function renderEpisodeUnitLine(unit: {
  * compatible with the old single-episode behavior).
  */
 function unitSemanticMetadata(
-  unitType: string,
+  kind: string,
   payload: unknown,
 ): { semanticKind: string; attributionClass: string; sourceTrust: string } {
   const message = (payload as { message?: { role?: string } })?.message;
-  const role = message?.role ?? unitType;
+  const role = message?.role ?? kind;
   switch (role) {
     case "user":
       return { semanticKind: "dialogue", attributionClass: "user", sourceTrust: "observed" };
@@ -91,7 +91,7 @@ function computePartitionRangeHash(
   units: ReadonlyArray<{
     contextSeq: number;
     contextUnitId: string;
-    unitType: string;
+    kind: string;
     payload: unknown;
     payloadTimestamp?: string;
   }>,
@@ -106,7 +106,7 @@ function partitionEpisodeSources(
   payloadUnits: ReadonlyArray<{
     contextSeq: number;
     contextUnitId: string;
-    unitType: string;
+    kind: string;
     payload: unknown;
     payloadTimestamp?: string;
   }>,
@@ -124,7 +124,7 @@ function partitionEpisodeSources(
     units: Array<{
       contextSeq: number;
       contextUnitId: string;
-      unitType: string;
+      kind: string;
       payload: unknown;
       payloadTimestamp?: string;
     }>;
@@ -134,7 +134,7 @@ function partitionEpisodeSources(
   }
   const partitions: Partition[] = [];
   for (const unit of payloadUnits) {
-    const meta = unitSemanticMetadata(unit.unitType, unit.payload);
+    const meta = unitSemanticMetadata(unit.kind, unit.payload);
     const lastPartition = partitions[partitions.length - 1];
     if (
       lastPartition?.kind === meta.semanticKind &&

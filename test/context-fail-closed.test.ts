@@ -62,20 +62,27 @@ function makeUnit(
   overrides: Partial<ContextMessageUnit> = {},
 ): ContextMessageUnit {
   return {
-    lineageId: LINEAGE,
-    runtimeSessionId,
+    schemaId: "iris.context_message_unit.v1",
+    contextLineageId: LINEAGE,
     contextSeq,
     contextUnitId: `unit-${contextSeq}`,
-    unitId: `unit-${contextSeq}`,
-    sourceEventId: `event-${contextSeq}`,
-    unitType: "input",
+    runtimeEventId: `event-${contextSeq}`,
+    kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
-    disposition: "include",
+    semanticContent: {
+      role: "user",
+      content: [{ type: "text", text: `msg-${contextSeq}` }],
+      timestamp: 1,
+    },
+    historianDisposition: "include",
     contentHash: `hash-${contextSeq}`,
-    payload: { role: "user", content: [{ type: "text", text: `msg-${contextSeq}` }], timestamp: 1 },
-    paired: false,
-    schemaVersion: "context-unit-v1",
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
+    derivationRefs: {
+      schemaId: "iris.semantic_derivation_refs.v1",
+      memoryRefs: [],
+      compartmentIds: [],
+      sourceContextMessageUnitIds: [],
+    },
+    lifecycleState: "committed",
     createdAt: "2026-08-01T12:00:00.000Z",
     ...overrides,
   };
@@ -108,7 +115,7 @@ test("f4.1: unknown session on the write path throws ContextLineageResolutionErr
     // the store's default lineageId.
     assert.throws(
       () => {
-        store.insertUnit(makeUnit("unknown-session", 1));
+        store.insertUnit(makeUnit("unknown-session", 1), { runtimeSessionId: "unknown-session" });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
@@ -134,12 +141,12 @@ test("f4.1: stale session after rollover fails closed (binding moved to new sess
     store.bindCurrentSession(LINEAGE, "iris-runtime-2026-08-06-1");
     assert.throws(
       () => {
-        store.insertUnit(makeUnit(SESSION, 1));
+        store.insertUnit(makeUnit(SESSION, 1), { runtimeSessionId: SESSION });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
     // The new session resolves fine.
-    store.insertUnit(makeUnit("iris-runtime-2026-08-06-1", 1));
+    store.insertUnit(makeUnit("iris-runtime-2026-08-06-1", 1), { runtimeSessionId: "iris-runtime-2026-08-06-1" });
     assert.equal(store.listUnits("iris-runtime-2026-08-06-1").length, 1);
   } finally {
     store.close();
@@ -155,7 +162,7 @@ test("f4.1: wrong data root (foreign session) never writes into this store's lin
     // A session from another data root has no binding here → fail closed.
     assert.throws(
       () => {
-        store.insertUnit(makeUnit("other-data-root-session", 1));
+        store.insertUnit(makeUnit("other-data-root-session", 1), { runtimeSessionId: "other-data-root-session" });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
@@ -194,7 +201,7 @@ test("f4.1: database corruption / missing lineage row fails closed, never fabric
     );
     assert.throws(
       () => {
-        store.insertUnit(makeUnit(SESSION, 1));
+        store.insertUnit(makeUnit(SESSION, 1), { runtimeSessionId: SESSION });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
@@ -319,12 +326,14 @@ test("f4.3: a unit whose lineageId disagrees with its session binding is rejecte
     // must not slip in under the session's binding.
     assert.throws(
       () => {
-        store.insertUnit(makeUnit(SESSION, 1, { lineageId: "identity-other" }));
+        store.insertUnit(makeUnit(SESSION, 1, { contextLineageId: "identity-other" }), {
+          runtimeSessionId: SESSION,
+        });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
     // The valid unit still works.
-    store.insertUnit(makeUnit(SESSION, 1));
+    store.insertUnit(makeUnit(SESSION, 1), { runtimeSessionId: SESSION });
     assert.equal(store.listUnits(SESSION).length, 1);
   } finally {
     store.close();

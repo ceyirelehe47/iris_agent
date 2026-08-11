@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { M0_EMPTY_BODY, M1_EMPTY_PLACEHOLDER } from "../contracts/context.js";
-import type { ContextMessageUnit } from "../contracts/context-units.js";
+import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
 import type { ContextLineage, ContextStore } from "./context-store.js";
 import {
   decidePass,
@@ -114,14 +114,23 @@ function toolResultSummary(message: AgentMessage): string {
   return `${name}: ${truncated}`;
 }
 
-function lineFor(unit: ContextMessageUnit, label: string): string {
-  switch (unit.unitType) {
-    case "input":
-      return `[user ${label}] ${textOf(unit.payload)}`;
+/** Feature A (#110): the canonical semanticContent IS the AgentMessage. */
+function payloadOf(unit: ContextMessageUnitV1): AgentMessage {
+  return unit.semanticContent as unknown as AgentMessage;
+}
+
+function lineFor(unit: ContextMessageUnitV1, label: string): string {
+  switch (unit.kind) {
+    case "user":
+      return `[user ${label}] ${textOf(payloadOf(unit))}`;
     case "assistant":
-      return `[assistant ${label}] ${assistantSummary(unit.payload)}`;
+      return `[assistant ${label}] ${assistantSummary(payloadOf(unit))}`;
     case "tool_result":
-      return `[tool-result ${label}] ${toolResultSummary(unit.payload)}`;
+      return `[tool-result ${label}] ${toolResultSummary(payloadOf(unit))}`;
+    case "tool_call":
+    case "body_event":
+    case "operational":
+      return `[${unit.kind} ${label}]`;
   }
 }
 
@@ -130,7 +139,7 @@ function lineFor(unit: ContextMessageUnit, label: string): string {
  * 块（title + user/assistant 文本行；tool result 摘要）。确定性：只依赖单元
  * 的 contextSeq/unitType/payload，不含时钟。空输入 → M1_EMPTY_PLACEHOLDER。
  */
-export function renderHistorySince(newUnits: ContextMessageUnit[]): string {
+export function renderHistorySince(newUnits: ContextMessageUnitV1[]): string {
   const firstSeq = newUnits[0]?.contextSeq;
   if (firstSeq === undefined) {
     return M1_EMPTY_PLACEHOLDER;
@@ -149,7 +158,7 @@ export function renderHistorySince(newUnits: ContextMessageUnit[]): string {
  * 单元的快照）。空前缀 → M0_EMPTY_BODY。
  */
 export function renderSessionHistory(
-  units: ContextMessageUnit[],
+  units: ContextMessageUnitV1[],
   representedThroughContextSeq: number,
 ): string {
   const materialized = units.filter((unit) => unit.contextSeq <= representedThroughContextSeq);
@@ -165,7 +174,7 @@ export function renderSessionHistory(
 
 /** HARD 重建 m0：以全部已表示单元重渲染 <session-history>（fold m1）。 */
 export function rebuildM0Body(
-  units: ContextMessageUnit[],
+  units: ContextMessageUnitV1[],
   representedThroughContextSeq: number,
 ): string {
   return renderSessionHistory(units, representedThroughContextSeq);
@@ -173,7 +182,7 @@ export function rebuildM0Body(
 
 export interface RenderProviderMessagesInput {
   /** 该 session 的全部语义单元（已按 contextSeq 升序）。 */
-  units: ContextMessageUnit[];
+  units: ContextMessageUnitV1[];
   /** 当前 watermark：此前已表示（进 m0）的单元序号。 */
   representedThroughContextSeq: number;
   /** persisted m0Body（null = 从未 materialized → M0_EMPTY_BODY）。 */
@@ -210,7 +219,7 @@ export function renderProviderMessages(
   const messages: AgentMessage[] = [
     syntheticUserMessage(m0Body),
     syntheticUserMessage(m1Body),
-    ...newUnits.map((unit) => unit.payload),
+    ...newUnits.map((unit) => payloadOf(unit)),
     ...input.liveDelta,
   ];
   const lastSeq = input.units[input.units.length - 1]?.contextSeq;
@@ -222,7 +231,7 @@ export function renderProviderMessages(
 export interface ClassifyAndAdvanceInput {
   lineage: ContextLineage | undefined;
   hardSignals: HardSignals;
-  units: ContextMessageUnit[];
+  units: ContextMessageUnitV1[];
   representedThroughContextSeq: number;
 }
 
@@ -233,7 +242,7 @@ export interface ClassifyAndAdvanceResult {
   /** true = 存在 watermark 之后的 live 单元（wouldAdvanceLive）。 */
   hasLiveDelta: boolean;
   /** watermark 之后的新单元（p5Tail / m1 delta 的数据源）。 */
-  newUnits: ContextMessageUnit[];
+  newUnits: ContextMessageUnitV1[];
 }
 
 /**
@@ -258,7 +267,7 @@ export function classifyAndAdvance(input: ClassifyAndAdvanceInput): ClassifyAndA
   };
 }
 
-function maxContextSeqOr(units: ContextMessageUnit[], fallback: number): number {
+function maxContextSeqOr(units: ContextMessageUnitV1[], fallback: number): number {
   const last = units[units.length - 1]?.contextSeq;
   return last ?? fallback;
 }
@@ -281,7 +290,7 @@ export interface RenderRecord {
 
 export interface RenderForProviderCallArgs {
   runtimeSessionId: string;
-  units: ContextMessageUnit[];
+  units: ContextMessageUnitV1[];
   liveDelta: AgentMessage[];
   hardSignals: HardSignals;
 }
@@ -332,7 +341,7 @@ export class ContextRenderer {
     // renderHistorySince 的整条消费链）；此处兜底保证任何调用方传入的原始
     // units（含 excluded / reference_only，如直传测试）都不会泄漏进 provider
     // 数组或 m0/m1 内容。渲染保持 PURE（不改写 store）。
-    const visibleUnits = args.units.filter((unit) => unit.disposition === "include");
+    const visibleUnits = args.units.filter((unit) => unit.historianDisposition === "include");
     const lineage = this.store.getLineage(args.runtimeSessionId);
     const representedThrough = lineage?.representedThroughContextSeq ?? 0;
     const lineageHasM0 = lineage?.m0Body !== null && lineage?.m0Body !== undefined;

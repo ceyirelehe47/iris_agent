@@ -316,8 +316,8 @@ test("r2-p1: golden — turn3 SOFT renders m1 as <session-history-since> and adv
     // messages = [m0, m1, ...p5Tail]；p5Tail = representedThrough 之后的单元。
     assert.equal(passC.messages.length, 4);
     assertHeadMessages(passC.messages, M0_EMPTY_BODY, expectedM1);
-    assert.equal(passC.messages[2], unitsC[0]?.payload, "p5Tail carries the folded input");
-    assert.equal(passC.messages[3], unitsC[1]?.payload, "p5Tail carries the assistant");
+    assert.equal(passC.messages[2], unitsC[0]?.semanticContent, "p5Tail carries the folded input");
+    assert.equal(passC.messages[3], unitsC[1]?.semanticContent, "p5Tail carries the assistant");
 
     fixture.renderer.persistRender(NOW_MS);
     const lineage = fixture.store.getLineage(SESSION);
@@ -422,7 +422,7 @@ test("r2-p1: renderProviderMessages orders [m0, m1, ...p5Tail, ...liveDelta]", (
     assert.equal(pass.record.classification, "HARD");
     assert.equal(pass.messages.length, 4);
     assertHeadMessages(pass.messages, M0_EMPTY_BODY, renderHistorySince(units));
-    assert.equal(pass.messages[2], units[0]?.payload, "p5Tail before liveDelta");
+    assert.equal(pass.messages[2], units[0]?.semanticContent, "p5Tail before liveDelta");
     assert.equal(pass.messages[3], liveDelta[0], "liveDelta after p5Tail");
   } finally {
     closeFixture(fixture);
@@ -723,7 +723,7 @@ test("r2-p1: N1 regression — materialized mid-turn double-HARD reuses the fold
     );
     const unitsWithTool = fixture.ingest.ensureUnitsUpTo(SESSION);
     assert.ok(
-      unitsWithTool.some((unit) => unit.unitType === "tool_result"),
+      unitsWithTool.some((unit) => unit.kind === "tool_result"),
       "toolResult unit exists",
     );
 
@@ -741,10 +741,10 @@ test("r2-p1: N1 regression — materialized mid-turn double-HARD reuses the fold
       passB.record.m0Body,
       "activeFold reuse: m0 bytes stable across mid-turn HARD",
     );
-    const toolUnit = unitsWithTool.find((unit) => unit.unitType === "tool_result");
+    const toolUnit = unitsWithTool.find((unit) => unit.kind === "tool_result");
     assert.ok(toolUnit, "tool result unit present");
     assert.ok(
-      passC.messages.includes(toolUnit?.payload as AgentMessage),
+      passC.messages.includes(toolUnit?.semanticContent as unknown as AgentMessage),
       "toolResult real message stays in the provider array (p5Tail, no loss)",
     );
   } finally {

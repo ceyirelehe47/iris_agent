@@ -99,8 +99,8 @@ function stubHistoryPort(): ContextHistoryReadPort {
           contextUnitId: `unit-${seq}`,
           contextSeq: seq,
           runtimeEventId: `evt-${seq}`,
-          unitType: "input",
-          disposition: "include",
+          kind: "user",
+          historianDisposition: "include",
           contentHash: "b".repeat(64),
           derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         });
@@ -127,7 +127,7 @@ function stubHistoryPort(): ContextHistoryReadPort {
         seq++
       ) {
         units.push({
-          lineageId: "identity-b11",
+          contextLineageId: "identity-b11",
           runtimeSessionId: "attribution-stub",
           contextSeq: seq,
           contextUnitId: `unit-${seq}`,
@@ -142,7 +142,7 @@ function stubHistoryPort(): ContextHistoryReadPort {
           contentHash: "b".repeat(64),
           payload: { role: "user", content: `content-${seq}`, timestamp: 1 },
           paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
+          derivationRefs: { schemaId: "iris.semantic_derivation_refs.v1", memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
           schemaVersion: "context-unit-v1",
           createdAt: "2026-08-01T00:00:00.000Z",
         });
