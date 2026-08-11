@@ -50,7 +50,11 @@ import {
   activeRuntimeHandle,
   type ActiveRuntimeHandle,
 } from "../runtime/active-runtime-registry.js";
-import { RuntimeCoordinator, type ModelOverridePort } from "../runtime/runtime-coordinator.js";
+import {
+  RuntimeCoordinator,
+  resolveFallbackModel,
+  type ModelOverridePort,
+} from "../runtime/runtime-coordinator.js";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   RecoverySupervisor,
@@ -1000,16 +1004,37 @@ export class IrisHost {
       // Supervisor resolve and apply fallback models through the real
       // PiRuntimeAdapter (harness.setModel()), not a test-injected dispatcher.
       // Without this port, promptWithModel fails closed on every fallback.
+      // iris_agent#107: production model override must use qualified
+      // provider/model identity (resolveFallbackModel) — bare model.id +
+      // .find() is ambiguous when duplicate IDs exist across providers.
+      // applyModelOverride routes through the CURRENT active Capsule via the
+      // ActiveRuntimeRegistry, not a stale startup adapter closure.
       const modelOverride: ModelOverridePort = {
         resolveModel(modelId: string) {
-          const allModels = models.getModels();
-          return allModels.find((m) => m.id === modelId) as Model<string> | undefined;
+          // #107: use the qualified resolver that rejects duplicates
+          return resolveFallbackModel(models.getModels() as Model<string>[], modelId);
         },
         async applyModelOverride(modelToApply) {
-          await adapter.setModel(modelToApply as Model<string>);
+          // #107: route through the CURRENT active runtime, not the stale
+          // startup adapter — after rollover, only the new Capsule should
+          // receive model overrides.
+          const activeHandle = registry.getActiveOrNull();
+          if (activeHandle === null) {
+            throw new Error("cannot apply model override: no active runtime capsule");
+          }
+          const activeAdapter = activeHandle.runtime as PiRuntimeAdapter;
+          await activeAdapter.setModel(modelToApply as Model<string>);
         },
         getActiveModelId() {
-          return model?.id;
+          // #107: reflect the CURRENT active runtime's model, not a startup
+          // constant — after fallback or rollover, this changes.
+          const activeHandle = registry.getActiveOrNull();
+          if (activeHandle === null) {
+            return model?.id;
+          }
+          // The active adapter knows its current model
+          const activeAdapter = activeHandle.runtime as PiRuntimeAdapter;
+          return activeAdapter.getCurrentModelId?.() ?? model?.id;
         },
       };
       const coordinator = new RuntimeCoordinator({
