@@ -20,7 +20,9 @@ import type { Model } from "@earendil-works/pi-ai";
 export interface ModelOverridePort {
   /**
    * Resolve a model identifier to a concrete Pi `Model` object.
-   * Returns undefined when the model is not in the current provider catalog.
+   * Returns undefined when the model is not in the current provider catalog
+   * or when the identifier is ambiguous across providers (iris_agent#101 —
+   * callers must fail closed, never dispatch the prior model).
    */
   resolveModel(modelId: string): Model<string> | undefined;
   /**
@@ -28,6 +30,53 @@ export interface ModelOverridePort {
    * Called before dispatch when the supervisor selects a fallback model.
    */
   applyModelOverride(model: Model<string>): Promise<void>;
+  /**
+   * Return the currently active model's id, or undefined if unknown.
+   * Used to skip redundant setModel calls that can reset provider state.
+   */
+  getActiveModelId?(): string | undefined;
+}
+
+/**
+ * iris_agent#101: typed fail-closed error for a fallback target that cannot
+ * be applied. Thrown BEFORE any dispatch when the selected provider/model
+ * pair is missing from the catalog, ambiguous across providers, or the
+ * runtime has no model-override port. The Recovery Supervisor classifies the
+ * message (`model_not_found`) and advances the bounded fallback policy —
+ * the prior model is never silently reused under the guise of a fallback.
+ */
+export class UnresolvableFallbackTargetError extends Error {
+  public readonly targetId: string;
+  public constructor(targetId: string, reason: string) {
+    super(
+      `unresolvable fallback target '${targetId}': model_not_found ${reason.replace(/\s+/g, "_")}`,
+    );
+    this.name = "UnresolvableFallbackTargetError";
+    this.targetId = targetId;
+  }
+}
+
+/**
+ * iris_agent#101: resolve a fallback target id to a unique Pi `Model`.
+ *
+ * Target ids are qualified as `provider/model` for an unambiguous
+ * provider+model identity. Bare legacy ids (no `/`) are also accepted, but
+ * only when exactly ONE model in the catalog carries that id — a duplicate id
+ * across providers is ambiguous and resolves to undefined (fail closed).
+ */
+export function resolveFallbackModel(
+  catalog: Model<string>[],
+  targetId: string,
+): Model<string> | undefined {
+  const slash = targetId.indexOf("/");
+  if (slash > 0 && slash < targetId.length - 1) {
+    const provider = targetId.slice(0, slash);
+    const model = targetId.slice(slash + 1);
+    const matches = catalog.filter((m) => m.provider === provider && m.id === model);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+  const matches = catalog.filter((m) => m.id === targetId);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /**
@@ -278,20 +327,52 @@ export class RuntimeCoordinator implements AgentRuntimePort {
    *
    * This is the ONLY production seam for model/provider fallback. Pi's native
    * same-provider/same-model retry loop remains L1 and is NOT duplicated here.
+   *
+   * iris_agent#101: fail-closed target resolution. A selected fallback target
+   * must be EXACTLY the pair used by the next dispatch. When the target
+   * cannot be resolved (missing) or is ambiguous (duplicate model ids across
+   * providers), this throws {@link UnresolvableFallbackTargetError} BEFORE
+   * any dispatch — the prior model is never silently reused under the guise
+   * of a fallback. The supervisor classifies the typed error as
+   * `model_not_found` and advances the bounded fallback policy.
    */
   async *promptWithModel(
     input: AgentInput,
     modelId: string | null,
   ): AsyncIterable<AgentRuntimeEvent> {
-    if (modelId !== null && this.modelOverride !== undefined) {
+    if (modelId !== null) {
+      if (this.modelOverride === undefined) {
+        throw new UnresolvableFallbackTargetError(
+          modelId,
+          "no model override port is configured on this runtime",
+        );
+      }
       const resolved = this.modelOverride.resolveModel(modelId);
-      if (resolved !== undefined) {
+      if (resolved === undefined) {
+        throw new UnresolvableFallbackTargetError(
+          modelId,
+          "target is missing from the provider catalog or ambiguous across providers",
+        );
+      }
+      // Skip applyModelOverride when the model is already active — avoids
+      // unnecessary harness.setModel() calls that can reset provider state
+      // (mock providers, response counters, etc.) on initial dispatch.
+      if (this.modelOverride.getActiveModelId?.() !== resolved.id) {
         await this.modelOverride.applyModelOverride(resolved);
       }
-      // If the model cannot be resolved, fall through to prompt() with the
-      // current model — the supervisor's classification/budget will catch it.
     }
     yield* this.prompt(input);
+  }
+
+  /**
+   * iris_agent#100: return the invocation currently accepted by this
+   * coordinator, or null when no invocation is active. The Recovery
+   * Supervisor uses this seam when a watchdog fires before the first native
+   * stream event was observed, so it can abort the EXACT accepted invocation
+   * instead of skipping abort (and dispatching a fallback over a zombie).
+   */
+  getActiveInvocationId(): string | null {
+    return this.activeInvocation;
   }
 
   async abort(invocationId: string, reason?: string, timeoutMs = 15000): Promise<void> {

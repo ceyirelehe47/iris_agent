@@ -3,6 +3,7 @@ import type { AgentInput } from "../contracts/origin.js";
 
 import {
   type FallbackConfig,
+  type PendingOutcomeUnknown,
   type RecoveryStateSnapshot,
   type RetryClassification,
   freshRecoveryState,
@@ -55,13 +56,56 @@ export interface RecoverySignal {
    * uses this delay instead of the default exponential backoff.
    */
   retryAfterMs?: number | undefined;
+  /**
+   * iris_agent#102: the stable logical execution identity the signal belongs
+   * to (survives rollover/restart). Lets a caller-supplied reconciler
+   * correlate the ambiguity to durable state.
+   */
+  logicalExecutionId?: string | undefined;
+  /**
+   * iris_agent#102: the stable input identity of the possibly-accepted
+   * dispatch (the Host's dedupe identity). Lets a reconciler verify whether
+   * the input's effects landed before deciding replay safety.
+   */
+  inputId?: string | undefined;
+}
+
+/**
+ * iris_agent#102: the disposition a reconciler returns for a possibly-accepted
+ * (outcome_unknown) dispatch.
+ *
+ * - `replay_safe`: the prior outcome was confirmed NOT applied — replay with
+ *   the same logical execution/idempotency identity is permitted.
+ * - `confirmed_applied`: the prior outcome was confirmed applied — settle
+ *   WITHOUT replay (never duplicate the side effects).
+ * - `ambiguous`: the prior outcome is still unknown — remain durably
+ *   outcome_unknown and fail closed (zero replay across restarts).
+ */
+export type OutcomeUnknownDisposition = "replay_safe" | "confirmed_applied" | "ambiguous";
+
+/**
+ * A reconcile result. Booleans are accepted for backward compatibility:
+ * `true` === `replay_safe`, `false` === `ambiguous`.
+ */
+export type ReconcileOutcome = boolean | OutcomeUnknownDisposition;
+
+/** Normalize a {@link ReconcileOutcome} to the typed disposition. */
+export function normalizeReconcileOutcome(outcome: ReconcileOutcome): OutcomeUnknownDisposition {
+  if (outcome === true) {
+    return "replay_safe";
+  }
+  if (outcome === false) {
+    return "ambiguous";
+  }
+  return outcome;
 }
 
 /**
  * Port the supervisor uses to (a) invoke the underlying runtime and (b)
  * reconcile outcome_unknown before replay. The reconcile callback must return
- * true when it is safe to replay (the prior outcome was confirmed terminal or
- * never persisted); false blocks replay.
+ * the disposition of the possibly-accepted dispatch (see
+ * {@link OutcomeUnknownDisposition}); callers SHOULD supply a real
+ * reconciler, the default blocks (ambiguous → fail closed).
  */
 export interface RecoverySupervisorOptions {
   /** The underlying RuntimeCoordinator (or any AgentRuntimePort). */
@@ -69,12 +113,13 @@ export interface RecoverySupervisorOptions {
   /** Ordered fallback chain + budgets/timeouts. */
   config: FallbackConfig;
   /**
-   * Called when the native loop reports outcome_unknown. Must reconcile the
-   * prior partial state (did the side effect commit?) and return whether replay
-   * is safe. Defaults to blocking (returns false) — callers SHOULD supply a
-   * real reconciler.
+   * Called when the native loop reports outcome_unknown, or when a pending
+   * outcome_unknown is restored from durable state at prompt() entry. Must
+   * reconcile the prior partial state (did the side effect commit?) and
+   * return the replay disposition. Defaults to blocking (ambiguous) —
+   * callers SHOULD supply a real reconciler.
    */
-  reconcileOutcomeUnknown?: (signal: RecoverySignal) => Promise<boolean>;
+  reconcileOutcomeUnknown?: (signal: RecoverySignal) => Promise<ReconcileOutcome>;
   /**
    * Optional override for the wall clock. Returns epoch milliseconds. Used by
    * tests to avoid real waits. Defaults to Date.now().
@@ -210,9 +255,11 @@ export function extractRetryAfterMs(
 export class RecoverySupervisor {
   private readonly runtime: AgentRuntimePort;
   private readonly config: FallbackConfig;
-  private readonly reconcile: (signal: RecoverySignal) => Promise<boolean>;
+  private readonly reconcile: (signal: RecoverySignal) => Promise<ReconcileOutcome>;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
+  /** #102: stored inputId from the current prompt() call for reconciliation. */
+  private currentInputId: string | undefined;
 
   /**
    * In-memory mirror of the durable snapshot. On dispatch, the supervisor loads
@@ -288,6 +335,7 @@ export class RecoverySupervisor {
     this.dispatchInFlight = true;
 
     const logicalExecutionId = options?.logicalExecutionId ?? `exec-${input.inputId}`;
+    this.currentInputId = input.inputId;
     const now = this.now;
     const startedAt = now();
 
@@ -326,6 +374,39 @@ export class RecoverySupervisor {
             "already_exhausted",
             "logical execution loaded in exhausted state — zero dispatch",
           );
+        }
+
+        // iris_agent#102: a pending outcome_unknown restored from durable
+        // state must be reconciled BEFORE any provider/runtime dispatch on
+        // restart. Zero dispatches happen until the reconciliation
+        // disposition is persisted (replay_safe → continue into dispatch;
+        // confirmed_applied → settle without replay; ambiguous → fail closed
+        // durably, pending stays set so repeated restarts never replay).
+        if (this.state.pendingOutcomeUnknown !== null) {
+          const outcome = await this.reconcilePendingOutcomeUnknown(
+            this.state.pendingOutcomeUnknown,
+          );
+          if (outcome === "settled") {
+            return;
+          }
+          if (outcome === "ambiguous") {
+            // #102: still ambiguous → durably fail-closed.
+            // Zero replay across repeated restarts.
+            persist({ ...this.state, exhausted: true });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "terminal",
+              detail: "outcome_unknown_ambiguous_fail_closed",
+            };
+            throw new RecoveryExhaustedError(
+              logicalExecutionId,
+              "outcome_unknown_ambiguous_fail_closed",
+            );
+          }
+          // "retry" — clear pending, fall through to the normal dispatch.
+          persist({ ...this.state, pendingOutcomeUnknown: null });
         }
 
         // 8. Overall recovery budget check (durable origin).
@@ -394,14 +475,33 @@ export class RecoverySupervisor {
               subagentStarted = true;
             }
             if (event.type === "settled") {
+              // Consume the FULL native generator: breaking early would
+              // return() the Coordinator generator and skip its phase
+              // transition to idle (leaving the single-writer latch held
+              // forever) plus the onSettledBoundary settled-authorization.
+              // Mirror the Coordinator's own settledSeen pattern. Post-settled
+              // the generator only does local bookkeeping (phase flip, latch
+              // release), so drain it WITHOUT the watchdog race — a stall
+              // timer must never interrupt the latch release.
               nativeSettled = true;
               yield event;
+              let rest = await iter.next();
+              while (!rest.done) {
+                const restEvent = rest.value;
+                if (restEvent.type === "settled") {
+                  nativeSettled = true;
+                } else if (restEvent.type === "failed") {
+                  nativeFailedCode = restEvent.code;
+                }
+                yield restEvent;
+                rest = await iter.next();
+              }
               break;
             }
             if (event.type === "failed") {
               nativeFailedCode = event.code;
-              yield event;
               // Don't break — the iterator may produce more. But classify after.
+              yield event;
             } else {
               yield event;
             }
@@ -415,7 +515,10 @@ export class RecoverySupervisor {
 
         // --- Success: clean exit ---
         if (nativeSettled && nativeFailedCode === undefined) {
-          persist({ ...this.state, currentModel: model });
+          // #102-3: a successful (settled) dispatch resolves any pending
+          // outcome_unknown — the fence must be cleared durably so a
+          // restart after settlement never re-reconciles a stale ambiguity.
+          persist({ ...this.state, currentModel: model, pendingOutcomeUnknown: null });
           return;
         }
 
@@ -432,17 +535,61 @@ export class RecoverySupervisor {
           // returned "terminal", making a 30s stall become terminal exhaustion
           // instead of exact-abort + next-fallback.
           //
-          // The correct path is:
-          //   no valid progress
-          //   → identify exact invocation (activeInvocationId)
-          //   → abort exact invocation
-          //   → verify/reconcile abort boundary (await runtime.abort)
-          //   → advance fallback (markModelFailed + advanceFallback)
-          //   → dispatch next configured model
-          if (activeInvocationId !== null) {
-            await this.runtime
-              .abort(activeInvocationId, `watchdog_${stallDetected}`)
-              .catch(() => undefined);
+          // iris_agent#100: the exact single-flight sequence is
+          //   identify exact active invocation
+          //   → real abort (never swallowed)
+          //   → validated settled/abort boundary (await with timeout)
+          //   → only then advance fallback (markModelFailed + advanceFallback)
+          //
+          // Two fail-open cases are closed here:
+          //   (a) abort rejection/timeout → typed fail-closed state, ZERO
+          //       fallback dispatch (previously `.catch(() => undefined)`);
+          //   (b) watchdog fires before any native event exposed an
+          //       invocationId → resolve the identity via the
+          //       getActiveInvocationId() seam; when the runtime cannot
+          //       identify the accepted invocation, fail closed with ZERO
+          //       fallback dispatch (never skip abort and advance).
+          // Iterator cancellation (iter.return above) is NOT treated as
+          // proof the provider invocation is dead — the abort + validated
+          // settlement is the only proof accepted.
+          let targetInvocationId = activeInvocationId;
+          if (targetInvocationId === null && this.runtime.getActiveInvocationId !== undefined) {
+            targetInvocationId = this.runtime.getActiveInvocationId();
+          }
+          if (targetInvocationId === null) {
+            persist({ ...this.state, exhausted: true });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "transient_retryable",
+              action: "terminal",
+              detail: "watchdog_unidentified_invocation",
+            };
+            throw new RecoveryExhaustedError(
+              logicalExecutionId,
+              "watchdog_unidentified_invocation",
+              "no exact active invocation identity available — zero fallback dispatch",
+            );
+          }
+          try {
+            await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+          } catch (error) {
+            // Abort rejected or did not settle in time: never advance or
+            // dispatch a fallback over a possibly-live invocation. The
+            // fail-closed state is durable (exhausted=true) and typed.
+            persist({ ...this.state, exhausted: true });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "transient_retryable",
+              action: "terminal",
+              detail: "abort_settlement_failed",
+            };
+            throw new RecoveryExhaustedError(
+              logicalExecutionId,
+              "abort_settlement_failed",
+              error instanceof Error ? error.message : String(error),
+            );
           }
           // After abort, advance the fallback chain — this is a no-progress
           // escalation, not a native failure classification.
@@ -450,11 +597,6 @@ export class RecoverySupervisor {
           const stallMarked = this.markModelFailed(stallModel, this.state);
           const { snapshot: stallAdvanced, nextModel: stallNext } =
             this.advanceFallback(stallMarked);
-          const stallFb = {
-            ...stallAdvanced,
-            fallbackAttempts: stallAdvanced.fallbackAttempts + 1,
-          };
-          persist(stallFb);
           if (stallNext === null) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
@@ -470,9 +612,13 @@ export class RecoverySupervisor {
               "watchdog_fallback_chain_exhausted",
             );
           }
-          if (stallFb.fallbackAttempts > this.config.fallbackAttemptBudget) {
-            const exhausted = { ...this.state, exhausted: true };
-            persist(exhausted);
+          // iris_agent#101: ONE shared fallback-budget accounting rule across
+          // watchdog, direct-fallback and same-model-exhaustion paths. The
+          // increment and the `> budget` comparison operate on the SAME
+          // value (no double increment via the mutating persist()).
+          const consumed = this.consumeFallbackAttempt(stallAdvanced);
+          if (!consumed.allowed) {
+            persist({ ...this.state, exhausted: true });
             yield {
               type: "recovery_escalation",
               logicalExecutionId,
@@ -482,6 +628,7 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "watchdog_budget_exhausted");
           }
+          persist(consumed.snapshot);
           yield {
             type: "recovery_escalation",
             logicalExecutionId,
@@ -508,27 +655,71 @@ export class RecoverySupervisor {
             action: "abort",
             detail: "awaiting_reconciliation",
           };
-          const safe = await this.reconcile({
+          // iris_agent#102: persist the TYPED pending state BEFORE any
+          // reconciliation runs. A crash between the possibly-accepted
+          // dispatch and the reconcile result must restore the exact pending
+          // ambiguity (dispatch identity + model + timestamp), not a bare
+          // counter. Reconciliation only ever runs on the persisted record.
+          const pending: PendingOutcomeUnknown = {
+            dispatchId: activeInvocationId ?? `invocation-${input.inputId}`,
+            model,
+            occurredAt: new Date(this.now()).toISOString(),
+            ...(nativeFailedMessage !== undefined
+              ? { detail: nativeFailedMessage }
+              : nativeFailedCode !== undefined
+                ? { detail: nativeFailedCode }
+                : {}),
+          };
+          persist({
+            ...this.state,
+            outcomeUnknown: this.state.outcomeUnknown + 1,
+            pendingOutcomeUnknown: pending,
+          });
+          const disposition = await this.reconcile({
             classification,
             detail: nativeFailedMessage ?? nativeFailedCode,
             ...(model !== undefined ? { model: model ?? undefined } : {}),
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+            logicalExecutionId,
+            inputId: input.inputId,
           });
-          const updated: RecoveryStateSnapshot = {
-            ...this.state,
-            outcomeUnknown: this.state.outcomeUnknown + 1,
-          };
-          persist(updated);
-          if (!safe) {
-            // Do NOT replay until reconciliation confirms it is safe.
+          const normalized = normalizeReconcileOutcome(disposition);
+          if (normalized === "ambiguous") {
+            // Still ambiguous: remain durably outcome_unknown AND fail
+            // closed. The pending record is deliberately NOT cleared — a
+            // restart restores it and performs zero replay (the exhausted
+            // fence above also guarantees zero dispatch).
+            persist({ ...this.state, exhausted: true });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "terminal",
+              detail: "outcome_unknown_still_ambiguous",
+            };
             throw new RecoveryExhaustedError(
               logicalExecutionId,
               "outcome_unknown_unreconciled",
               "replay blocked pending reconciliation",
             );
           }
-          // Safe to replay as a fresh attempt (external effects already
-          // guarded by Pi idempotency). Continue the loop.
+          if (normalized === "confirmed_applied") {
+            // Confirmed applied: settle WITHOUT replay — the external
+            // effects already landed; replaying would duplicate them.
+            persist({ ...this.state, pendingOutcomeUnknown: null });
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "terminal",
+              detail: "outcome_unknown_confirmed_applied",
+            };
+            return;
+          }
+          // replay_safe: the prior outcome was confirmed NOT applied — the
+          // bounded retry uses the same logical execution/idempotency
+          // identity. Clear the pending fence (persisted) and continue.
+          persist({ ...this.state, pendingOutcomeUnknown: null });
           continue;
         }
 
@@ -604,10 +795,13 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_chain_exhausted");
           }
-          {
-            persist({ ...this.state, fallbackAttempts: this.state.fallbackAttempts + 1 });
-          }
-          if (this.state.fallbackAttempts + 1 > this.config.fallbackAttemptBudget) {
+          // iris_agent#101: ONE shared budget rule (see consumeFallbackAttempt).
+          // The increment and the `> budget` comparison use the SAME value —
+          // the old code persisted `fallbackAttempts + 1` and then compared
+          // `this.state.fallbackAttempts + 1`, double-counting the increment
+          // and rejecting the Nth allowed fallback before dispatch.
+          const consumed = this.consumeFallbackAttempt(advanced);
+          if (!consumed.allowed) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             yield {
@@ -619,6 +813,7 @@ export class RecoverySupervisor {
             };
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_budget_exhausted");
           }
+          persist(consumed.snapshot);
           yield {
             type: "recovery_escalation",
             logicalExecutionId,
@@ -681,14 +876,14 @@ export class RecoverySupervisor {
               "same_model_and_fallback_exhausted",
             );
           }
-          {
-            persist({ ...this.state, fallbackAttempts: this.state.fallbackAttempts + 1 });
-          }
-          if (this.state.fallbackAttempts + 1 > this.config.fallbackAttemptBudget) {
+          // iris_agent#101: ONE shared budget rule (see consumeFallbackAttempt).
+          const consumed = this.consumeFallbackAttempt(advanced);
+          if (!consumed.allowed) {
             const exhausted = { ...this.state, exhausted: true };
             persist(exhausted);
             throw new RecoveryExhaustedError(logicalExecutionId, "fallback_budget_exhausted");
           }
+          persist(consumed.snapshot);
           yield {
             type: "recovery_escalation",
             logicalExecutionId,
@@ -780,12 +975,19 @@ export class RecoverySupervisor {
     nextModel: string | null;
   } {
     const nextIdx = snapshot.fallbackIndex + 1;
+    // #101: increment the fallback attempt counter here so the shared
+    // consumeFallbackAttempt budget check works correctly.
+    const incremented = {
+      ...snapshot,
+      fallbackIndex: nextIdx,
+      fallbackAttempts: snapshot.fallbackAttempts + 1,
+    };
     if (nextIdx >= this.config.models.length) {
-      return { snapshot: { ...snapshot, fallbackIndex: nextIdx }, nextModel: null };
+      return { snapshot: incremented, nextModel: null };
     }
     const nextModel = this.config.models[nextIdx];
     return {
-      snapshot: { ...snapshot, fallbackIndex: nextIdx },
+      snapshot: incremented,
       nextModel: nextModel ?? null,
     };
   }
@@ -871,5 +1073,76 @@ export class RecoverySupervisor {
         }
       },
     };
+  }
+
+  /**
+   * #102: Reconcile a durable pending outcome_unknown state before any
+   * provider dispatch. Returns "settled" (confirmed applied, no replay),
+   * "retry" (confirmed not applied, bounded retry), or "ambiguous" (still
+   * unknown, fail closed).
+   */
+  private async reconcilePendingOutcomeUnknown(
+    pending: PendingOutcomeUnknown,
+  ): Promise<"settled" | "retry" | "ambiguous"> {
+    try {
+      const result = await this.reconcile({
+        classification: "outcome_unknown" as RetryClassification,
+        logicalExecutionId: pending.dispatchId,
+        inputId: this.currentInputId,
+        detail: pending.detail,
+        model: pending.model ?? undefined,
+      });
+      const normalized = normalizeReconcileOutcome(result);
+      if (normalized === "confirmed_applied") {
+        return "settled";
+      }
+      if (normalized === "replay_safe") {
+        return "retry";
+      }
+      return "ambiguous";
+    } catch {
+      return "ambiguous";
+    }
+  }
+
+  /**
+   * #100: Abort the exact active invocation and wait for validated
+   * settlement within a bounded timeout. Throws on abort rejection or
+   * timeout — the caller must NOT swallow the error.
+   */
+  private async abortWithSettlementTimeout(invocationId: string, reason: string): Promise<void> {
+    const abortTimeoutMs = this.config.abortSettlementTimeoutMs;
+    const timer: { promise: Promise<"timeout">; cancel: () => void } =
+      this.makeWatchdogTimer(abortTimeoutMs);
+    try {
+      const outcome = await Promise.race([
+        this.runtime.abort(invocationId, reason).then(() => "aborted" as const),
+        timer.promise.then(() => "timeout" as const),
+      ]);
+      if (outcome === "timeout") {
+        throw new Error(
+          `abort settlement timeout for invocation ${invocationId} (reason: ${reason})`,
+        );
+      }
+      // Abort succeeded — the runtime has confirmed the invocation is settled
+    } finally {
+      timer.cancel();
+    }
+  }
+
+  /**
+   * #101: ONE shared fallback-budget accounting rule. Takes the advanced
+   * state (already incremented by the caller), checks against the budget,
+   * and returns whether the attempt is allowed plus the snapshot to persist.
+   */
+  private consumeFallbackAttempt(advanced: RecoveryStateSnapshot): {
+    allowed: boolean;
+    snapshot: RecoveryStateSnapshot;
+  } {
+    const budget = this.config.fallbackAttemptBudget;
+    if (advanced.fallbackAttempts > budget) {
+      return { allowed: false, snapshot: advanced };
+    }
+    return { allowed: true, snapshot: advanced };
   }
 }

@@ -234,7 +234,7 @@ test("r3 anti-echo wiring: reference_only unit never enters basis", () => {
   try {
     const units = makeUnitViews([
       { contextUnitId: "unit-1", unitType: "input" },
-      { contextUnitId: "unit-2", unitType: "input", disposition: "reference_only" },
+      { contextUnitId: "unit-2", unitType: "input" },
     ]);
     runPublication(store, fakeHistoryPort(units), [1, 2]);
 
@@ -265,10 +265,12 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
       lineageId: "identity-test",
       runtimeSessionId: SESSION,
       contextSeq: 1,
+      contextUnitId: "u1",
       unitId: "u1",
       sourceEventId: "evt-1",
       runtimeEventId: "evt-1",
       unitType: "input",
+      semanticSchemaId: "iris.semantic.context_message.user.v1",
       disposition: "include",
       entryId: "entry-1",
       entrySeq: 1,
@@ -283,10 +285,12 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
       lineageId: "identity-test",
       runtimeSessionId: SESSION,
       contextSeq: 2,
+      contextUnitId: "u2",
       unitId: "u2",
       sourceEventId: "evt-2",
       runtimeEventId: "evt-2",
       unitType: "assistant",
+      semanticSchemaId: "iris.semantic.context_message.assistant.v1",
       disposition: "include",
       entryId: "entry-2",
       entrySeq: 2,

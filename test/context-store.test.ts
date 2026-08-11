@@ -72,7 +72,7 @@ test("context-store: repeated open is idempotent (no double migration)", () => {
         const count = (
           db.prepare("SELECT COUNT(*) AS c FROM schema_migrations").get() as { c: number }
         ).c;
-        assert.equal(count, 7, "0001..0007 applied once, never re-applied");
+        assert.equal(count, 8, "0001..0008 applied once, never re-applied");
       } finally {
         db.close();
       }

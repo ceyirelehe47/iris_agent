@@ -29,23 +29,17 @@ import {
   CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
   CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
   validateGenerationV2,
+  validateGenerationV2Strict,
   computeContextGenerationHash,
   computeSemanticContentHash,
 } from "../contracts/context-v27.js";
 
 /**
  * Semantic schema IDs for P5 unit projection.
- * Maps the durable ContextMessageUnit.unitType to a semantic discriminator.
+ * Removed P5_SEMANTIC_SCHEMA_MAP: per #103, the generation builder MUST reuse
+ * the durable unit's semanticSchemaId 1:1, not re-derive it via a second mapper.
+ * The durable unit already carries semanticSchemaId from KIND_TO_SEMANTIC_SCHEMA_ID.
  */
-const P5_SEMANTIC_SCHEMA_MAP: Record<string, string> = {
-  input: "iris.semantic.p5.input.v1",
-  assistant: "iris.semantic.p5.assistant.v1",
-  output: "iris.semantic.p5.output.v1",
-  tool_call: "iris.semantic.p5.tool_call.v1",
-  tool_result: "iris.semantic.p5.tool_result.v1",
-  system: "iris.semantic.p5.system.v1",
-  operational: "iris.semantic.p5.operational.v1",
-};
 
 /**
  * Input to the Context Generation Builder: the frozen P0–P5 sources.
@@ -177,6 +171,12 @@ export function buildContextGenerationV2(
     );
   }
 
+  // Feature B (#104): also run the strict validator with hash recompute
+  const strictCheck = validateGenerationV2Strict(generation);
+  if (!strictCheck.valid) {
+    throw new Error(`buildContextGenerationV2: strict validation failed: ${strictCheck.reason}`);
+  }
+
   return generation;
 }
 
@@ -201,26 +201,24 @@ function projectStaticUnit(unit: P0P1P2P3P4Unit): ContextUnitV2 {
 /**
  * Project a P5 durable ContextMessageUnit into a generation-level ContextUnitV2.
  *
- * The projection reuses the durable contextUnitId and maps the unitType to
- * a semanticSchemaId discriminator. The payload (AgentMessage) is serialized
- * as the semanticContent JsonValue.
+ * Per #103: reuses the durable unit's contextUnitId, semanticSchemaId, and
+ * contentHash 1:1 — no second mapper or schema re-derivation.
  */
 function projectP5Unit(cmu: ContextMessageUnit): ContextUnitV2 {
-  const semanticSchemaId = P5_SEMANTIC_SCHEMA_MAP[cmu.unitType] ?? "iris.semantic.p5.unknown.v1";
-
   // Serialize the AgentMessage payload as JsonValue
   const semanticContent = cmu.payload as unknown as JsonValue;
 
   const header: ContextUnitHeaderV1 = {
     schemaId: CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
-    contextUnitId: cmu.unitId,
+    contextUnitId: cmu.contextUnitId,
     source: {
       schemaId: CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
       sourceSchemaId: "iris.context_message_unit.v1",
-      sourceId: cmu.unitId,
+      sourceId: cmu.contextUnitId,
       sourceHash: cmu.contentHash,
     },
-    semanticSchemaId,
+    // Reuse the durable unit's semanticSchemaId 1:1 — no second mapper
+    semanticSchemaId: cmu.semanticSchemaId,
     contentHash: cmu.contentHash,
   };
 

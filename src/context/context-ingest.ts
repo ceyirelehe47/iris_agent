@@ -6,6 +6,7 @@ import type {
   ContextIngestPort,
   UnitDispositionFilter,
 } from "../contracts/context-units.js";
+import { KIND_TO_SEMANTIC_SCHEMA_ID } from "../contracts/context-v27.js";
 import type { RuntimeEventIngestPort } from "../contracts/runtime-events.js";
 import {
   type IrisInputMetaDetails,
@@ -220,10 +221,12 @@ export class ContextIngest implements ContextIngestPort {
             lineageId: this.lineageId,
             runtimeSessionId,
             contextSeq: seq,
+            contextUnitId: `input-${event.entryId ?? event.eventId}`,
             unitId: `input-${event.entryId ?? event.eventId}`,
             sourceEventId: event.eventId,
             runtimeEventId: event.eventId,
             unitType: "input",
+            semanticSchemaId: KIND_TO_SEMANTIC_SCHEMA_ID.user,
             disposition: "include",
             ...(event.entryId !== undefined ? { entryId: event.entryId } : {}),
             ...(event.entrySeq !== undefined ? { entrySeq: event.entrySeq } : {}),
@@ -308,10 +311,15 @@ export class ContextIngest implements ContextIngestPort {
           lineageId: this.lineageId,
           runtimeSessionId,
           contextSeq: seq,
+          contextUnitId: `${unitType}-${event.entryId ?? event.eventId}`,
           unitId: `${unitType}-${event.entryId ?? event.eventId}`,
           sourceEventId: event.eventId,
           runtimeEventId: event.eventId,
           unitType,
+          semanticSchemaId:
+            unitType === "assistant"
+              ? KIND_TO_SEMANTIC_SCHEMA_ID.assistant
+              : KIND_TO_SEMANTIC_SCHEMA_ID.tool_result,
           disposition: "include",
           ...(event.entryId !== undefined ? { entryId: event.entryId } : {}),
           ...(event.entrySeq !== undefined ? { entrySeq: event.entrySeq } : {}),

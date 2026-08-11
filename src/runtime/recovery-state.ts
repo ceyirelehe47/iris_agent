@@ -46,6 +46,13 @@ export interface FallbackConfig {
   reservedDispatchRetries: number;
   /** Overall recovery budget across all strategies. Default 600000 (10min). */
   overallBudgetMs: number;
+  /**
+   * iris_agent#100: how long the supervisor waits for a positively validated
+   * abort/settled boundary after a watchdog fires before treating the abort
+   * as failed and entering the fail-closed state. Default 15000 (matches the
+   * RuntimeCoordinator abort settlement timeout).
+   */
+  abortSettlementTimeoutMs: number;
 }
 
 export function defaultFallbackConfig(models: string[]): FallbackConfig {
@@ -58,7 +65,29 @@ export function defaultFallbackConfig(models: string[]): FallbackConfig {
     subagentFirstProgressMs: 90000,
     reservedDispatchRetries: 6,
     overallBudgetMs: 600000,
+    abortSettlementTimeoutMs: 15000,
   };
+}
+
+/**
+ * iris_agent#102: typed pending outcome_unknown state for one logical
+ * execution.
+ *
+ * Persisted durably (JSON column `pending_outcome_unknown`) BEFORE any
+ * reconciliation runs, so a crash/restart after a possibly-accepted dispatch
+ * restores the exact pending ambiguity instead of only a bare counter. The
+ * supervisor reconciles it before ANY provider dispatch on restart and never
+ * clears it while the outcome is still ambiguous.
+ */
+export interface PendingOutcomeUnknown {
+  /** Stable logical dispatch identity (the native invocationId). */
+  dispatchId: string;
+  /** The model that was active for the possibly-accepted dispatch. */
+  model: string | null;
+  /** ISO-8601 timestamp of when the ambiguity was recorded. */
+  occurredAt: string;
+  /** Diagnostic detail from the native failure signal. */
+  detail?: string | undefined;
 }
 
 /**
@@ -83,6 +112,12 @@ export interface RecoveryStateSnapshot {
    */
   fallbackAttempts: number;
   exhausted: boolean;
+  /**
+   * iris_agent#102: typed pending outcome_unknown record, or null when no
+   * dispatch is pending ambiguity. Persisted before reconciliation and only
+   * cleared after the reconciliation disposition is persisted.
+   */
+  pendingOutcomeUnknown: PendingOutcomeUnknown | null;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -97,6 +132,7 @@ interface RecoveryStateRow {
   reserved_retries: number;
   fallback_attempts: number;
   exhausted: number;
+  pending_outcome_unknown: string | null;
   created_at: string;
   updated_at: string | null;
 }
@@ -107,6 +143,7 @@ function rowToSnapshot(row: RecoveryStateRow): RecoveryStateSnapshot {
     parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, string>)
       : {};
+  const pending = parsePendingOutcomeUnknown(row.pending_outcome_unknown);
   return {
     logicalExecutionId: row.logical_execution_id,
     sameModelAttempts: row.same_model_attempts,
@@ -117,9 +154,44 @@ function rowToSnapshot(row: RecoveryStateRow): RecoveryStateSnapshot {
     reservedRetries: row.reserved_retries,
     fallbackAttempts: row.fallback_attempts,
     exhausted: row.exhausted === 1,
+    pendingOutcomeUnknown: pending,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown | null {
+  if (raw === null || raw === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as { dispatchId?: unknown }).dispatchId === "string" &&
+      typeof (parsed as { occurredAt?: unknown }).occurredAt === "string"
+    ) {
+      const pending = parsed as PendingOutcomeUnknown;
+      return {
+        dispatchId: pending.dispatchId,
+        model: typeof pending.model === "string" ? pending.model : null,
+        occurredAt: pending.occurredAt,
+        ...(pending.detail !== undefined ? { detail: pending.detail } : {}),
+      };
+    }
+  } catch {
+    // Corrupt JSON must not silently drop the ambiguity fence: surface it as
+    // a pending record whose identity is unknown so reconciliation still runs.
+    return {
+      dispatchId: "unknown-corrupt-pending",
+      model: null,
+      occurredAt: new Date(0).toISOString(),
+      detail: `corrupt pending_outcome_unknown payload: ${raw.slice(0, 200)}`,
+    };
+  }
+  return null;
 }
 
 function snapshotToRow(snapshot: RecoveryStateSnapshot): {
@@ -132,6 +204,7 @@ function snapshotToRow(snapshot: RecoveryStateSnapshot): {
   reserved_retries: number;
   fallback_attempts: number;
   exhausted: number;
+  pending_outcome_unknown: string | null;
   created_at: string;
   updated_at: string | null;
 } {
@@ -145,6 +218,10 @@ function snapshotToRow(snapshot: RecoveryStateSnapshot): {
     reserved_retries: snapshot.reservedRetries,
     fallback_attempts: snapshot.fallbackAttempts,
     exhausted: snapshot.exhausted ? 1 : 0,
+    pending_outcome_unknown:
+      snapshot.pendingOutcomeUnknown === null
+        ? null
+        : JSON.stringify(snapshot.pendingOutcomeUnknown),
     created_at: snapshot.createdAt,
     updated_at: snapshot.updatedAt,
   };
@@ -188,8 +265,9 @@ export class RecoveryStateStore {
         `INSERT INTO recovery_state (
            logical_execution_id, same_model_attempts, current_model,
            fallback_index, failed_models, outcome_unknown, reserved_retries,
-           fallback_attempts, exhausted, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           fallback_attempts, exhausted, pending_outcome_unknown,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(logical_execution_id) DO UPDATE SET
            same_model_attempts = excluded.same_model_attempts,
            current_model = excluded.current_model,
@@ -199,6 +277,7 @@ export class RecoveryStateStore {
            reserved_retries = excluded.reserved_retries,
            fallback_attempts = excluded.fallback_attempts,
            exhausted = excluded.exhausted,
+           pending_outcome_unknown = excluded.pending_outcome_unknown,
            updated_at = excluded.updated_at`,
       )
       .run(
@@ -211,6 +290,7 @@ export class RecoveryStateStore {
         row.reserved_retries,
         row.fallback_attempts,
         row.exhausted,
+        row.pending_outcome_unknown,
         row.created_at,
         row.updated_at,
       );
@@ -240,7 +320,22 @@ export function freshRecoveryState(logicalExecutionId: string, now: string): Rec
     reservedRetries: 0,
     fallbackAttempts: 0,
     exhausted: false,
+    pendingOutcomeUnknown: null,
     createdAt: now,
     updatedAt: null,
   };
+}
+
+/**
+ * Derive the stable logical execution identity for one accepted input.
+ *
+ * iris_agent#99: the identity must survive Runtime Session rollover and
+ * process restart so the durable recovery budgets (retry/fallback/exhaustion)
+ * and the pending outcome_unknown fence stay attached to the SAME logical
+ * invocation. The Host instance epoch is the dedupe namespace and the inputId
+ * is the stable input identity — neither changes when a rollover CAS swaps the
+ * active Capsule.
+ */
+export function logicalExecutionIdFor(instanceEpoch: number, inputId: string): string {
+  return `logical-exec-${instanceEpoch}:${inputId}`;
 }

@@ -65,9 +65,11 @@ function makeUnit(overrides: Partial<ContextMessageUnit>): ContextMessageUnit {
     lineageId: "identity-test",
     runtimeSessionId: SESSION,
     contextSeq: 0,
+    contextUnitId: "unit-x",
     unitId: "unit-x",
     sourceEventId: "evt-x",
     unitType: "input",
+    semanticSchemaId: "iris.semantic.context_message.user.v1",
     disposition: "include",
     contentHash: "h",
     payload: { role: "user", content: "x", timestamp: 0 } as AgentMessage,
@@ -116,10 +118,33 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
     store.createLineage(makeLineageInput());
     // 三个单元：contextSeq 1/2 携带 entry_seq（3 / 8），contextSeq 3 无
     // entry_seq（NULL，不参与映射）。
-    store.insertUnit(makeUnit({ contextSeq: 1, entrySeq: 3, unitId: "u-1", sourceEventId: "e-1" }));
-    store.insertUnit(makeUnit({ contextSeq: 2, entrySeq: 8, unitId: "a-2", sourceEventId: "e-2" }));
     store.insertUnit(
-      makeUnit({ contextSeq: 3, unitType: "assistant", unitId: "a-3", sourceEventId: "e-3" }),
+      makeUnit({
+        contextSeq: 1,
+        entrySeq: 3,
+        contextUnitId: "u-1",
+        unitId: "u-1",
+        sourceEventId: "e-1",
+      }),
+    );
+    store.insertUnit(
+      makeUnit({
+        contextSeq: 2,
+        entrySeq: 8,
+        contextUnitId: "a-2",
+        unitId: "a-2",
+        sourceEventId: "e-2",
+      }),
+    );
+    store.insertUnit(
+      makeUnit({
+        contextSeq: 3,
+        unitType: "assistant",
+        semanticSchemaId: "iris.semantic.context_message.assistant.v1",
+        contextUnitId: "a-3",
+        unitId: "a-3",
+        sourceEventId: "e-3",
+      }),
     );
     // HARD fold 推进 watermark 到 2：只有 contextSeq <= 2 的单元进入 m0。
     store.materializeM0ByContextSeq({
@@ -151,8 +176,18 @@ test("R3-P1 port: units with NULL entry_seq inside the prefix are skipped (MAX o
     store.createLineage(makeLineageInput());
     // 前缀内唯一携带 entry_seq 的是 contextSeq 2（entry_seq 5）；contextSeq 1
     // 无 entry_seq → 不参与，MAX 仍为 5。
-    store.insertUnit(makeUnit({ contextSeq: 1, unitId: "u-1", sourceEventId: "e-1" }));
-    store.insertUnit(makeUnit({ contextSeq: 2, entrySeq: 5, unitId: "a-2", sourceEventId: "e-2" }));
+    store.insertUnit(
+      makeUnit({ contextSeq: 1, contextUnitId: "u-1", unitId: "u-1", sourceEventId: "e-1" }),
+    );
+    store.insertUnit(
+      makeUnit({
+        contextSeq: 2,
+        entrySeq: 5,
+        contextUnitId: "a-2",
+        unitId: "a-2",
+        sourceEventId: "e-2",
+      }),
+    );
     store.materializeM0ByContextSeq({
       runtimeSessionId: SESSION,
       m0Body: "<session-history>…</session-history>",

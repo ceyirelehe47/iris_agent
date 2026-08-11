@@ -21,6 +21,16 @@ export interface AgentRuntimePort {
    * this undefined — callers fall back to `prompt` for backward compatibility.
    */
   promptWithModel?(input: AgentInput, model: string | null): AsyncIterable<AgentRuntimeEvent>;
+  /**
+   * iris_agent#100: optional seam to obtain the identity of the invocation
+   * currently accepted by the runtime, WITHOUT waiting for the first stream
+   * event. The supervisor needs this when a watchdog fires before the native
+   * loop emitted anything (the accepted invocation id exists runtime-side but
+   * has not been observed). Runtimes without an accepted-invocation concept
+   * leave this undefined — the supervisor then fails closed instead of
+   * dispatching a fallback over an unidentified invocation.
+   */
+  getActiveInvocationId?(): string | null;
 }
 
 export interface HistorianPublicationOutboxPort {

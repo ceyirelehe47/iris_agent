@@ -16,7 +16,7 @@
  * (ContextHistoryReadPort 暴露的值,不持有 context.db 句柄)。
  */
 
-import type { ContextUnitType } from "../contracts/context-units.js";
+import type { ContextUnitType } from "../context/history-read-port.js";
 import type { RuntimeEventDerivationRefs } from "../contracts/runtime-events.js";
 
 /** Historian 消费的单元视图(ContextHistoryReadPort 暴露的 values-only 窄视图)。 */
