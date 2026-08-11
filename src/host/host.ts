@@ -1069,21 +1069,22 @@ export class IrisHost {
       const supervisor = new RecoverySupervisor({
         runtime: coordinator,
         config: defaultFallbackConfig(models.getModels().map((m) => m.id)),
-        // iris_agent#102: the Host is the reconciler for possibly-accepted
-        // dispatches — the ingress ledger is the durable proof of whether the
-        // input's effects landed. session_committed → confirmed applied
-        // (settle, never replay); accepted → not durably applied → replay is
-        // safe (Pi's tool idempotency governs re-execution); unknown identity
-        // → fail closed (ambiguous).
-        reconcileOutcomeUnknown: async (signal) => {
-          if (signal.inputId === undefined) {
-            return "ambiguous";
-          }
-          const record = readyIngress.getRecord(signal.inputId, instanceEpoch);
-          if (record === undefined) {
-            return "ambiguous";
-          }
-          return record.state === "session_committed" ? "confirmed_applied" : "replay_safe";
+        // iris_agent#107: the Host reconciler must NOT use ingress
+        // session_committed as proof that provider/tool/Memory/Body effects
+        // were applied. Ingress only proves user input + companion entered
+        // Pi Session — it says nothing about model dispatch outcomes.
+        // Without operation-specific durable evidence (idempotency key,
+        // provider read-after-write, tool receipt, Memory Publication
+        // acceptance, etc.), the safe answer is always "ambiguous" → fail
+        // closed (never replay an uncertain side effect).
+        // When operation-specific reconcilers are available, this dispatch
+        // should query them. For now, always return ambiguous to prevent
+        // duplicate side effects.
+        reconcileOutcomeUnknown: async () => {
+          // #107: without operation-specific durable effect evidence,
+          // we cannot determine whether the possibly-accepted dispatch
+          // was applied. Always fail closed.
+          return "ambiguous";
         },
       });
       return new IrisHost({
