@@ -3,14 +3,16 @@
  *
  * Covers:
  * - Provider-id collision: duplicate bare model IDs fail closed
- * - Fallback after rollover: model override applies to current active Capsule
- * - outcome_unknown before/after restart: durable pending identity
- * - External side-effect ambiguity: zero replay
+ * - Durable pending identity: PendingOutcomeUnknown carries logicalExecutionId + inputId
+ * - Malformed JSON fail-closed: parsePendingOutcomeUnknown never returns null for non-empty input
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 
 import { resolveFallbackModel } from "../src/runtime/runtime-coordinator.js";
+import { RecoveryStateStore, type RecoveryStateSnapshot } from "../src/runtime/recovery-state.js";
+import type { PendingOutcomeUnknown } from "../src/runtime/recovery-state.js";
 import type { Model } from "@earendil-works/pi-ai";
 
 // ---------------------------------------------------------------------------
@@ -59,59 +61,102 @@ test("#107 AC1: non-existent model returns undefined (fail closed)", () => {
   assert.equal(wrongProvider, undefined, "wrong provider must return undefined");
 });
 
-test("#107 AC6: pending outcome_unknown carries logicalExecutionId and inputId, not just dispatchId", () => {
-  // This test verifies the type contract: PendingOutcomeUnknown MUST have
-  // logicalExecutionId and inputId fields. We import the type and check
-  // that an object conforming to the interface has these fields.
-  interface PendingShape {
-    dispatchId: string;
-    logicalExecutionId: string;
-    inputId: string;
-    model: string | null;
-    occurredAt: string;
-    detail?: string;
-  }
+test("#107 AC6: RecoveryStateStore.load preserves durable logicalExecutionId + inputId in pending", () => {
+  // This test exercises the REAL persistence layer: writes a snapshot with
+  // logicalExecutionId and inputId, then loads it back and verifies the
+  // pending record carries these durable identity fields.
+  const path = `/tmp/test-durable-pending-${Date.now()}.db`;
+  const store = new RecoveryStateStore(path);
 
-  const pending: PendingShape = {
-    dispatchId: "dispatch-123",
-    logicalExecutionId: "exec-456",
-    inputId: "input-789",
-    model: "test-model",
-    occurredAt: "2026-01-01T00:00:00Z",
+  // Save a snapshot with a pending record that has the new identity fields
+  const snapshot: RecoveryStateSnapshot = {
+    logicalExecutionId: "exec-durable-123",
+    sameModelAttempts: 1,
+    currentModel: "test-model",
+    fallbackIndex: 0,
+    failedModels: {},
+    outcomeUnknown: 1,
+    reservedRetries: 0,
+    fallbackAttempts: 0,
+    exhausted: false,
+    pendingOutcomeUnknown: {
+      dispatchId: "dispatch-456",
+      logicalExecutionId: "exec-durable-123",
+      inputId: "input-789",
+      model: "test-model",
+      occurredAt: "2026-01-01T00:00:00Z",
+      detail: "test ambiguity",
+    } satisfies PendingOutcomeUnknown,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
   };
 
-  assert.equal(pending.logicalExecutionId, "exec-456");
-  assert.equal(pending.inputId, "input-789");
+  store.save(snapshot);
+  store.close();
+
+  // Reopen and verify the durable identity survives persistence
+  const store2 = new RecoveryStateStore(path);
+  const loaded = store2.load("exec-durable-123") as RecoveryStateSnapshot | null;
+  store2.close();
+
+  assert.ok(loaded !== null, "snapshot must load");
+  assert.ok(loaded.pendingOutcomeUnknown !== null, "pending must be preserved");
+
+  const pending = loaded.pendingOutcomeUnknown as PendingOutcomeUnknown;
+  assert.equal(
+    pending.logicalExecutionId,
+    "exec-durable-123",
+    "logicalExecutionId must survive persistence/restart",
+  );
+  assert.equal(pending.inputId, "input-789", "inputId must survive persistence/restart");
   assert.notEqual(
     pending.logicalExecutionId,
     pending.dispatchId,
-    "logicalExecutionId must not equal dispatchId",
+    "logicalExecutionId must NOT equal dispatchId — they are different identity layers",
   );
 });
 
-test("#107 AC7: valid JSON with missing pending fields stays fail-closed", () => {
-  // parsePendingOutcomeUnknown is private, but the test from the previous
-  // round already covers this via RecoveryStateStore.load. Here we verify
-  // that the contract is maintained: malformed JSON with valid parse but
-  // missing fields does NOT return null.
-  //
-  // We simulate the parsing behavior:
-  const malformedPayload = '{"foo":"bar"}';
-  const parsed = JSON.parse(malformedPayload) as Record<string, unknown>;
-  const hasDispatchId = typeof parsed["dispatchId"] === "string";
-  const hasOccurredAt = typeof parsed["occurredAt"] === "string";
+test("#107 AC7: malformed pending JSON (valid parse, missing fields) stays fail-closed via store.load", () => {
+  // This test exercises the REAL parsePendingOutcomeUnknown through the
+  // public RecoveryStateStore.load API — no mocking, no local literals.
+  const path = `/tmp/test-malformed-pending-${Date.now()}.db`;
+  const store = new RecoveryStateStore(path);
+  store.close();
 
-  // This is the condition the parser checks — it must NOT silently return null
+  // Inject a structurally malformed pending JSON directly into the DB
+  const db = new DatabaseSync(path);
+  db.exec(`
+    INSERT OR REPLACE INTO recovery_state (
+      logical_execution_id, same_model_attempts, current_model,
+      fallback_index, failed_models, outcome_unknown,
+      reserved_retries, fallback_attempts, exhausted,
+      pending_outcome_unknown, created_at, updated_at
+    ) VALUES (
+      'exec-malformed', 0, 'test-model',
+      0, '{}', 0,
+      0, 0, 0,
+      '{"randomField":"not-a-valid-pending"}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+    )
+  `);
+  db.close();
+
+  // Load must NOT return pendingOutcomeUnknown === null for this malformed JSON.
+  // It must produce a synthetic fail-closed pending.
+  const store2 = new RecoveryStateStore(path);
+  const loaded = store2.load("exec-malformed") as RecoveryStateSnapshot | null;
+  store2.close();
+
+  assert.ok(loaded !== null, "state must load");
   assert.ok(
-    !hasDispatchId || !hasOccurredAt,
-    "malformed payload missing required fields must be detected as malformed",
+    loaded.pendingOutcomeUnknown !== null,
+    "malformed JSON must NOT silently return null — must stay fail-closed",
   );
 
-  // The parser returns a synthetic fail-closed record, never null for this case.
-  // The synthetic record has dispatchId containing "malformed" or "corrupt".
-  const syntheticDispatchId = "unknown-malformed-pending";
+  const pending = loaded.pendingOutcomeUnknown as PendingOutcomeUnknown;
   assert.ok(
-    syntheticDispatchId.includes("malformed"),
-    "synthetic fail-closed identity must signal malformed status",
+    pending.dispatchId.includes("malformed") ||
+      pending.dispatchId.includes("corrupt") ||
+      pending.dispatchId.includes("unknown"),
+    "malformed pending must produce a synthetic fail-closed dispatchId",
   );
 });
