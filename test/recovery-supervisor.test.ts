@@ -19,6 +19,7 @@ import {
   defaultFallbackConfig,
   freshRecoveryState,
 } from "../src/runtime/recovery-state.js";
+import { DatabaseSync } from "node:sqlite";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -885,4 +886,43 @@ test("reserved_retries survives restart via the store", async () => {
   assert.ok(loaded, "state should be loaded after restart");
   assert.equal(loaded.reservedRetries, 4, "reserved_retries must survive restart");
   restoredStore.close();
+});
+
+test("#107: structurally malformed pending JSON stays fail-closed (never returns null)", () => {
+  const path = `/tmp/test-malformed-pending-${Date.now()}.db`;
+  const store = new RecoveryStateStore(path);
+
+  // Manually inject a structurally malformed pending JSON
+  const db = new DatabaseSync(path);
+  db.exec(`
+    INSERT OR REPLACE INTO recovery_state (
+      logical_execution_id, same_model_attempts, current_model,
+      fallback_index, failed_models, outcome_unknown,
+      reserved_retries, fallback_attempts, exhausted,
+      pending_outcome_unknown, created_at, updated_at
+    ) VALUES (
+      'exec-malformed', 0, 'test-model',
+      0, '{}', 0,
+      0, 0, 0,
+      '{"foo":"bar"}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+    )
+  `);
+  db.close();
+
+  // Load must NOT return a snapshot with pendingOutcomeUnknown === null
+  const state = store.load("exec-malformed");
+  const pending = state?.pendingOutcomeUnknown ?? null;
+  assert.ok(
+    pending !== null,
+    "malformed pending JSON must not silently return null — must stay fail-closed",
+  );
+  assert.ok(
+    pending !== null &&
+      (pending.dispatchId.includes("malformed") ||
+        pending.dispatchId.includes("corrupt") ||
+        pending.dispatchId.includes("unknown")),
+    "malformed pending must produce a synthetic fail-closed identity",
+  );
+
+  store.close();
 });
