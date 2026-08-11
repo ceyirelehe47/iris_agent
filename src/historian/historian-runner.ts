@@ -46,8 +46,13 @@ export function contextUnitToSequencedEntry(
 ): SequencedSessionEntry {
   return {
     runtimeSessionId,
-    entrySeq: ordinalFallback ?? 0,
-    ...(unit.contextSeq !== undefined ? { contextSeq: unit.contextSeq } : {}),
+    // iris_agent#110: V1 units no longer carry a physical entrySeq. Use
+    // contextSeq as the entry-level ordinal — it IS globally monotonic within
+    // the lineage and uniquely ordered, which is exactly what the freeze/commit
+    // cursor needs to track progress across batches. The ordinalFallback is
+    // only used when contextSeq is absent (should not happen for committed units).
+    entrySeq: unit.contextSeq ?? ordinalFallback ?? 0,
+    contextSeq: unit.contextSeq,
     entryId: unit.contextUnitId,
     entry: { type: "message", message: unit.semanticContent as unknown as AgentMessage },
     contentHash: unit.contentHash,
@@ -70,8 +75,9 @@ export function unitsToSequencedEntries(
     ordinal += 1;
     return {
       runtimeSessionId,
-      entrySeq: ordinal,
-      ...(unit.contextSeq !== undefined ? { contextSeq: unit.contextSeq } : {}),
+      // iris_agent#110: use contextSeq as entrySeq (globally monotonic within lineage)
+      entrySeq: unit.contextSeq ?? ordinal,
+      contextSeq: unit.contextSeq,
       entryId: unit.contextUnitId,
       entry: { type: "message", message: unit.semanticContent as unknown as AgentMessage },
       contentHash: unit.contentHash,

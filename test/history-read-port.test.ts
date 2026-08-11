@@ -63,12 +63,13 @@ function closeStore(store: ContextStore, dir: string): void {
 function makeUnit(
   overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>,
 ): ContextMessageUnitV1 {
+  const seq = (overrides["contextSeq"] as number | undefined) ?? 0;
   return {
     schemaId: "iris.context_message_unit.v1",
-    contextUnitId: "unit-x",
+    contextUnitId: `unit-${seq}`,
     contextLineageId: "identity-test",
-    contextSeq: 0,
-    runtimeEventId: "evt-x",
+    contextSeq: seq,
+    runtimeEventId: `evt-${seq}`,
     kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
     historianDisposition: "include",
@@ -126,20 +127,18 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
     store.insertUnit(
       makeUnit({
         contextSeq: 1,
-        entrySeq: 3,
         contextUnitId: "u-1",
-        unitId: "u-1",
-        sourceEventId: "e-1",
+        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 3, entryIds: ["entry-1"] },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
         contextSeq: 2,
-        entrySeq: 8,
         contextUnitId: "a-2",
-        unitId: "a-2",
-        sourceEventId: "e-2",
+        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 8, entryIds: ["entry-2"] },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
@@ -147,6 +146,7 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
         kind: "assistant",
         semanticSchemaId: "iris.semantic.context_message.assistant.v1",
         contextUnitId: "a-3",
+        rawArchiveRef: undefined,
         unitId: "a-3",
         sourceEventId: "e-3",
       }),
@@ -182,16 +182,20 @@ test("R3-P1 port: units with NULL entry_seq inside the prefix are skipped (MAX o
     // 前缀内唯一携带 entry_seq 的是 contextSeq 2（entry_seq 5）；contextSeq 1
     // 无 entry_seq → 不参与，MAX 仍为 5。
     store.insertUnit(
-      makeUnit({ contextSeq: 1, contextUnitId: "u-1", unitId: "u-1", sourceEventId: "e-1" }),
+      makeUnit({
+        contextSeq: 1, contextUnitId: "u-1", unitId: "u-1", sourceEventId: "e-1",
+      }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
         contextSeq: 2,
-        entrySeq: 5,
         contextUnitId: "a-2",
         unitId: "a-2",
         sourceEventId: "e-2",
+        rawArchiveRef: { schemaId: "iris.raw_archive_ref.v1", runtimeSessionId: SESSION, startEntrySeq: 5, entryIds: ["entry-2"] },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.materializeM0ByContextSeq({
       runtimeSessionId: SESSION,
