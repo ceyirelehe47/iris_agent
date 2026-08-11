@@ -52,8 +52,8 @@ function unit(contextSeq: number, overrides: Partial<HistorianUnitView> = {}): H
     contextUnitId: `unit-${contextSeq}`,
     contextSeq,
     runtimeEventId: `evt-${contextSeq}`,
-    unitType: "input",
-    disposition: "include",
+    kind: "user",
+    historianDisposition: "include",
     contentHash: createHash("sha256").update(`content-${contextSeq}`).digest("hex"),
     derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     ...overrides,
@@ -68,23 +68,33 @@ function stubPort(units: HistorianUnitView[], lineageId = LINEAGE): ContextHisto
     units
       .filter((u) => u.contextSeq >= fromContextSeq && u.contextSeq <= toContextSeq)
       .map((u) => ({
-        lineageId,
-        runtimeSessionId: "attribution-stub",
-        contextSeq: u.contextSeq,
+        schemaId: "iris.context_message_unit.v1" as const,
         contextUnitId: u.contextUnitId,
-        unitId: u.contextUnitId,
-        sourceEventId: u.runtimeEventId,
+        contextLineageId: lineageId,
+        contextSeq: u.contextSeq,
         runtimeEventId: u.runtimeEventId,
-        unitType: u.unitType,
+        kind: u.kind,
         semanticSchemaId: "iris.semantic.context_message.user.v1",
-        disposition: u.disposition,
-        entryId: `entry-${u.contextSeq}`,
-        entrySeq: u.contextSeq,
+        semanticContent: {
+          role: "user" as const,
+          content: `content-${u.contextSeq}`,
+          timestamp: 1,
+        },
+        historianDisposition: u.historianDisposition,
         contentHash: u.contentHash,
-        payload: { role: "user" as const, content: `content-${u.contextSeq}`, timestamp: 1 },
-        paired: false,
-        derivationRefs: u.derivationRefs,
-        schemaVersion: "context-unit-v1",
+        derivationRefs: {
+          schemaId: "iris.semantic_derivation_refs.v1" as const,
+          memoryRefs: u.derivationRefs.memoryRefs,
+          compartmentIds: u.derivationRefs.compartmentIds,
+          sourceContextMessageUnitIds: u.derivationRefs.sourceContextMessageUnitIds,
+        },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1" as const,
+          runtimeSessionId: "attribution-stub",
+          startEntrySeq: u.contextSeq,
+          entryIds: [`entry-${u.contextSeq}`],
+        },
+        lifecycleState: "committed" as const,
         createdAt: "2026-08-01T00:00:00.000Z",
       }));
   return {
@@ -105,8 +115,8 @@ function stubPort(units: HistorianUnitView[], lineageId = LINEAGE): ContextHisto
         contextUnitId: unit.contextUnitId,
         contextSeq: unit.contextSeq,
         runtimeEventId: unit.runtimeEventId,
-        unitType: unit.unitType,
-        disposition: unit.disposition,
+        kind: unit.kind,
+        historianDisposition: unit.historianDisposition,
         contentHash: unit.contentHash,
         derivationRefs: unit.derivationRefs,
         payload: { role: "user", content: `content-${unit.contextSeq}`, timestamp: 0 },
@@ -162,8 +172,10 @@ function fixture(port: ContextHistoryReadPort): Fixture {
         throughContextSeqInclusive: 4096,
       }).units;
       const claimedEntries = claimed
-        .filter((unit) => unit.entrySeq !== undefined)
-        .map((unit) => contextUnitToSequencedEntry(sessionId, unit));
+        .filter((unit) => unit.rawArchiveRef?.startEntrySeq !== undefined)
+        .map((unit) =>
+          contextUnitToSequencedEntry(sessionId, unit, unit.rawArchiveRef?.startEntrySeq),
+        );
       void entries; // the fixture's entries feed freeze through the claim path
       const freeze = freezeBoundary({
         rawSeamInput: {
@@ -344,8 +356,8 @@ test("B10-AC5: production Historian cannot publish without the Context read/clai
     const hp = stubPort([unit(1)]);
     const claimedEntries = hp
       .claimHistorianBatch({ afterContextSeqExclusive: 0, throughContextSeqInclusive: 1 })
-      .units.filter((unit) => unit.entrySeq !== undefined)
-      .map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+      .units.filter((unit) => unit.rawArchiveRef?.startEntrySeq !== undefined)
+      .map((unit) => contextUnitToSequencedEntry(SESSION, unit, unit.rawArchiveRef?.startEntrySeq));
     const freeze = freezeBoundary({
       rawSeamInput: {
         runtimeSessionId: SESSION,
@@ -421,7 +433,7 @@ test("B10-AC6: payloadHash is canonical over the complete payload; provenance ch
     }
 
     // Changed disposition (reference_only) changes the payload hash.
-    const refOnly = unit(1, { disposition: "reference_only" });
+    const refOnly = unit(1, { historianDisposition: "reference_only" });
     const fx3 = fixture(stubPort([refOnly]));
     try {
       await fx3.runCycle([u("u-1", null, "one")]);

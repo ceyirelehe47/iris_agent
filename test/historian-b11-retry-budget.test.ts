@@ -127,23 +127,23 @@ function stubHistoryPort(): ContextHistoryReadPort {
         seq++
       ) {
         units.push({
+          schemaId: "iris.context_message_unit.v1",
           contextLineageId: "identity-b11",
-          runtimeSessionId: "attribution-stub",
           contextSeq: seq,
           contextUnitId: `unit-${seq}`,
-          unitId: `unit-${seq}`,
-          sourceEventId: `evt-${seq}`,
           runtimeEventId: `evt-${seq}`,
-          unitType: "input",
+          kind: "user",
           semanticSchemaId: "iris.semantic.context_message.user.v1",
-          disposition: "include",
-          entryId: `entry-${seq}`,
-          entrySeq: seq,
+          historianDisposition: "include",
           contentHash: "b".repeat(64),
-          payload: { role: "user", content: `content-${seq}`, timestamp: 1 },
-          paired: false,
-          derivationRefs: { schemaId: "iris.semantic_derivation_refs.v1", memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-          schemaVersion: "context-unit-v1",
+          semanticContent: { role: "user", content: `content-${seq}`, timestamp: 1 },
+          derivationRefs: {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          lifecycleState: "committed",
           createdAt: "2026-08-01T00:00:00.000Z",
         });
       }

@@ -146,7 +146,9 @@ test("f4.1: stale session after rollover fails closed (binding moved to new sess
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );
     // The new session resolves fine.
-    store.insertUnit(makeUnit("iris-runtime-2026-08-06-1", 1), { runtimeSessionId: "iris-runtime-2026-08-06-1" });
+    store.insertUnit(makeUnit("iris-runtime-2026-08-06-1", 1), {
+      runtimeSessionId: "iris-runtime-2026-08-06-1",
+    });
     assert.equal(store.listUnits("iris-runtime-2026-08-06-1").length, 1);
   } finally {
     store.close();
@@ -162,7 +164,9 @@ test("f4.1: wrong data root (foreign session) never writes into this store's lin
     // A session from another data root has no binding here → fail closed.
     assert.throws(
       () => {
-        store.insertUnit(makeUnit("other-data-root-session", 1), { runtimeSessionId: "other-data-root-session" });
+        store.insertUnit(makeUnit("other-data-root-session", 1), {
+          runtimeSessionId: "other-data-root-session",
+        });
       },
       (error: unknown) => error instanceof ContextLineageResolutionError,
     );

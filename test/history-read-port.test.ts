@@ -60,7 +60,9 @@ function closeStore(store: ContextStore, dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function makeUnit(overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>): ContextMessageUnitV1 {
+function makeUnit(
+  overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>,
+): ContextMessageUnitV1 {
   return {
     schemaId: "iris.context_message_unit.v1",
     contextUnitId: "unit-x",
@@ -73,7 +75,12 @@ function makeUnit(overrides: Partial<ContextMessageUnitV1> & Record<string, unkn
     contentHash: "h",
     semanticContent: { role: "user", content: "x", timestamp: 0 } as unknown as JsonValue,
     lifecycleState: "committed",
-    derivationRefs: { schemaId: "iris.semantic_derivation_refs.v1", memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
+    derivationRefs: {
+      schemaId: "iris.semantic_derivation_refs.v1",
+      memoryRefs: [],
+      compartmentIds: [],
+      sourceContextMessageUnitIds: [],
+    },
     createdAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
   };

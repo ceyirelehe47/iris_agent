@@ -64,8 +64,7 @@ function fakeHistoryPort(): ContextHistoryReadPort {
         contextSeq: 1,
         runtimeEventId: "evt-1",
         kind: "user",
-        semanticSchemaId: "iris.semantic.context_message.user.v1",
-        disposition: "include",
+        historianDisposition: "include",
         contentHash: "d".repeat(64),
         derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
       },
@@ -76,8 +75,7 @@ function fakeHistoryPort(): ContextHistoryReadPort {
         contextSeq: 1,
         runtimeEventId: "evt-1",
         kind: "user",
-        semanticSchemaId: "iris.semantic.context_message.user.v1",
-        disposition: "include",
+        historianDisposition: "include",
         contentHash: "d".repeat(64),
         derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         payload: { role: "user", content: "hello", timestamp: 0 },
@@ -88,23 +86,23 @@ function fakeHistoryPort(): ContextHistoryReadPort {
       const units: import("../src/contracts/context-units.js").ContextMessageUnit[] = [];
       if (afterContextSeqExclusive < 1 && throughContextSeqInclusive >= 1) {
         units.push({
-          lineageId: "identity-r4",
-          runtimeSessionId: SESSION,
+          contextLineageId: "identity-r4",
           contextSeq: 1,
           contextUnitId: "unit-1",
-          unitId: "unit-1",
-          sourceEventId: "evt-1",
           runtimeEventId: "evt-1",
-          unitType: "input",
+          schemaId: "iris.context_message_unit.v1",
+          kind: "user",
+          lifecycleState: "committed",
           semanticSchemaId: "iris.semantic.context_message.user.v1",
-          disposition: "include",
-          entryId: "entry-1",
-          entrySeq: 1,
+          historianDisposition: "include",
           contentHash: "d".repeat(64),
-          payload: { role: "user", content: "hello", timestamp: 1 },
-          paired: false,
-          derivationRefs: { schemaId: "iris.semantic_derivation_refs.v1", memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-          schemaVersion: "context-unit-v1",
+          semanticContent: { role: "user", content: "hello", timestamp: 1 },
+          derivationRefs: {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
           createdAt: "2026-08-01T00:00:00.000Z",
         });
       }
@@ -208,7 +206,6 @@ const SAMPLE_ENVELOPE = (() => {
     .update(canonicalJson(episodeSourceBase), "utf8")
     .digest("hex");
   const envelopeBase = {
-    schemaVersion: "historian-publication-v3",
     publicationId: `publication-${SESSION}-1`,
     sourceSequence: 1,
     publishedAt: "2026-08-06T00:00:00Z",

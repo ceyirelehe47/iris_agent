@@ -85,9 +85,7 @@ test("Feature A: no handwritten duplicate durable Context unit interface in prod
       return e.isDirectory() ? walk(full) : [full];
     });
   }
-  const tsFiles = walk(srcDir).filter(
-    (f) => f.endsWith(".ts") && !f.includes("context-v27.ts") && !f.includes("context-units.ts"),
-  );
+  const tsFiles = walk(srcDir).filter((f) => f.endsWith(".ts") && !f.includes("context-v27.ts"));
   for (const f of tsFiles) {
     const content = fs.readFileSync(f, "utf8");
     // Strip comments to check only active code

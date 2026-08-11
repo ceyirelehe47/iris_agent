@@ -241,7 +241,10 @@ export function historianBatchHash(input: {
   afterContextSeqExclusive: number;
   throughContextSeqInclusive: number;
   units: ReadonlyArray<
-    Pick<import("./context-v27.js").ContextMessageUnitV1, "contextSeq" | "contextUnitId" | "contentHash">
+    Pick<
+      import("./context-v27.js").ContextMessageUnitV1,
+      "contextSeq" | "contextUnitId" | "contentHash"
+    >
   >;
 }): string {
   const body = input.units

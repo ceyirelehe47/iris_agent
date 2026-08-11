@@ -733,8 +733,7 @@ export class ContextStore implements ContextUnitStorePort {
       }
       throw error;
     }
-    const disposition =
-      count >= this.maxUnitsPerSession ? "exclude" : unit.historianDisposition;
+    const disposition = count >= this.maxUnitsPerSession ? "exclude" : unit.historianDisposition;
     const boundLineageId = verify ? this.resolveLineageId(sessionId) : unit.contextLineageId;
     if (verify && unit.contextLineageId !== boundLineageId) {
       throw new ContextLineageResolutionError(sessionId);
@@ -1042,7 +1041,8 @@ export class ContextStore implements ContextUnitStorePort {
     // rows); fallback derives it from unit_type via the canonical map.
     const semanticSchemaId =
       row.semantic_schema_id ??
-      (KIND_TO_SEMANTIC_SCHEMA_ID[kind] ?? "iris.semantic.context_message.unknown.v1");
+      KIND_TO_SEMANTIC_SCHEMA_ID[kind] ??
+      "iris.semantic.context_message.unknown.v1";
     const derivationRefs = parseStoredDerivationRefs(row.derivation_refs);
     const unit: ContextMessageUnitV1 = {
       schemaId: "iris.context_message_unit.v1",
