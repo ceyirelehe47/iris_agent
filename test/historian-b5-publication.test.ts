@@ -502,7 +502,7 @@ test("B5: a publication with recall projections commits assessment deltas in the
         afterContextSeqExclusive: 0,
         throughContextSeqInclusive: entries.length,
       })
-      .units.map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+      .units.map((unit, i) => contextUnitToSequencedEntry(SESSION, unit, i + 1));
     // R3-P1 适配：freezeBoundary 拆分为 { rawSeamInput }。
     const freeze = freezeBoundary({
       rawSeamInput: {
@@ -571,7 +571,7 @@ test("B5: a publication commit-hook failure rolls back cursor + publication + ou
         afterContextSeqExclusive: 0,
         throughContextSeqInclusive: entries.length,
       })
-      .units.map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+      .units.map((unit, i) => contextUnitToSequencedEntry(SESSION, unit, i + 1));
     // R3-P1 适配：freezeBoundary 拆分为 { rawSeamInput }。
     const freeze = freezeBoundary({
       rawSeamInput: {
