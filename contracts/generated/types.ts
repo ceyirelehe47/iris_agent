@@ -17,7 +17,7 @@ export type RuntimeEventKind = "user" | "assistant" | "tool_call" | "tool_result
 
 export type HistorianDisposition = "include" | "reference_only" | "exclude";
 
-export type ContextMessageUnitLifecycleState = "committed" | "historian_eligible" | "historian_claimed" | "compartmentalized_pending_bust" | "represented_in_p3" | "retired";
+export type ContextMessageUnitLifecycleState = "committed" | "historian_eligible" | "historian_claimed" | "compartmentalized_pending_bust" | "represented_in_p3" | "retired" | "legacy_committed_unknown";
 
 // --- Schema ID constants ---
 export const IRIS_RAW_ARCHIVE_REF_V1_SCHEMA_ID = "iris.raw_archive_ref.v1" as const;

@@ -24,7 +24,8 @@
         "historian_claimed",
         "compartmentalized_pending_bust",
         "represented_in_p3",
-        "retired"
+        "retired",
+        "legacy_committed_unknown"
       ]
     }
   },
