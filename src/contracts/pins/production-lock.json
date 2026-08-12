@@ -17,8 +17,8 @@
     "fork": {
       "repository": "blueforst/pi",
       "baselineCommit": "ab5f8d88ee1d400c0c8fb5c50ac10b2f4a4851d1",
-      "seamCommit": "edd724be790ec3a73b3a85bb051882a45acc5c72",
-      "seamTree": "b0a87becb5add1f52c571e168918933b8cffe531",
+      "seamCommit": "205ed90416ed258a5c223f2e6c817cdd70d390fc",
+      "seamTree": "66a1b7165880884f18c3a9238e8f70a9a705a479",
       "acceptedRuntimeRepository": "blueforst/pi",
       "acceptedRuntimeCommit": "66a3ea14616a438f47d3121979c0581c22ea64bb",
       "acceptedRuntimeTree": "a6bdb67ab97a087e3e0285746462545780ea19b3",
@@ -32,7 +32,9 @@
     "release": "v0.33.0",
     "commit": "48ab531d8fa98af2f463db2e4d9f8ffdd63d765e",
     "authoritativePath": "packages/plugin/src/hooks/magic-context",
-    "explicitlyNotAdopted": ["experimental.memory_mural"]
+    "explicitlyNotAdopted": [
+      "experimental.memory_mural"
+    ]
   },
   "memoryContracts": {
     "package": "iris-memory-contracts",

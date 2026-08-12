@@ -144,13 +144,14 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
       assert.ok(source.sourceHash.length > 0);
     });
 
-    it("semanticContent payload plane accepts JsonValue (type-level; shape is schema-enforced)", () => {
+    it("unknown semanticSchemaId fails closed (payload plane is JsonValue, shape is schema-enforced)", () => {
       // The payload PLANE is JsonValue — any JSON is storable at the type
       // level (Feature B: structural acceptance only). Concrete SHAPE is
-      // enforced per semanticSchemaId by validateUnitV2Strict — this test
-      // uses the by-design open schema (p5.unknown.v1) on purpose: text_v1
-      // now rejects everything that is not a plain string (see
-      // semantic-schema-validation.test.ts).
+      // enforced per semanticSchemaId by validateUnitV2Strict, and the
+      // FORBIDDEN escape hatches (text_v1 / p5.unknown.v1) were removed by
+      // Feature A6: any semanticSchemaId outside the GENERATED registry
+      // fails closed as unknown.
+      const unknown = "iris.semantic.context_message.does_not_exist.v999";
       const cases: JsonValue[] = [
         "hello",
         42,
@@ -158,10 +159,16 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
         null,
         [1, "two", { three: true }],
         { key: "value", nested: { deep: [1, 2] } },
+        { role: "user", content: "well-formed but unknown schema" },
       ];
       for (const content of cases) {
-        const unit = makeUnit("u", "iris.semantic.p5.unknown.v1", content);
+        const unit = makeUnit("u", unknown, content);
+        // Type level: any JSON is storable.
         assert.deepEqual(unit.semanticContent, content);
+        // Strict level: unknown schema must fail closed.
+        const result = validateUnitV2Strict(unit);
+        assert.ok(!result.valid, `unknown schema must fail closed for payload: ${JSON.stringify(content)}`);
+        assert.match(result.reason ?? "", /unknown semanticSchemaId/);
       }
     });
   });

@@ -78,14 +78,17 @@ function makeValidGeneration(units: ContextUnitV2[]): ContextGenerationV2 {
 // --- Tests ---
 
 test("B1: valid generation passes strict validation", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello"), makeValidUnit("u2", "world")]);
+  const gen = makeValidGeneration([
+    makeValidUnit("u1", { role: "user", content: "hello" }),
+    makeValidUnit("u2", { role: "user", content: "world" }),
+  ]);
   const result = validateGenerationV2Strict(gen);
   assert.ok(result.valid, `should be valid: ${result.reason}`);
 });
 
 test("B1b: user.v1 validates proper role+content objects", () => {
   // user.v1 requires {role, content} — a valid payload passes.
-  const unit = makeValidUnit("u1", "test content");
+  const unit = makeValidUnit("u1", { role: "user", content: "test content" });
   const unitResult = validateUnitV2Strict(unit);
   assert.ok(unitResult.valid, `valid user.v1 payload must pass unit validation: ${unitResult.reason}`);
 
@@ -105,7 +108,7 @@ test("B2: schemaId tag alone does NOT establish validity", () => {
 });
 
 test("B3: missing required header field is rejected", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
+  const gen = makeValidGeneration([makeValidUnit("u1", { role: "user", content: "hello" })]);
   // Delete the field entirely (not just set to undefined)
   const headerCopy: Record<string, unknown> = { ...gen.header };
   delete headerCopy["contextLineageId"];
@@ -116,7 +119,7 @@ test("B3: missing required header field is rejected", () => {
 });
 
 test("B4: contentHash mismatch is rejected", () => {
-  const unit = makeValidUnit("u1", "hello");
+  const unit = makeValidUnit("u1", { role: "user", content: "hello" });
   const tampered: ContextUnitV2 = {
     ...unit,
     header: {
@@ -131,7 +134,7 @@ test("B4: contentHash mismatch is rejected", () => {
 });
 
 test("B5: contextGenerationHash mismatch is rejected", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
+  const gen = makeValidGeneration([makeValidUnit("u1", { role: "user", content: "hello" })]);
   const tampered = {
     ...gen,
     header: { ...gen.header, contextGenerationHash: "deadbeef" },
@@ -142,7 +145,7 @@ test("B5: contextGenerationHash mismatch is rejected", () => {
 });
 
 test("B6: unknown unit schemaId is rejected", () => {
-  const unit = makeValidUnit("u1", "hello");
+  const unit = makeValidUnit("u1", { role: "user", content: "hello" });
   const badUnit = { ...unit, schemaId: "iris.context_unit.v999" };
   const gen = makeValidGeneration([badUnit as ContextUnitV2]);
   // Override with a generation that has a valid hash for the tampered units
@@ -152,7 +155,7 @@ test("B6: unknown unit schemaId is rejected", () => {
 });
 
 test("B7: forbidden layer field in unit header is rejected", () => {
-  const unit = makeValidUnit("u1", "hello");
+  const unit = makeValidUnit("u1", { role: "user", content: "hello" });
   const badUnit = {
     ...unit,
     header: { ...unit.header, layer: 5 } as unknown,
@@ -204,7 +207,7 @@ test("B10: valid V1 is migrated and output passes full V2 validator", () => {
 });
 
 test("B11: V2 with valid structure but wrong hash is rejected at fence", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
+  const gen = makeValidGeneration([makeValidUnit("u1", { role: "user", content: "hello" })]);
   const tampered = {
     ...gen,
     header: { ...gen.header, contextGenerationHash: "wrong-hash" },
@@ -221,7 +224,7 @@ test("B12: neither V1 nor V2 shape is rejected", () => {
 });
 
 test("B13: layerEnds[5] != units.length is rejected", () => {
-  const gen = makeValidGeneration([makeValidUnit("u1", "hello")]);
+  const gen = makeValidGeneration([makeValidUnit("u1", { role: "user", content: "hello" })]);
   const tampered = {
     ...gen,
     header: {
