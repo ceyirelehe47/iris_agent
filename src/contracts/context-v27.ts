@@ -374,6 +374,18 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "layer",
       "pLevel",
     ],
+    // Feature B (goal.txt §4): concrete shape contract. A tool_call unit
+    // carries a message-shaped payload (the assistant message holding the
+    // toolCall parts) — never a bare string/array/primitive. The ingest
+    // layer does not yet produce tool_call units (only user/assistant/
+    // tool_result); the object contract is the floor for any future
+    // producer and rejects shape garbage today.
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "tool_call semanticContent must be an object (message-shaped)";
+      }
+      return null;
+    },
   },
   "iris.semantic.context_message.tool_result.v1": {
     schemaId: "iris.semantic.context_message.tool_result.v1",
@@ -386,6 +398,18 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "layer",
       "pLevel",
     ],
+    // Feature B: concrete shape contract — the ingest layer writes the raw
+    // Pi AgentMessage for tool_result events (role === "toolResult").
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "tool_result semanticContent must be an object";
+      }
+      const obj = content as Record<string, unknown>;
+      if (obj["role"] !== "toolResult") {
+        return "tool_result semanticContent.role must be 'toolResult'";
+      }
+      return null;
+    },
   },
   "iris.semantic.context_message.body_event.v1": {
     schemaId: "iris.semantic.context_message.body_event.v1",
@@ -398,6 +422,15 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "layer",
       "pLevel",
     ],
+    // Feature B: concrete shape contract — body events are message-shaped
+    // objects. No producer is wired in the ingest layer yet; the object
+    // contract rejects bare strings/arrays/primitives today.
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "body_event semanticContent must be an object (event-shaped)";
+      }
+      return null;
+    },
   },
   "iris.semantic.context_message.operational.v1": {
     schemaId: "iris.semantic.context_message.operational.v1",
@@ -410,6 +443,15 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "layer",
       "pLevel",
     ],
+    // Feature B: concrete shape contract — operational events are
+    // message-shaped objects. No producer is wired in the ingest layer yet;
+    // the object contract rejects bare strings/arrays/primitives today.
+    validateContent: (content) => {
+      if (content === null || typeof content !== "object" || Array.isArray(content)) {
+        return "operational semanticContent must be an object (event-shaped)";
+      }
+      return null;
+    },
   },
   "iris.semantic.text_v1": {
     schemaId: "iris.semantic.text_v1",
@@ -422,8 +464,20 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "layer",
       "pLevel",
     ],
-    // Migrated V1 content is a plain string — no structural requirements.
+    // Feature B (goal.txt §4): the text contract is a PLAIN STRING. V1
+    // migration produces string bodies; arbitrary objects/arrays/numbers
+    // are rejected — text_v1 is not a generic escape hatch.
+    validateContent: (content) => {
+      if (typeof content !== "string") {
+        return "text_v1 semanticContent must be a plain string";
+      }
+      return null;
+    },
   },
+  // By design NO content validator: this is the fail-safe schema for
+  // unrecognized P5 content — its whole purpose is to carry unknown shapes
+  // without lying about their semantics. Control-metadata rejection still
+  // applies; shape is deliberately open.
   "iris.semantic.p5.unknown.v1": {
     schemaId: "iris.semantic.p5.unknown.v1",
     forbiddenPayloadFields: [
@@ -436,6 +490,8 @@ const SEMANTIC_SCHEMA_REGISTRY: Record<string, SemanticSchemaSpecV1> = {
       "pLevel",
     ],
   },
+  // Source-ref schema (v1ToF2Fence sourceSchemaId), NOT a unit payload
+  // schema — no content validator applies.
   "iris.legacy_flat_v1.source": {
     schemaId: "iris.legacy_flat_v1.source",
     forbiddenPayloadFields: [

@@ -77,12 +77,23 @@ function makeValidGeneration(units: ContextUnitV2[]): ContextGenerationV2 {
 // --- Tests ---
 
 test("B1: valid generation passes strict validation", () => {
-  const gen = makeValidGeneration([
-    makeValidUnit("u1", "hello"),
-    makeValidUnit("u2", { text: "world" }),
-  ]);
+  const gen = makeValidGeneration([makeValidUnit("u1", "hello"), makeValidUnit("u2", "world")]);
   const result = validateGenerationV2Strict(gen);
   assert.ok(result.valid, `should be valid: ${result.reason}`);
+});
+
+test("B1b (Feature B): text_v1 rejects object payloads through strict validation", () => {
+  // goal.txt §4: text_v1 is a PLAIN-STRING contract — an object payload is
+  // not a valid text unit, at unit level AND through the whole generation.
+  const unit = makeValidUnit("u1", { text: "world" });
+  const unitResult = validateUnitV2Strict(unit);
+  assert.ok(!unitResult.valid, "text_v1 object payload must fail unit validation");
+  assert.match(unitResult.reason ?? "", /text_v1 semanticContent must be a plain string/);
+
+  const gen = makeValidGeneration([unit]);
+  const genResult = validateGenerationV2Strict(gen);
+  assert.ok(!genResult.valid, "text_v1 object payload must fail generation validation");
+  assert.match(genResult.reason ?? "", /semantic validation failed/);
 });
 
 test("B2: schemaId tag alone does NOT establish validity", () => {

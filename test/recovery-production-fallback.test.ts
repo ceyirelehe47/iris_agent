@@ -12,7 +12,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../src/contracts/ports.js";
 import type { AgentInput } from "../src/contracts/origin.js";
 import type { AgentRuntimePhase } from "../src/contracts/runtime-ports.js";
-import type { PreparedInvocationSources } from "../src/contracts/context.js";
+import type { InvocationSourceBinding } from "../src/contracts/context.js";
 import { RuntimeCoordinator, type ModelOverridePort } from "../src/runtime/runtime-coordinator.js";
 import type { ActiveRuntimePort } from "../src/runtime/active-runtime-registry.js";
 
@@ -52,7 +52,7 @@ function makeFakeActiveRuntime(runtime: FakeRuntime): ActiveRuntimePort {
           blocks: [],
           interaction: { interactionId: "i-001" },
         },
-        prepared: {} as PreparedInvocationSources,
+        prepared: {} as InvocationSourceBinding,
         invocationId: "",
       },
     }),
@@ -117,12 +117,15 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
       prepareInvocation: async (
         _input: AgentInput,
         runtimeSessionId: string,
-      ): Promise<PreparedInvocationSources> => ({
+      ): Promise<InvocationSourceBinding> => ({
         contextSourceSnapshotId: "snap-001",
         runtimeSessionId,
+        epochId: "epoch-test",
+        personaSnapshotId: "persona-default-v1",
+        declarationVersion: "decl-v1",
+        providerProfileId: "mock-iris-provider-v1",
         canonicalSystemPrompt: "test",
         systemProjectionHash: "hash",
-        materializationIdentity: "test-v1",
         preparedAt: "2026-08-09T12:00:00Z",
       }),
     });
@@ -183,12 +186,15 @@ describe("iris_agent#89: production fallback dispatch seam", () => {
       prepareInvocation: async (
         _input: AgentInput,
         runtimeSessionId: string,
-      ): Promise<PreparedInvocationSources> => ({
+      ): Promise<InvocationSourceBinding> => ({
         contextSourceSnapshotId: "snap-002",
         runtimeSessionId,
+        epochId: "epoch-test",
+        personaSnapshotId: "persona-default-v1",
+        declarationVersion: "decl-v1",
+        providerProfileId: "mock-iris-provider-v1",
         canonicalSystemPrompt: "test",
         systemProjectionHash: "hash",
-        materializationIdentity: "test-v1",
         preparedAt: "2026-08-09T12:00:00Z",
       }),
     });

@@ -1,6 +1,6 @@
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
 import type { Model } from "@earendil-works/pi-ai";
@@ -119,17 +119,19 @@ export interface RuntimeCoordinatorOptions {
    */
   modelOverride?: ModelOverridePort;
   /**
-   * Derives InvocationSourceBinding + canonical system prompt for an input,
-   * scoped to the active runtime Session/Epoch. Called before every prompt().
-   * v13：invocation 只绑定 prepared sources（currentInvocation）；m0/m1/P5
-   * 物化由 ContextRenderer/contextController 在 provider render 时完成
-   * （v12 的 ContextRuntimePort.prepare 语义已删除）。
+   * Derives the InvocationSourceBinding (Pi-runtime binding: session binding +
+   * epoch info + canonical system prompt identity) for an input, scoped to
+   * the active runtime Session/Epoch. Called before every prompt().
+   * Feature B (goal.txt §5): the binding is a MINIMAL Pi-runtime binding —
+   * it carries NO Context assembly state. m0/m1 materialization is owned by
+   * ContextRenderer/contextController at provider render time (v12 的
+   * ContextRuntimePort.prepare / materializationIdentity mock 已删除).
    */
   prepareInvocation: (
     input: AgentInput,
     runtimeSessionId: string,
     epochId: string,
-  ) => Promise<PreparedInvocationSources>;
+  ) => Promise<InvocationSourceBinding>;
   /**
    * Fired exactly once per invocation when Pi native settled is observed on
    * the bound active Epoch. The Host uses this to release the invocation and,

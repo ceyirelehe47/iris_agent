@@ -43,7 +43,7 @@ import type { AgentHarness, Session } from "@earendil-works/pi-agent-core";
 
 import type { AgentRuntimeEvent } from "../src/contracts/ports.js";
 import type { AgentInput } from "../src/contracts/origin.js";
-import type { PreparedInvocationSources } from "../src/contracts/context.js";
+import type { InvocationSourceBinding } from "../src/contracts/context.js";
 import type { InvocationBinding } from "../src/runtime/harness-factory.js";
 import {
   RuntimeCoordinator,
@@ -292,7 +292,7 @@ function buildComposition(): HostComposition {
       input: AgentInput,
       runtimeSessionId: string,
       epochId: string,
-    ): Promise<PreparedInvocationSources> =>
+    ): Promise<InvocationSourceBinding> =>
       prepareContextSources(input, runtimeSessionId, epochId, defaultAgentConfig(), NOW_ISO),
   });
 
