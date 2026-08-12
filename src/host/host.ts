@@ -1106,7 +1106,13 @@ export class IrisHost {
         // entered Pi Session.
         reconcileOutcomeUnknown: options.outcomeReconciler
           ? async (signal) => {
-              return options.outcomeReconciler!({
+              return (
+                options.outcomeReconciler as (s: {
+                  logicalExecutionId: string;
+                  inputId: string;
+                  dispatchId: string;
+                }) => Promise<"confirmed_applied" | "replay_safe" | "ambiguous">
+              )({
                 logicalExecutionId: signal.logicalExecutionId ?? "unknown",
                 inputId: signal.inputId ?? "unknown",
                 dispatchId: signal.dispatchId ?? "unknown",

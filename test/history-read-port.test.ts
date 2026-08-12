@@ -18,8 +18,6 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-
 import type { ContextMessageUnitV1, JsonValue } from "../src/contracts/context-v27.js";
 import { ContextStore } from "../src/context/context-store.js";
 import {
@@ -63,7 +61,7 @@ function closeStore(store: ContextStore, dir: string): void {
 function makeUnit(
   overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>,
 ): ContextMessageUnitV1 {
-  const seq = (overrides["contextSeq"] as number | undefined) ?? 0;
+  const seq = (overrides.contextSeq as number | undefined) ?? 0;
   return {
     schemaId: "iris.context_message_unit.v1",
     contextUnitId: `unit-${seq}`,

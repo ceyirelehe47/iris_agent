@@ -239,8 +239,9 @@ function buildComposition(): HostComposition {
   models.setProvider(fauxA.provider);
   models.setProvider(fauxB.provider);
   const catalog = models.getModels() as Model<string>[];
-  const modelA = fauxA.getModel("model-x")!;
-  const modelB = fauxB.getModel("model-x")!;
+  const modelA = fauxA.getModel("model-x");
+  const modelB = fauxB.getModel("model-x");
+  if (!modelA || !modelB) throw new Error("test setup: model-x not found");
   assert.equal(modelA.id, modelB.id, "fixture: duplicate model id across providers");
   assert.notEqual(modelA.provider, modelB.provider, "fixture: providers must differ");
 
@@ -336,7 +337,8 @@ async function runSupervised(
 
 function fallbackEvents(events: RecoverySupervisorEvent[]): RecoveryEscalationEvent[] {
   return events.filter(
-    (e): e is RecoveryEscalationEvent => e.type === "recovery_escalation" && e.action === "fallback",
+    (e): e is RecoveryEscalationEvent =>
+      e.type === "recovery_escalation" && e.action === "fallback",
   );
 }
 
@@ -357,7 +359,11 @@ test("#111 AC1: duplicate model id across providers — fallback a/model-x → b
 
   // Attempt 1 through the REAL supervisor: the active model is already
   // provider-a/model-x, so the qualified comparison must SKIP setModel.
-  const events1 = await runSupervised(c.supervisor, sampleAgentInput(), "logical-exec-1:input-0001");
+  const events1 = await runSupervised(
+    c.supervisor,
+    sampleAgentInput(),
+    "logical-exec-1:input-0001",
+  );
   assert.ok(events1.some((e) => e.type === "settled"));
   assert.equal(
     c.capsuleA.harness.setModelCalls.length,
@@ -371,7 +377,10 @@ test("#111 AC1: duplicate model id across providers — fallback a/model-x → b
   // the currently active model, DIFFERENT provider. #111 regression: the
   // old comparison (qualified id vs bare model.id) skipped setModel here.
   const events2: AgentRuntimeEvent[] = [];
-  for await (const event of c.coordinator.promptWithModel(inputWithId("input-0002"), "provider-b/model-x")) {
+  for await (const event of c.coordinator.promptWithModel(
+    inputWithId("input-0002"),
+    "provider-b/model-x",
+  )) {
     events2.push(event);
   }
   assert.ok(events2.some((e) => e.type === "settled"));
@@ -394,7 +403,11 @@ test("#111 AC2: rollover then fallback — new Capsule setModel exactly once, ol
   const c = buildComposition();
 
   // Invocation 1 on Capsule A through the REAL supervisor: settles normally.
-  const events1 = await runSupervised(c.supervisor, sampleAgentInput(), "logical-exec-1:input-0001");
+  const events1 = await runSupervised(
+    c.supervisor,
+    sampleAgentInput(),
+    "logical-exec-1:input-0001",
+  );
   assert.ok(events1.some((e) => e.type === "settled"));
   assert.equal(c.capsuleA.harness.setModelCalls.length, 0);
 
@@ -403,14 +416,21 @@ test("#111 AC2: rollover then fallback — new Capsule setModel exactly once, ol
   assert.equal(c.registry.getActiveRuntime().epochId, EPOCH_B.epochId);
 
   // Invocation 2 on the NEW active Capsule (B) through the supervisor.
-  const events2 = await runSupervised(c.supervisor, inputWithId("input-0002"), "logical-exec-1:input-0002");
+  const events2 = await runSupervised(
+    c.supervisor,
+    inputWithId("input-0002"),
+    "logical-exec-1:input-0002",
+  );
   assert.ok(events2.some((e) => e.type === "settled"));
   assert.equal(c.capsuleB.harness.setModelCalls.length, 0, "no redundant setModel on Capsule B");
 
   // Fallback fires on Capsule B: the override port routes through the
   // registry to the CURRENT active Capsule — exactly once, on B.
   const events3: AgentRuntimeEvent[] = [];
-  for await (const event of c.coordinator.promptWithModel(inputWithId("input-0003"), "provider-b/model-x")) {
+  for await (const event of c.coordinator.promptWithModel(
+    inputWithId("input-0003"),
+    "provider-b/model-x",
+  )) {
     events3.push(event);
   }
   assert.ok(events3.some((e) => e.type === "settled"));
@@ -432,10 +452,17 @@ test("#111 AC2: rollover then fallback — new Capsule setModel exactly once, ol
 test("#111 AC3: provider dispatch target — post-fallback dispatch is handled by provider-b", async () => {
   const c = buildComposition();
 
-  const events1 = await runSupervised(c.supervisor, sampleAgentInput(), "logical-exec-1:input-0001");
+  const events1 = await runSupervised(
+    c.supervisor,
+    sampleAgentInput(),
+    "logical-exec-1:input-0001",
+  );
   assert.ok(events1.some((e) => e.type === "settled"));
   const events2: AgentRuntimeEvent[] = [];
-  for await (const event of c.coordinator.promptWithModel(inputWithId("input-0002"), "provider-b/model-x")) {
+  for await (const event of c.coordinator.promptWithModel(
+    inputWithId("input-0002"),
+    "provider-b/model-x",
+  )) {
     events2.push(event);
   }
   assert.ok(events2.some((e) => e.type === "settled"));
@@ -463,7 +490,10 @@ test("#111 AC4: getActiveModelId switches across provider fallback (a/model-x �
   await runSupervised(c.supervisor, sampleAgentInput(), "logical-exec-1:input-0001");
   assert.equal(activeQualifiedId(c), "provider-a/model-x", "settle does not change the model");
 
-  for await (const _event of c.coordinator.promptWithModel(inputWithId("input-0002"), "provider-b/model-x")) {
+  for await (const _event of c.coordinator.promptWithModel(
+    inputWithId("input-0002"),
+    "provider-b/model-x",
+  )) {
     void _event;
   }
 
@@ -479,7 +509,10 @@ test("#111 AC4: getActiveModelId switches across provider fallback (a/model-x �
   // qualified id vs bare model.id — would have re-set).
   const before = c.capsuleA.harness.setModelCalls.length;
   const events3: AgentRuntimeEvent[] = [];
-  for await (const event of c.coordinator.promptWithModel(inputWithId("input-0003"), "provider-b/model-x")) {
+  for await (const event of c.coordinator.promptWithModel(
+    inputWithId("input-0003"),
+    "provider-b/model-x",
+  )) {
     events3.push(event);
   }
   assert.ok(events3.some((e) => e.type === "settled"));
@@ -499,7 +532,11 @@ test("#111 AC5: stale adapter setModel after rollover has zero effect on the cur
   const c = buildComposition();
 
   // Settle Capsule A, then roll over to Capsule B (no fallback yet).
-  const events1 = await runSupervised(c.supervisor, sampleAgentInput(), "logical-exec-1:input-0001");
+  const events1 = await runSupervised(
+    c.supervisor,
+    sampleAgentInput(),
+    "logical-exec-1:input-0001",
+  );
   assert.ok(events1.some((e) => e.type === "settled"));
   assert.equal(c.registry.casSwap(EPOCH_A.epochId, c.handleB), true);
 
@@ -523,7 +560,10 @@ test("#111 AC5: stale adapter setModel after rollover has zero effect on the cur
   // Now the production fallback fires on the active Capsule: the override
   // port routes through the registry to Capsule B — Capsule A's stale model
   // is never consulted.
-  for await (const _event of c.coordinator.promptWithModel(inputWithId("input-0002"), "provider-b/model-x")) {
+  for await (const _event of c.coordinator.promptWithModel(
+    inputWithId("input-0002"),
+    "provider-b/model-x",
+  )) {
     void _event;
   }
 
@@ -572,7 +612,10 @@ test("#111 AC6: watchdog-driven supervisor fallback runs end-to-end against the 
   assert.deepEqual(c.capsuleA.harness.dispatchProviders, ["provider-a", "provider-b"]);
 
   // Settled outcome + durable state reflect the qualified fallback model.
-  assert.ok(events.some((e) => e.type === "settled"), "supervisor stream must settle");
+  assert.ok(
+    events.some((e) => e.type === "settled"),
+    "supervisor stream must settle",
+  );
   assert.equal(c.supervisor.getState()?.currentModel, "provider-b/model-x");
   assert.equal(activeQualifiedId(c), "provider-b/model-x");
 });

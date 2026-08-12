@@ -189,7 +189,7 @@ test("f2-xrepo: crash between durable append and publication is recovered exactl
     const events = ledger.listBySession(s2.epoch.runtimeSessionId);
     const finalized = events.filter((event) => event.type === "message_finalized");
     assert.equal(finalized.length, 1, "exactly one message_finalized must land in the ledger");
-    assert.equal(finalized[0]?.["entryId"], await s2.session.getLeafId());
+    assert.equal(finalized[0]?.entryId, await s2.session.getLeafId());
 
     // A second recovery must not re-emit (ack persisted) and the ledger must
     // not gain duplicates.
@@ -417,7 +417,7 @@ test("f2-xrepo: rollover keeps per-session recovery independent and never resets
       .listBySession(s.epoch.runtimeSessionId)
       .filter((e) => e.type === "message_finalized");
     assert.equal(finalizedA.length, 1);
-    assert.equal(finalizedA[0]?.["entryId"], aEntryId);
+    assert.equal(finalizedA[0]?.entryId, aEntryId);
     await closeSessionStorage(repoA);
 
     // Session B events continue cleanly (no reset, no cross-talk).
@@ -601,7 +601,7 @@ test("f2-xrepo: tampered persisted receipt is quarantined, never emitted, never 
     );
     const quarantined = await s.session.readQuarantinedCommitReceipts();
     assert.equal(quarantined.length, 1);
-    assert.equal(quarantined[0]?.["entryId"], entryId);
+    assert.equal(quarantined[0]?.entryId, entryId);
     assert.match(quarantined[0]?.reason ?? "", /content_hash_mismatch/);
 
     ledger.close();
@@ -870,10 +870,7 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     context2.ingest.ensureUnitsUpTo(metadata2.id);
     const unitsAfterRestart = context2.store.listUnits(metadata2.id);
     assert.deepEqual(
-      unitsAfterRestart.map((u) => [
-        u.contextUnitId,
-        u.contextSeq,
-      ]),
+      unitsAfterRestart.map((u) => [u.contextUnitId, u.contextSeq]),
       [
         ["input-e-legacy-a", 1],
         [`input-${framedEntryId}`, 2],
@@ -1053,9 +1050,7 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     }
     // No unit may exist for the acked pair or the torn tail.
     assert.ok(
-      !context.store
-        .listUnits(metadata.id)
-        .some((u) => u.contextUnitId === "input-e-acked-a"),
+      !context.store.listUnits(metadata.id).some((u) => u.contextUnitId === "input-e-acked-a"),
       "acked receipts must never produce Context units",
     );
 
@@ -1104,9 +1099,7 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     assert.equal(await harness2.recoverPendingCommitReceipts(), 0, "restart must replay nothing");
     context2.ingest.ensureUnitsUpTo(metadata2.id);
     assert.deepEqual(
-      context2.store
-        .listUnits(metadata2.id)
-        .map((u) => [u.contextUnitId, u.contextSeq]),
+      context2.store.listUnits(metadata2.id).map((u) => [u.contextUnitId, u.contextSeq]),
       [
         ["input-e-pending-b", 1],
         [`input-${framedEntryId}`, 2],
