@@ -944,6 +944,23 @@ export class ContextStore implements ContextUnitStorePort {
       compartmentIds: [],
       sourceContextMessageUnitIds: [],
     };
+    // Feature A5 (#113): content_hash is the canonical hash of the row's OWN
+    // durable semantic state, and the basis covers historianDisposition. The
+    // soft cap may force the effective disposition to 'exclude' AFTER the
+    // caller built the unit (ingest/fixtures hash over their declared
+    // disposition); the stored hash must cover the disposition AS STORED, so
+    // recompute over the effective disposition — write and restart/read
+    // verification then agree on ONE hash for ONE stored state.
+    const contentHash =
+      disposition === unit.historianDisposition
+        ? unit.contentHash
+        : computeContextMessageUnitContentHashV1({
+            semanticSchemaId: unit.semanticSchemaId,
+            kind: unit.kind,
+            historianDisposition: disposition,
+            derivationRefs,
+            semanticContent: unit.semanticContent,
+          });
     this.db
       .prepare(
         `INSERT INTO context_units (
@@ -963,7 +980,7 @@ export class ContextStore implements ContextUnitStorePort {
         disposition,
         entryId,
         entrySeq,
-        unit.contentHash,
+        contentHash,
         JSON.stringify(unit.semanticContent),
         null,
         null,

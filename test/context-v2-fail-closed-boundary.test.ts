@@ -118,7 +118,7 @@ test("B4: contentHash mismatch is rejected", () => {
   const gen = makeValidGeneration([tampered]);
   const result = validateGenerationV2Strict(gen);
   assert.ok(!result.valid);
-  assert.match(result.reason ?? "", /contentHash mismatch/);
+  assert.match(result.reason ?? "", /P5 contentHash must equal its durable source sourceHash/);
 });
 
 test("B5: contextGenerationHash mismatch is rejected", () => {
