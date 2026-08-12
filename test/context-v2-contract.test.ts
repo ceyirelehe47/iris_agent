@@ -115,7 +115,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("ContextUnitV2 has exactly schemaId, header, semanticContent", () => {
-      const unit = makeUnit("u1", "iris.semantic.text_v1", "hello");
+      const unit = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "hello" });
       assert.equal(unit.schemaId, "iris.context_unit.v2");
       assert.ok("header" in unit);
       assert.ok("semanticContent" in unit);
@@ -123,7 +123,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("ContextUnitHeaderV1 has exact fields: schemaId, contextUnitId, source, semanticSchemaId, contentHash", () => {
-      const unit = makeUnit("u1", "iris.semantic.text_v1", "hello");
+      const unit = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "hello" });
       const header = unit.header;
       assert.equal(header.schemaId, "iris.context_unit_header.v1");
       assert.ok("contextUnitId" in header);
@@ -133,7 +133,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("ContextUnitSourceRefV1 has required sourceHash (not optional)", () => {
-      const unit = makeUnit("u1", "iris.semantic.text_v1", "x");
+      const unit = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" });
       const source = unit.header.source;
       assert.equal(source.schemaId, "iris.context_unit_source_ref.v1");
       assert.ok("sourceSchemaId" in source);
@@ -167,7 +167,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
 
   describe("P0-P5 membership from layerEnds only", () => {
     it("unit does NOT carry layer/pLevel discriminator", () => {
-      const unit = makeUnit("u1", "iris.semantic.text_v1", "hello");
+      const unit = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "hello" });
       assert.equal(hasForbiddenUnitFields(unit), false);
       assert.ok(!("layer" in unit));
       assert.ok(!("pLevel" in unit));
@@ -179,7 +179,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
       const badUnit = {
         schemaId: CONTEXT_UNIT_V2_SCHEMA_ID,
         header: {
-          ...makeUnit("u1", "iris.semantic.text_v1", "x").header,
+          ...makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" }).header,
           layer: 3,
         },
         semanticContent: "x",
@@ -191,7 +191,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
       const badUnit = {
         schemaId: CONTEXT_UNIT_V2_SCHEMA_ID,
         header: {
-          ...makeUnit("u1", "iris.semantic.text_v1", "x").header,
+          ...makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" }).header,
           pLevel: 2,
         },
         semanticContent: "x",
@@ -206,9 +206,9 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
       assert.equal(unitLayer(gen0, 0), null);
 
       // Units only in P0 and P5, P1-P4 empty
-      const u0 = makeUnit("u0", "iris.semantic.text_v1", "system");
-      const u5a = makeUnit("u5a", "iris.semantic.text_v1", "hello");
-      const u5b = makeUnit("u5b", "iris.semantic.text_v1", "hi");
+      const u0 = makeUnit("u0", "iris.semantic.context_message.user.v1", { role: "user", content: "system" });
+      const u5a = makeUnit("u5a", "iris.semantic.context_message.user.v1", { role: "user", content: "hello" });
+      const u5b = makeUnit("u5b", "iris.semantic.context_message.user.v1", { role: "user", content: "hi" });
       const gen = makeGeneration([u0, u5a, u5b], [1, 1, 1, 1, 1, 3]);
       assert.equal(unitLayer(gen, 0), 0);
       assert.equal(unitLayer(gen, 1), 5);
@@ -221,9 +221,9 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
 
   describe("semantic discriminator is semanticSchemaId only", () => {
     it("semanticContent does not duplicate identity/type/hash metadata", () => {
-      const unit = makeUnit("u1", "iris.semantic.text_v1", "hello world");
+      const unit = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "hello world" });
       // semanticContent is pure semantic payload
-      assert.equal(unit.semanticContent, "hello world");
+      assert.deepEqual(unit.semanticContent, { role: "user", content: "hello world" });
       // No type/kind field in header that restates semantic schema
       assert.ok(!("type" in unit.header));
       assert.ok(!("kind" in unit.header));
@@ -278,8 +278,8 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
         assert.equal(m0.header.contextUnitId, "u1");
         assert.equal(m0.header.source.sourceHash, "hash-u1");
         assert.equal(m1.header.source.sourceHash, "ch-2"); // falls back to contentHash
-        assert.equal(m0.semanticContent, "hello");
-        assert.equal(m1.semanticContent, "world");
+        assert.deepEqual(m0.semanticContent, { role: "user", content: "hello" });
+        assert.deepEqual(m1.semanticContent, { role: "user", content: "world" });
         assert.deepEqual([...m.header.layerEnds], [1, 1, 1, 1, 1, 2]);
         assert.ok(validateGenerationV2(m));
       }
@@ -296,7 +296,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
 
     it("V1 and V2 cannot mix in the same pipeline (V2 input returns 'v2', not 'migrated')", () => {
       const gen = makeGeneration(
-        [makeUnit("u1", "iris.semantic.text_v1", "x")],
+        [makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" })],
         [0, 0, 0, 0, 0, 1],
       );
       const result = v1ToF2Fence(gen, "lineage", "gen", "snap", "2026-01-01");
@@ -307,8 +307,8 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
   describe("deterministic ordering and hash behavior", () => {
     it("same inputs produce same contextGenerationHash", () => {
       const units = [
-        makeUnit("u1", "iris.semantic.text_v1", "a"),
-        makeUnit("u2", "iris.semantic.text_v1", "b"),
+        makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "a" }),
+        makeUnit("u2", "iris.semantic.context_message.user.v1", { role: "user", content: "b" }),
       ];
       const h1 = computeContextGenerationHash({
         schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
@@ -328,8 +328,8 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("different unit order produces different hash", () => {
-      const u1 = makeUnit("u1", "iris.semantic.text_v1", "a");
-      const u2 = makeUnit("u2", "iris.semantic.text_v1", "b");
+      const u1 = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "a" });
+      const u2 = makeUnit("u2", "iris.semantic.context_message.user.v1", { role: "user", content: "b" });
       const h1 = computeContextGenerationHash({
         schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
         contextLineageId: "L1",
@@ -348,8 +348,8 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("different layerEnds produce different hash", () => {
-      const u1 = makeUnit("u1", "iris.semantic.text_v1", "a");
-      const u2 = makeUnit("u2", "iris.semantic.text_v1", "b");
+      const u1 = makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "a" });
+      const u2 = makeUnit("u2", "iris.semantic.context_message.user.v1", { role: "user", content: "b" });
       const h1 = computeContextGenerationHash({
         schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
         contextLineageId: "L1",
@@ -368,7 +368,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
     });
 
     it("different lineage produces different hash", () => {
-      const units = [makeUnit("u1", "iris.semantic.text_v1", "a")];
+      const units = [makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "a" })];
       const h1 = computeContextGenerationHash({
         schemaId: CONTEXT_GENERATION_V2_SCHEMA_ID,
         contextLineageId: "L1",
@@ -401,11 +401,8 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
               sourceId: "sys-source",
               sourceHash: "sys-hash",
             },
-            // Feature B (goal.txt §4): text_v1 is the plain-string text
-            // contract — a system prompt unit under text_v1 carries the
-            // prompt as a string, never a wrapped object.
-            semanticSchemaId: "iris.semantic.text_v1",
-            semanticContent: "You are Iris",
+            semanticSchemaId: "iris.semantic.context_message.user.v1",
+            semanticContent: { role: "user", content: "You are Iris" },
           },
         ],
         p1Units: [],
@@ -465,11 +462,11 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
           contextUnitId: "u1",
           source: {
             schemaId: CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
-            sourceSchemaId: "iris.semantic.text_v1",
+            sourceSchemaId: "iris.semantic.context_message.user.v1",
             sourceId: "s1",
             sourceHash: "", // empty → invalid
           },
-          semanticSchemaId: "iris.semantic.text_v1",
+          semanticSchemaId: "iris.semantic.context_message.user.v1",
           contentHash: "ch1",
         },
         semanticContent: "hello",
@@ -480,7 +477,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
 
     it("validateGenerationV2 rejects invalid layerEnds (e5 != units.length)", () => {
       const gen = makeGeneration(
-        [makeUnit("u1", "iris.semantic.text_v1", "x")],
+        [makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" })],
         [0, 0, 0, 0, 0, 0], // says 0 units but has 1
       );
       assert.equal(validateGenerationV2(gen), false);
