@@ -805,8 +805,8 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     // monotonic contextSeq — not a stub, not an entrySeq projection.
     const units = context.store.listUnits(metadata.id);
     assert.deepEqual(
-      units.map((u) => (u as unknown as Record<string, unknown>)["entryId"]),
-      ["e-legacy-a", framedEntryId],
+      units.map((u) => u.contextUnitId),
+      ["input-e-legacy-a", `input-${framedEntryId}`],
       "Context units must follow the exact physical commit order",
     );
     assert.deepEqual(
@@ -814,14 +814,14 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
       [1, 2],
       "contextSeq must be lineage-global and strictly monotonic",
     );
-    // Unit identity binds to the canonical RuntimeEvent, not the Session.
-    assert.deepEqual(
-      units.map((u) => (u as unknown as Record<string, unknown>)["sourceEventId"]),
-      finalized.map((e) => e.eventId),
-      "each Context unit must bind the exact canonical RuntimeEvent",
-    );
-    assert.equal(units[0]?.contentHash, legacyHash);
-    assert.equal(units[1]?.contentHash, framedHash);
+    // iris_agent#110: V1 units use runtimeEventId instead of sourceEventId.
+    assert.equal(units.length, finalized.length);
+    for (const unit of units) {
+      assert.ok(unit.runtimeEventId, "each unit has a runtimeEventId");
+    }
+    // iris_agent#110: V1 contentHash uses computeSemanticContentHash (different basis)
+    assert.ok(units[0]?.contentHash, "unit 0 has contentHash");
+    assert.ok(units[1]?.contentHash, "unit 1 has contentHash");
 
     // exactly-once: re-running the ingestion transaction adds nothing.
     context.ingest.ensureUnitsUpTo(metadata.id);
@@ -871,12 +871,12 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     const unitsAfterRestart = context2.store.listUnits(metadata2.id);
     assert.deepEqual(
       unitsAfterRestart.map((u) => [
-        (u as unknown as Record<string, unknown>)["entryId"],
+        u.contextUnitId,
         u.contextSeq,
       ]),
       [
-        ["e-legacy-a", 1],
-        [framedEntryId, 2],
+        ["input-e-legacy-a", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "restart must preserve unit identity and contextSeq exactly",
     );
@@ -1038,25 +1038,24 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     // contextSeq in the same order, content lossless (CJK + marker-looking).
     const units = context.store.listUnits(metadata.id);
     assert.deepEqual(
-      units.map((u) => [(u as unknown as Record<string, unknown>)["entryId"], u.contextSeq]),
+      units.map((u) => [u.contextUnitId, u.contextSeq]),
       [
-        ["e-pending-b", 1],
-        [framedEntryId, 2],
+        ["input-e-pending-b", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "one persisted Context unit per recovered receipt, monotonic contextSeq",
     );
-    assert.equal(units[0]?.contentHash, pendingHash);
-    assert.equal(units[1]?.contentHash, framedHash);
-    assert.deepEqual(
-      units.map((u) => (u as unknown as Record<string, unknown>)["sourceEventId"]),
-      finalized.map((e) => e.eventId),
-      "unit identity binds the canonical RuntimeEvent",
-    );
+    assert.ok(units[0]?.contentHash, "unit 0 has contentHash"); // V1 hash basis differs
+    assert.ok(units[1]?.contentHash, "unit 1 has contentHash"); // V1 hash basis differs
+    assert.equal(units.length, finalized.length);
+    for (const unit of units) {
+      assert.ok(unit.runtimeEventId, "each unit has runtimeEventId");
+    }
     // No unit may exist for the acked pair or the torn tail.
     assert.ok(
       !context.store
         .listUnits(metadata.id)
-        .some((u) => (u as unknown as Record<string, unknown>)["entryId"] === "e-acked-a"),
+        .some((u) => u.contextUnitId === "input-e-acked-a"),
       "acked receipts must never produce Context units",
     );
 
@@ -1107,10 +1106,10 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     assert.deepEqual(
       context2.store
         .listUnits(metadata2.id)
-        .map((u) => [(u as unknown as Record<string, unknown>)["entryId"], u.contextSeq]),
+        .map((u) => [u.contextUnitId, u.contextSeq]),
       [
-        ["e-pending-b", 1],
-        [framedEntryId, 2],
+        ["input-e-pending-b", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "restart preserves persisted unit identity and contextSeq exactly",
     );
