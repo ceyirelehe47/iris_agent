@@ -193,7 +193,7 @@ function parseStoredDerivationRefs(raw: string): SemanticDerivationRefsV1 {
     "compartmentIds",
     "workSnapshotVersion",
     "sourceContextMessageUnitIds",
-    "sourceContextUnitIds",
+    LEGACY_SOURCE_CONTEXT_MESSAGE_UNIT_IDS_KEY,
   ]);
   for (const key of Object.keys(record)) {
     if (!knownKeys.has(key)) {
@@ -221,7 +221,10 @@ function parseStoredDerivationRefs(raw: string): SemanticDerivationRefsV1 {
   );
   // Explicit legacy migration: the deprecated pre-v27 key name. Only legal
   // when the canonical key is absent (both present → ambiguous → fail closed).
-  const legacySourceIds = stringList(record["sourceContextUnitIds"], "sourceContextUnitIds");
+  const legacySourceIds = stringList(
+    record[LEGACY_SOURCE_CONTEXT_MESSAGE_UNIT_IDS_KEY],
+    LEGACY_SOURCE_CONTEXT_MESSAGE_UNIT_IDS_KEY,
+  );
   if (legacySourceIds !== undefined && sourceContextMessageUnitIds !== undefined) {
     throw new Error(
       "context rowToUnit: derivation_refs carries BOTH sourceContextUnitIds and " +
@@ -395,7 +398,10 @@ function parseLifecycleState(raw: string): ContextMessageUnitLifecycleState {
  * if the on-disk schema_migrations.max(version) is NEWER than this constant
  * (a newer binary wrote state this binary cannot read).
  */
-export const LATEST_MIGRATION_VERSION = "0008_lifecycle_state";
+export // iris_agent#113: legacy fence — this key name is prohibited in new contracts
+// but must be read for backward-compatible SQLite deserialization
+const LEGACY_SOURCE_CONTEXT_MESSAGE_UNIT_IDS_KEY = "sourceContextUnitIds";
+const LATEST_MIGRATION_VERSION = "0008_lifecycle_state";
 
 /**
  * R2-P3：每 session 的 context_units 软 cap（语义 ledger 有界化的第一级）。

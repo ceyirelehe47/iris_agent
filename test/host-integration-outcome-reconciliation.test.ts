@@ -60,10 +60,7 @@ import { directUserRequest } from "../src/contracts/origin.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
 import { InputAcceptanceLedger } from "../src/host/ingress.js";
 import { IrisHost } from "../src/host/host.js";
-import {
-  freshRecoveryState,
-  RecoveryStateStore,
-} from "../src/runtime/recovery-state.js";
+import { freshRecoveryState, RecoveryStateStore } from "../src/runtime/recovery-state.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -104,9 +101,11 @@ interface ReconcilerCall {
 function makeReconciler(
   calls: ReconcilerCall[],
   disposition: "confirmed_applied" | "replay_safe" | "ambiguous",
-): (signal: { logicalExecutionId: string; inputId: string; dispatchId: string }) => Promise<
-  "confirmed_applied" | "replay_safe" | "ambiguous"
-> {
+): (signal: {
+  logicalExecutionId: string;
+  inputId: string;
+  dispatchId: string;
+}) => Promise<"confirmed_applied" | "replay_safe" | "ambiguous"> {
   return async (signal) => {
     calls.push({ ...signal });
     return disposition;
@@ -171,6 +170,7 @@ function installThrowingProvider(): void {
 
 /** Wrap the provider call with a call counter (real implementation runs). */
 function installPromptCounter(counter: { promptCalls: number }): void {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
   const realPrompt = AgentHarness.prototype.prompt;
   mock.method(
     AgentHarness.prototype,
@@ -402,11 +402,7 @@ test("D5: confirmed_applied — settle without replay (zero provider dispatch)",
       0,
       "confirmed_applied must settle with ZERO provider dispatch (no duplicate side effects)",
     );
-    assert.equal(
-      events.includes("turn_start"),
-      false,
-      "confirmed_applied must never start a turn",
-    );
+    assert.equal(events.includes("turn_start"), false, "confirmed_applied must never start a turn");
     assert.equal(events.includes("failed"), false, "confirmed_applied is not a failure");
     assert.equal(host.health().ready, true);
     assert.equal(

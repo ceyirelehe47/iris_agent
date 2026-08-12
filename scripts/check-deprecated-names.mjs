@@ -40,7 +40,10 @@ const DEPRECATED_NAMES = [
 ];
 
 // Files where LegacyFlat types are permitted (they define/test the fence)
-const LEGACY_TYPE_EXEMPT_FILES = new Set(["src/contracts/context-v27.ts"]);
+const LEGACY_TYPE_EXEMPT_FILES = new Set([
+  "src/contracts/context-v27.ts",
+  "src/context/context-store.ts",
+]);
 
 const EXEMPT_PATH_PATTERNS = [
   /node_modules\//,
@@ -106,7 +109,9 @@ for (const file of trackedFiles) {
       if (regex.test(line)) {
         // LegacyFlat types are only allowed in their definition file + tests
         if (
-          (name === "LegacyFlatV1Generation" || name === "LegacyFlatV1Unit") &&
+          (name === "LegacyFlatV1Generation" ||
+            name === "LegacyFlatV1Unit" ||
+            name === "sourceContextUnitIds") &&
           LEGACY_TYPE_EXEMPT_FILES.has(file)
         ) {
           continue;
