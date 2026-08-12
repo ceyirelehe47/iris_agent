@@ -10,6 +10,9 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   KIND_TO_SEMANTIC_SCHEMA_ID,
   SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+  computeContextMessageUnitContentHashV1,
+  computeSemanticContentHash,
+  type ContextMessageUnitLifecycleState,
   type ContextMessageUnitV1,
   type JsonValue,
   type RawArchiveRefV1,
@@ -59,6 +62,8 @@ interface UnitRow {
   schema_version: string;
   raw_archive_ref: string | null;
   semantic_schema_id: string | null;
+  lifecycle_state: string;
+  content_hash_basis: string;
   created_at: string;
 }
 
@@ -150,57 +155,238 @@ function physicalDispositionToHistorian(
 }
 
 /**
- * Feature A (#110): parse the stored derivation refs JSON into the canonical
- * SemanticDerivationRefsV1. The physical column may hold either the legacy
- * shape ({memoryRefs, compartmentIds, sourceContextMessageUnitIds}) or the
- * canonical V1 shape (schemaId + optional fields). Corrupt/unparseable →
- * undefined (the V1 unit then simply omits derivationRefs — nothing is
- * fabricated on a read-only path).
+ * Feature A5 (#113): strict, lossless parse of the stored derivation refs
+ * JSON into the canonical SemanticDerivationRefsV1. FAIL CLOSED:
+ *
+ * - invalid JSON / non-object / wrong-typed members → throw (never silently
+ *   omitted, never filtered into a different canonical meaning);
+ * - unknown keys → throw (a value with unknown keys is not a valid
+ *   SemanticDerivationRefsV1 object);
+ * - the DEPRECATED legacy key `sourceContextUnitIds` is explicitly migrated
+ *   to `sourceContextMessageUnitIds` when the canonical key is absent (both
+ *   present → ambiguous → throw);
+ * - a missing schemaId (pre-Feature-A shape) is explicitly migrated by
+ *   tagging the canonical schemaId; a PRESENT schemaId must equal the
+ *   canonical value.
+ *
+ * Key presence is preserved (empty arrays stay present), so the parsed
+ * object matches byte-for-byte what the write path hashed.
  */
-function parseStoredDerivationRefs(raw: string): SemanticDerivationRefsV1 | undefined {
+function parseStoredDerivationRefs(raw: string): SemanticDerivationRefsV1 {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch {
-    return undefined;
+    throw new Error(
+      `context rowToUnit: corrupt derivation_refs JSON ${JSON.stringify(raw)} (fail closed)`,
+    );
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return undefined;
+    throw new Error(
+      `context rowToUnit: derivation_refs must be an object, got ${JSON.stringify(raw)} (fail closed)`,
+    );
   }
   const record = parsed as Record<string, unknown>;
-  const stringList = (value: unknown): string[] | undefined =>
-    Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : undefined;
-  const memoryRefs = stringList(record["memoryRefs"]);
-  const compartmentIds = stringList(record["compartmentIds"]);
-  const sourceContextMessageUnitIds = stringList(record["sourceContextMessageUnitIds"]);
-  const workSnapshotVersion =
-    typeof record["workSnapshotVersion"] === "number" ? record["workSnapshotVersion"] : undefined;
+  const knownKeys = new Set<string>([
+    "schemaId",
+    "memoryRefs",
+    "compartmentIds",
+    "workSnapshotVersion",
+    "sourceContextMessageUnitIds",
+    "sourceContextUnitIds",
+  ]);
+  for (const key of Object.keys(record)) {
+    if (!knownKeys.has(key)) {
+      throw new Error(
+        `context rowToUnit: derivation_refs contains unknown key ${JSON.stringify(key)} (fail closed)`,
+      );
+    }
+  }
+  const stringList = (value: unknown, field: string): string[] | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(value) || value.some((member) => typeof member !== "string")) {
+      throw new Error(
+        `context rowToUnit: derivation_refs.${field} must be an array of strings (fail closed)`,
+      );
+    }
+    return value as string[];
+  };
+  const memoryRefs = stringList(record["memoryRefs"], "memoryRefs");
+  const compartmentIds = stringList(record["compartmentIds"], "compartmentIds");
+  const sourceContextMessageUnitIds = stringList(
+    record["sourceContextMessageUnitIds"],
+    "sourceContextMessageUnitIds",
+  );
+  // Explicit legacy migration: the deprecated pre-v27 key name. Only legal
+  // when the canonical key is absent (both present → ambiguous → fail closed).
+  const legacySourceIds = stringList(record["sourceContextUnitIds"], "sourceContextUnitIds");
+  if (legacySourceIds !== undefined && sourceContextMessageUnitIds !== undefined) {
+    throw new Error(
+      "context rowToUnit: derivation_refs carries BOTH sourceContextUnitIds and " +
+        "sourceContextMessageUnitIds (ambiguous legacy+canonical) (fail closed)",
+    );
+  }
+  const workSnapshotVersion = record["workSnapshotVersion"];
+  if (workSnapshotVersion !== undefined && typeof workSnapshotVersion !== "number") {
+    throw new Error(
+      `context rowToUnit: derivation_refs.workSnapshotVersion must be a number (fail closed)`,
+    );
+  }
+  const storedSchemaId = record["schemaId"];
+  if (storedSchemaId !== undefined && storedSchemaId !== SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID) {
+    throw new Error(
+      `context rowToUnit: derivation_refs has unknown schemaId ${JSON.stringify(storedSchemaId)} (fail closed)`,
+    );
+  }
   return {
     schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
-    ...(memoryRefs !== undefined && memoryRefs.length > 0 ? { memoryRefs } : {}),
-    ...(compartmentIds !== undefined && compartmentIds.length > 0 ? { compartmentIds } : {}),
+    ...(memoryRefs !== undefined ? { memoryRefs } : {}),
+    ...(compartmentIds !== undefined ? { compartmentIds } : {}),
     ...(workSnapshotVersion !== undefined ? { workSnapshotVersion } : {}),
-    ...(sourceContextMessageUnitIds !== undefined && sourceContextMessageUnitIds.length > 0
+    ...(sourceContextMessageUnitIds !== undefined
       ? { sourceContextMessageUnitIds }
-      : {}),
+      : legacySourceIds !== undefined
+        ? { sourceContextMessageUnitIds: legacySourceIds }
+        : {}),
   };
 }
 
 /**
- * Feature A (#110): parse the stored raw archive ref into the canonical
- * RawArchiveRefV1. New writes store canonical JSON; pre-Feature-A rows hold
- * the legacy `pi://session/<id>/entry/<entryId>` string form, which the
- * persistence layer keeps as-is (no structural type needed at this layer).
+ * Feature A5 (#113): strict, lossless parse of the stored raw archive ref
+ * into a REAL RawArchiveRefV1 object at runtime (no type-cast masquerade).
+ *
+ * - Canonical JSON form: parsed and structurally validated field by field;
+ *   a corrupt or unknown-shaped object fails closed.
+ * - Legacy string form (`pi://session/<id>/entry/<entryId>`, pre-Feature-A
+ *   rows): EXPLICITLY parsed/migrated into the structured contract. The
+ *   session id and entry id are extracted; any other string fails closed.
  */
 function parseStoredRawArchiveRef(raw: string): RawArchiveRefV1 {
-  if (raw.startsWith("{")) {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    let parsed: unknown;
     try {
-      return JSON.parse(raw) as RawArchiveRefV1;
+      parsed = JSON.parse(trimmed) as unknown;
     } catch {
-      // fall through to the legacy string form
+      throw new Error(
+        `context rowToUnit: corrupt raw_archive_ref JSON ${JSON.stringify(raw)} (fail closed)`,
+      );
     }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        `context rowToUnit: raw_archive_ref must be an object, got ${JSON.stringify(raw)} (fail closed)`,
+      );
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record["schemaId"] !== "iris.raw_archive_ref.v1") {
+      throw new Error(
+        `context rowToUnit: raw_archive_ref has unknown schemaId ${JSON.stringify(record["schemaId"])} (fail closed)`,
+      );
+    }
+    const runtimeSessionId = record["runtimeSessionId"];
+    if (typeof runtimeSessionId !== "string" || runtimeSessionId.length === 0) {
+      throw new Error(
+        "context rowToUnit: raw_archive_ref.runtimeSessionId must be a non-empty string (fail closed)",
+      );
+    }
+    const optionalNumber = (value: unknown, field: string): number | undefined => {
+      if (value === undefined) {
+        return undefined;
+      }
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+        throw new Error(
+          `context rowToUnit: raw_archive_ref.${field} must be a non-negative integer (fail closed)`,
+        );
+      }
+      return value;
+    };
+    const optionalStringList = (value: unknown, field: string): readonly string[] | undefined => {
+      if (value === undefined) {
+        return undefined;
+      }
+      if (!Array.isArray(value) || value.some((member) => typeof member !== "string")) {
+        throw new Error(
+          `context rowToUnit: raw_archive_ref.${field} must be an array of strings (fail closed)`,
+        );
+      }
+      return value as string[];
+    };
+    const startEntrySeq = optionalNumber(record["startEntrySeq"], "startEntrySeq");
+    const endEntrySeq = optionalNumber(record["endEntrySeq"], "endEntrySeq");
+    const entryIds = optionalStringList(record["entryIds"], "entryIds");
+    const blobRefs = optionalStringList(record["blobRefs"], "blobRefs");
+    const sourceHash = record["sourceHash"];
+    if (sourceHash !== undefined && typeof sourceHash !== "string") {
+      throw new Error(
+        "context rowToUnit: raw_archive_ref.sourceHash must be a string (fail closed)",
+      );
+    }
+    for (const key of Object.keys(record)) {
+      if (
+        ![
+          "schemaId",
+          "runtimeSessionId",
+          "startEntrySeq",
+          "endEntrySeq",
+          "entryIds",
+          "sourceHash",
+          "blobRefs",
+        ].includes(key)
+      ) {
+        throw new Error(
+          `context rowToUnit: raw_archive_ref contains unknown key ${JSON.stringify(key)} (fail closed)`,
+        );
+      }
+    }
+    const ref: RawArchiveRefV1 = {
+      schemaId: "iris.raw_archive_ref.v1",
+      runtimeSessionId,
+      ...(startEntrySeq !== undefined ? { startEntrySeq } : {}),
+      ...(endEntrySeq !== undefined ? { endEntrySeq } : {}),
+      ...(entryIds !== undefined ? { entryIds } : {}),
+      ...(sourceHash !== undefined ? { sourceHash } : {}),
+      ...(blobRefs !== undefined ? { blobRefs } : {}),
+    };
+    return ref;
   }
-  return raw as unknown as RawArchiveRefV1;
+  // Legacy string form — explicitly migrated, never cast.
+  const legacy = /^pi:\/\/session\/([^/]+)\/entry\/(.+)$/.exec(trimmed);
+  const runtimeSessionId = legacy?.[1];
+  const entryId = legacy?.[2];
+  if (runtimeSessionId === undefined || entryId === undefined) {
+    throw new Error(
+      `context rowToUnit: unrecognized raw_archive_ref ${JSON.stringify(raw)} (fail closed)`,
+    );
+  }
+  return {
+    schemaId: "iris.raw_archive_ref.v1",
+    runtimeSessionId,
+    entryIds: [entryId],
+  };
+}
+
+/**
+ * Feature A5 (#113): the canonical unit lifecycle states, fail-closed parsed
+ * from the persisted column — never fabricated.
+ */
+const CANONICAL_LIFECYCLE_STATES: readonly ContextMessageUnitLifecycleState[] = [
+  "committed",
+  "historian_eligible",
+  "historian_claimed",
+  "compartmentalized_pending_bust",
+  "represented_in_p3",
+  "retired",
+];
+
+function parseLifecycleState(raw: string): ContextMessageUnitLifecycleState {
+  if ((CANONICAL_LIFECYCLE_STATES as readonly string[]).includes(raw)) {
+    return raw as ContextMessageUnitLifecycleState;
+  }
+  throw new Error(
+    `context rowToUnit: unknown lifecycle_state ${JSON.stringify(raw)} (fail closed)`,
+  );
 }
 
 /**
@@ -209,7 +395,7 @@ function parseStoredRawArchiveRef(raw: string): RawArchiveRefV1 {
  * if the on-disk schema_migrations.max(version) is NEWER than this constant
  * (a newer binary wrote state this binary cannot read).
  */
-export const LATEST_MIGRATION_VERSION = "0007_archive_staging";
+export const LATEST_MIGRATION_VERSION = "0008_lifecycle_state";
 
 /**
  * R2-P3：每 session 的 context_units 软 cap（语义 ledger 有界化的第一级）。
@@ -764,8 +950,8 @@ export class ContextStore implements ContextUnitStorePort {
           context_lineage_id, context_seq, unit_id, runtime_event_id, source_event_id,
           unit_type, disposition, entry_id, entry_seq, content_hash, payload,
           companion_entry_id, pair_key, paired, derivation_refs, schema_version,
-          raw_archive_ref, created_at, semantic_schema_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          raw_archive_ref, lifecycle_state, content_hash_basis, created_at, semantic_schema_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         boundLineageId,
@@ -785,6 +971,10 @@ export class ContextStore implements ContextUnitStorePort {
         JSON.stringify(derivationRefs),
         "context-unit-v1",
         archiveRef === undefined ? null : JSON.stringify(archiveRef),
+        // Feature A5 (#113): persist the REAL lifecycle state and mark the
+        // row as written on the one versioned canonical hash basis ('v2').
+        unit.lifecycleState,
+        "v2",
         unit.createdAt,
         unit.semanticSchemaId,
       );
@@ -795,25 +985,12 @@ export class ContextStore implements ContextUnitStorePort {
     contextSeq: number,
     update: { companionEntryId: string; pairKey: string; paired: boolean; payload: AgentMessage },
   ): void {
-    const result = this.db
-      .prepare(
-        `UPDATE context_units SET
-          companion_entry_id = ?, pair_key = ?, paired = ?, payload = ?
-        WHERE context_lineage_id = ? AND context_seq = ?`,
-      )
-      .run(
-        update.companionEntryId,
-        update.pairKey,
-        update.paired ? 1 : 0,
-        JSON.stringify(update.payload),
-        this.resolveLineageId(runtimeSessionId),
-        contextSeq,
-      );
-    if (result.changes !== 1) {
-      throw new Error(
-        `context updateUnitPairing failed: no unit ${runtimeSessionId}/${contextSeq}`,
-      );
-    }
+    this.updateUnitPairingAtomic(
+      this.resolveLineageId(runtimeSessionId),
+      contextSeq,
+      update,
+      "updateUnitPairing",
+    );
   }
 
   /**
@@ -825,24 +1002,80 @@ export class ContextStore implements ContextUnitStorePort {
     contextSeq: number,
     update: { companionEntryId: string; pairKey: string; paired: boolean; payload: AgentMessage },
   ): void {
-    const result = this.db
-      .prepare(
-        `UPDATE context_units SET
-          companion_entry_id = ?, pair_key = ?, paired = ?, payload = ?
-        WHERE context_lineage_id = ? AND context_seq = ?`,
-      )
-      .run(
-        update.companionEntryId,
-        update.pairKey,
-        update.paired ? 1 : 0,
-        JSON.stringify(update.payload),
-        lineageId,
-        contextSeq,
-      );
-    if (result.changes !== 1) {
-      throw new Error(
-        `context updateUnitPairingByLineage failed: no unit ${lineageId}/${contextSeq}`,
-      );
+    this.updateUnitPairingAtomic(lineageId, contextSeq, update, "updateUnitPairingByLineage");
+  }
+
+  /**
+   * Feature A5 (#113): user companion folding is an ATOMIC canonical semantic
+   * update. Replacing the stored payload (semanticContent) MUST update the
+   * canonical content_hash in the SAME SQL transaction — the persisted hash
+   * always equals the canonical hash of the resulting durable semantic state
+   * (semanticContent + kind + historianDisposition + derivationRefs +
+   * semanticSchemaId of the row, one versioned basis). The row also migrates
+   * to the 'v2' hash basis in the same statement. A missing row or any
+   * failure rolls back the whole update (never a payload/hash split).
+   */
+  private updateUnitPairingAtomic(
+    lineageId: string,
+    contextSeq: number,
+    update: { companionEntryId: string; pairKey: string; paired: boolean; payload: AgentMessage },
+    scope: string,
+  ): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT unit_type, disposition, derivation_refs, semantic_schema_id
+           FROM context_units WHERE context_lineage_id = ? AND context_seq = ?`,
+        )
+        .get(lineageId, contextSeq) as
+        | {
+            unit_type: string;
+            disposition: string;
+            derivation_refs: string;
+            semantic_schema_id: string | null;
+          }
+        | undefined;
+      if (row === undefined) {
+        throw new Error(`context ${scope} failed: no unit ${lineageId}/${contextSeq}`);
+      }
+      const kind = physicalUnitTypeToKind(row.unit_type);
+      const historianDisposition = physicalDispositionToHistorian(row.disposition);
+      const derivationRefs = parseStoredDerivationRefs(row.derivation_refs);
+      const semanticSchemaId =
+        row.semantic_schema_id ??
+        KIND_TO_SEMANTIC_SCHEMA_ID[kind] ??
+        "iris.semantic.context_message.unknown.v1";
+      const contentHash = computeContextMessageUnitContentHashV1({
+        semanticSchemaId,
+        kind,
+        historianDisposition,
+        derivationRefs,
+        semanticContent: update.payload as unknown as JsonValue,
+      });
+      const result = this.db
+        .prepare(
+          `UPDATE context_units SET
+            companion_entry_id = ?, pair_key = ?, paired = ?, payload = ?,
+            content_hash = ?, content_hash_basis = 'v2'
+          WHERE context_lineage_id = ? AND context_seq = ?`,
+        )
+        .run(
+          update.companionEntryId,
+          update.pairKey,
+          update.paired ? 1 : 0,
+          JSON.stringify(update.payload),
+          contentHash,
+          lineageId,
+          contextSeq,
+        );
+      if (result.changes !== 1) {
+        throw new Error(`context ${scope} failed: no unit ${lineageId}/${contextSeq}`);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
   }
 
@@ -1037,6 +1270,11 @@ export class ContextStore implements ContextUnitStorePort {
   private rowToUnitRecord(row: UnitRow): UnitStoreRecord {
     const kind = physicalUnitTypeToKind(row.unit_type);
     const historianDisposition = physicalDispositionToHistorian(row.disposition);
+    // Feature A5 (#113): the REAL persisted lifecycle state — never
+    // fabricated as 'committed' (that would silently collapse
+    // historian_eligible/claimed/pending_bust/represented_in_p3/retired
+    // across restart).
+    const lifecycleState = parseLifecycleState(row.lifecycle_state);
     // semanticSchemaId from the new column (migration 0005 backfills existing
     // rows); fallback derives it from unit_type via the canonical map.
     const semanticSchemaId =
@@ -1044,6 +1282,17 @@ export class ContextStore implements ContextUnitStorePort {
       KIND_TO_SEMANTIC_SCHEMA_ID[kind] ??
       "iris.semantic.context_message.unknown.v1";
     const derivationRefs = parseStoredDerivationRefs(row.derivation_refs);
+    const semanticContent = JSON.parse(row.payload) as JsonValue;
+    this.verifyStoredContentHash({
+      storedHash: row.content_hash,
+      basis: row.content_hash_basis,
+      kind,
+      historianDisposition,
+      semanticSchemaId,
+      derivationRefs,
+      semanticContent,
+      unitId: row.unit_id,
+    });
     const unit: ContextMessageUnitV1 = {
       schemaId: "iris.context_message_unit.v1",
       contextUnitId: row.unit_id,
@@ -1052,16 +1301,14 @@ export class ContextStore implements ContextUnitStorePort {
       runtimeEventId: row.runtime_event_id ?? row.source_event_id,
       kind,
       semanticSchemaId,
-      semanticContent: JSON.parse(row.payload) as JsonValue,
+      semanticContent,
       historianDisposition,
-      ...(derivationRefs !== undefined ? { derivationRefs } : {}),
+      derivationRefs,
       ...(row.raw_archive_ref !== null
         ? { rawArchiveRef: parseStoredRawArchiveRef(row.raw_archive_ref) }
         : {}),
       contentHash: row.content_hash,
-      // The physical table has no lifecycle column; every stored row is a
-      // committed unit (historian eligibility is derived downstream).
-      lifecycleState: "committed",
+      lifecycleState,
       createdAt: row.created_at,
     };
     return {
@@ -1075,6 +1322,56 @@ export class ContextStore implements ContextUnitStorePort {
         paired: row.paired === 1,
       },
     };
+  }
+
+  /**
+   * Feature A5 (#113): restart/read verification against the ONE versioned
+   * canonical hash basis. The stored content_hash must equal the canonical
+   * hash of the row's own durable semantic state; any mismatch means a
+   * hash-basis field (semanticContent, kind, historianDisposition,
+   * derivationRefs, semanticSchemaId, or the hash itself) was tampered or
+   * corrupted → fail closed.
+   *
+   * - 'v2' rows (written by this feature): full versioned basis recompute.
+   * - 'v1' rows (pre-#113): legacy payload-only basis recompute — payload
+   *   tamper still fails closed; the row is explicitly fenced as legacy
+   *   until a pairing update or rewrite migrates it to 'v2'.
+   */
+  private verifyStoredContentHash(input: {
+    storedHash: string;
+    basis: string;
+    kind: ContextMessageUnitV1["kind"];
+    historianDisposition: ContextMessageUnitV1["historianDisposition"];
+    semanticSchemaId: string;
+    derivationRefs: SemanticDerivationRefsV1;
+    semanticContent: JsonValue;
+    unitId: string;
+  }): void {
+    let expectedHash: string;
+    if (input.basis === "v2") {
+      expectedHash = computeContextMessageUnitContentHashV1({
+        semanticSchemaId: input.semanticSchemaId,
+        kind: input.kind,
+        historianDisposition: input.historianDisposition,
+        derivationRefs: input.derivationRefs,
+        semanticContent: input.semanticContent,
+      });
+    } else if (input.basis === "v1") {
+      // Legacy pre-#113 basis: content_hash covered the payload plane only.
+      expectedHash = computeSemanticContentHash(input.semanticContent);
+    } else {
+      throw new Error(
+        `context rowToUnit: unknown content_hash_basis ${JSON.stringify(input.basis)} for unit ${input.unitId} (fail closed)`,
+      );
+    }
+    if (input.storedHash !== expectedHash) {
+      throw new Error(
+        `context rowToUnit: content_hash mismatch for unit ${input.unitId} ` +
+          `(stored ${input.storedHash}, canonical ${expectedHash}); a hash-basis field ` +
+          `(semanticContent/kind/historianDisposition/derivationRefs/semanticSchemaId) was ` +
+          `tampered or corrupted (fail closed)`,
+      );
+    }
   }
 
   /** Raw prepared-statement access for the replay/consumer layers. */

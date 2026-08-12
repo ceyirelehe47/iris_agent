@@ -4,11 +4,12 @@ import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contrac
 import {
   KIND_TO_SEMANTIC_SCHEMA_ID,
   SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
-  computeSemanticContentHash,
+  computeContextMessageUnitContentHashV1,
   type ContextIngestPort,
   type ContextMessageUnitV1,
   type JsonValue,
   type RawArchiveRefV1,
+  type SemanticDerivationRefsV1,
   type UnitDispositionFilter,
 } from "../contracts/context-v27.js";
 import type { RuntimeEvent, RuntimeEventIngestPort } from "../contracts/runtime-events.js";
@@ -242,6 +243,13 @@ export class ContextIngest implements ContextIngestPort {
     kind: "user" | "assistant" | "tool_result",
     semanticContent: JsonValue,
   ): ContextMessageUnitV1 {
+    const semanticSchemaId = KIND_TO_SEMANTIC_SCHEMA_ID[kind];
+    const derivationRefs: SemanticDerivationRefsV1 = {
+      schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+      memoryRefs: [],
+      compartmentIds: [],
+      sourceContextMessageUnitIds: [],
+    };
     const unit: ContextMessageUnitV1 = {
       schemaId: "iris.context_message_unit.v1",
       contextUnitId: `${unitIdPrefixForKind(kind)}-${event.entryId ?? event.eventId}`,
@@ -249,16 +257,20 @@ export class ContextIngest implements ContextIngestPort {
       contextSeq: seq,
       runtimeEventId: event.eventId,
       kind,
-      semanticSchemaId: KIND_TO_SEMANTIC_SCHEMA_ID[kind],
+      semanticSchemaId,
       semanticContent,
       historianDisposition: "include",
-      derivationRefs: {
-        schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
-        memoryRefs: [],
-        compartmentIds: [],
-        sourceContextMessageUnitIds: [],
-      },
-      contentHash: computeSemanticContentHash(semanticContent),
+      derivationRefs,
+      // Feature A5 (#113): the ONE versioned canonical basis — semanticContent
+      // + kind + historianDisposition + derivationRefs + semanticSchemaId —
+      // not a payload-only hash (never the raw event hash either).
+      contentHash: computeContextMessageUnitContentHashV1({
+        semanticSchemaId,
+        kind,
+        historianDisposition: "include",
+        derivationRefs,
+        semanticContent,
+      }),
       lifecycleState: "committed",
       ...(event.entryId !== undefined
         ? {

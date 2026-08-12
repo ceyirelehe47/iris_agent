@@ -10,6 +10,7 @@ import { ContextIngest } from "../src/context/context-ingest.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
 import type { PiSeamEvent } from "../src/contracts/runtime-events.js";
 import type { ContextMessageUnit } from "../src/contracts/context-units.js";
+import { computeContextMessageUnitContentHashV1 } from "../src/contracts/context-v27.js";
 
 /**
  * F4 (iris_agent#9): identity-level Context fail-closed lineage resolution.
@@ -61,7 +62,7 @@ function makeUnit(
   contextSeq: number,
   overrides: Partial<ContextMessageUnit> = {},
 ): ContextMessageUnit {
-  return {
+  const unit: ContextMessageUnit = {
     schemaId: "iris.context_message_unit.v1",
     contextLineageId: LINEAGE,
     contextSeq,
@@ -75,7 +76,7 @@ function makeUnit(
       timestamp: 1,
     },
     historianDisposition: "include",
-    contentHash: `hash-${contextSeq}`,
+    contentHash: "",
     derivationRefs: {
       schemaId: "iris.semantic_derivation_refs.v1",
       memoryRefs: [],
@@ -86,6 +87,25 @@ function makeUnit(
     createdAt: "2026-08-01T12:00:00.000Z",
     ...overrides,
   };
+  // Feature A5 (#113): the store verifies content_hash on read against the
+  // one versioned canonical basis — hand-built units must carry the real
+  // canonical hash of their own durable semantic state.
+  const contentHash =
+    unit.contentHash !== ""
+      ? unit.contentHash
+      : computeContextMessageUnitContentHashV1({
+          semanticSchemaId: unit.semanticSchemaId,
+          kind: unit.kind,
+          historianDisposition: unit.historianDisposition,
+          derivationRefs: unit.derivationRefs ?? {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          semanticContent: unit.semanticContent as ContextMessageUnit["semanticContent"],
+        });
+  return { ...unit, contentHash };
 }
 
 function sampleEvent(overrides: Partial<PiSeamEvent> = {}): PiSeamEvent {

@@ -31,6 +31,7 @@ import { ContextStore } from "../src/context/context-store.js";
 import { createContextHistoryReadPort } from "../src/context/history-read-port.js";
 import { HistorianManager } from "../src/historian/historian-manager.js";
 import { HistorianStore } from "../src/historian/historian-store.js";
+import { computeContextMessageUnitContentHashV1 } from "../src/contracts/context-v27.js";
 
 const LINEAGE = "identity-b12";
 const SESSION_A = "iris-runtime-2026-08-01-a";
@@ -62,9 +63,26 @@ function insertUnit(
     unitId: string;
     contextUnitId?: string;
     entrySeq?: number;
-    contentHash?: string;
   },
 ): void {
+  const semanticSchemaId = "iris.semantic.context_message.user.v1";
+  const semanticContent = { role: "user", content: `content-${input.contextSeq}`, timestamp: 1 };
+  const derivationRefs = {
+    schemaId: "iris.semantic_derivation_refs.v1" as const,
+    memoryRefs: [],
+    compartmentIds: [],
+    sourceContextMessageUnitIds: [],
+  };
+  // Feature A5 (#113): the store verifies content_hash on read against the
+  // one versioned canonical basis — hand-built units must carry the real
+  // canonical hash of their own durable semantic state.
+  const contentHash = computeContextMessageUnitContentHashV1({
+    semanticSchemaId,
+    kind: "user",
+    historianDisposition: "include",
+    derivationRefs,
+    semanticContent,
+  });
   store.insertUnit(
     {
       schemaId: "iris.context_message_unit.v1",
@@ -73,10 +91,10 @@ function insertUnit(
       contextSeq: input.contextSeq,
       runtimeEventId: `evt-${input.contextSeq}`,
       kind: "user",
-      semanticSchemaId: "iris.semantic.context_message.user.v1",
-      semanticContent: { role: "user", content: `content-${input.contextSeq}`, timestamp: 1 },
+      semanticSchemaId,
+      semanticContent,
       historianDisposition: "include",
-      contentHash: input.contentHash ?? "c".repeat(64),
+      contentHash,
       ...(input.entrySeq === undefined
         ? {}
         : {
@@ -87,12 +105,7 @@ function insertUnit(
               entryIds: [`entry-${input.contextSeq}`],
             },
           }),
-      derivationRefs: {
-        schemaId: "iris.semantic_derivation_refs.v1",
-        memoryRefs: [],
-        compartmentIds: [],
-        sourceContextMessageUnitIds: [],
-      },
+      derivationRefs,
       lifecycleState: "committed",
       createdAt: "t",
     },

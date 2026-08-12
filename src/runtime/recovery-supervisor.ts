@@ -605,7 +605,10 @@ export class RecoverySupervisor {
             if (hasSignalAbort && (stillActive === null || stillActive === undefined)) {
               // Teardown already settled — skip redundant abort
             } else {
-              await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+              await this.abortWithSettlementTimeout(
+                targetInvocationId,
+                `watchdog_${stallDetected}`,
+              );
             }
           } catch (error) {
             // Abort rejected or did not settle in time: never advance or

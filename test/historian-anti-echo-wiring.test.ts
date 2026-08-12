@@ -23,6 +23,7 @@ import type { HistorianUnitView } from "../src/historian/anti-echo.js";
 import type { SequencedSessionEntry } from "../src/contracts/historian.js";
 import { PublicationService } from "../src/historian/historian-publication.js";
 import { HistorianStore } from "../src/historian/historian-store.js";
+import { computeContextMessageUnitContentHashV1 } from "../src/contracts/context-v27.js";
 
 const SESSION = "iris-runtime-2026-08-01-1";
 
@@ -261,6 +262,9 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
   try {
     store.createLineage(makeLineageInput());
     // 插入一个 include input + 一个 derived-only assistant(有 entry_seq)。
+    // Feature A5 (#113): content_hash is verified on read against the one
+    // versioned canonical basis — real stores require the real canonical
+    // hash of each unit's durable semantic state.
     store.insertUnit(
       {
         schemaId: "iris.context_message_unit.v1",
@@ -272,7 +276,18 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
         semanticSchemaId: "iris.semantic.context_message.user.v1",
         semanticContent: { role: "user", content: "hello" },
         historianDisposition: "include",
-        contentHash: "c".repeat(64),
+        contentHash: computeContextMessageUnitContentHashV1({
+          semanticSchemaId: "iris.semantic.context_message.user.v1",
+          kind: "user",
+          historianDisposition: "include",
+          derivationRefs: {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          semanticContent: { role: "user", content: "hello" },
+        }),
         derivationRefs: {
           schemaId: "iris.semantic_derivation_refs.v1",
           memoryRefs: [],
@@ -301,7 +316,18 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
         semanticSchemaId: "iris.semantic.context_message.assistant.v1",
         semanticContent: { role: "assistant", content: "as you recall..." },
         historianDisposition: "include",
-        contentHash: "d".repeat(64),
+        contentHash: computeContextMessageUnitContentHashV1({
+          semanticSchemaId: "iris.semantic.context_message.assistant.v1",
+          kind: "assistant",
+          historianDisposition: "include",
+          derivationRefs: {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: ["mem-1"],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          semanticContent: { role: "assistant", content: "as you recall..." },
+        }),
         derivationRefs: {
           schemaId: "iris.semantic_derivation_refs.v1",
           memoryRefs: ["mem-1"],

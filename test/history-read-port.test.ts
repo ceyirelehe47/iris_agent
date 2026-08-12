@@ -19,6 +19,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ContextMessageUnitV1, JsonValue } from "../src/contracts/context-v27.js";
+import { computeContextMessageUnitContentHashV1 } from "../src/contracts/context-v27.js";
 import { ContextStore } from "../src/context/context-store.js";
 import {
   createContextHistoryReadPort,
@@ -62,7 +63,7 @@ function makeUnit(
   overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>,
 ): ContextMessageUnitV1 {
   const seq = (overrides.contextSeq as number | undefined) ?? 0;
-  return {
+  const unit: ContextMessageUnitV1 = {
     schemaId: "iris.context_message_unit.v1",
     contextUnitId: `unit-${seq}`,
     contextLineageId: "identity-test",
@@ -71,7 +72,7 @@ function makeUnit(
     kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
     historianDisposition: "include",
-    contentHash: "h",
+    contentHash: "",
     semanticContent: { role: "user", content: "x", timestamp: 0 } as unknown as JsonValue,
     lifecycleState: "committed",
     derivationRefs: {
@@ -83,6 +84,25 @@ function makeUnit(
     createdAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
   };
+  // Feature A5 (#113): the store verifies content_hash on read against the
+  // one versioned canonical basis — hand-built units must carry the real
+  // canonical hash of their own durable semantic state.
+  const contentHash =
+    unit.contentHash !== ""
+      ? unit.contentHash
+      : computeContextMessageUnitContentHashV1({
+          semanticSchemaId: unit.semanticSchemaId,
+          kind: unit.kind,
+          historianDisposition: unit.historianDisposition,
+          derivationRefs: unit.derivationRefs ?? {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          semanticContent: unit.semanticContent,
+        });
+  return { ...unit, contentHash };
 }
 
 /** 断言 MaterializedLineageBoundary 的每个字段（无 as/非空断言）。 */

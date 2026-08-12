@@ -653,16 +653,35 @@ export function validateGenerationV2Strict(generation: unknown): {
       return { valid: false, reason: `unit[${i}]: ${unitCheck.reason}` };
     }
 
-    // Verify contentHash by recompute
+    // Verify contentHash against the ONE canonical basis (#113):
+    // - P5 units are 1:1 projections of durable ContextMessageUnitV1 rows.
+    //   The durable contentHash (versioned basis: semanticContent + kind +
+    //   historianDisposition + derivationRefs + semanticSchemaId) is
+    //   verified on the store read path; the V2 projection must preserve it
+    //   exactly through the source ref chain (contentHash === sourceHash).
+    // - Static units (P0–P4) carry no kind/disposition/derivationRefs; their
+    //   contentHash is the payload-plane hash recomputed here.
     const unitRecord = unit as Record<string, unknown>;
     const unitHeader = unitRecord["header"] as Record<string, unknown>;
+    const source = unitHeader["source"] as Record<string, unknown>;
     const semanticContent = unitRecord["semanticContent"] as JsonValue;
-    const expectedHash = computeSemanticContentHash(semanticContent);
-    if (unitHeader["contentHash"] !== expectedHash) {
-      return {
-        valid: false,
-        reason: `unit[${i}]: contentHash mismatch (expected ${expectedHash}, got ${unitHeader["contentHash"]})`,
-      };
+    if (source["sourceSchemaId"] === CONTEXT_MESSAGE_UNIT_V1_SCHEMA_ID) {
+      if (unitHeader["contentHash"] !== source["sourceHash"]) {
+        return {
+          valid: false,
+          reason:
+            `unit[${i}]: P5 contentHash must equal its durable source sourceHash ` +
+            `(projected ${unitHeader["contentHash"]}, source ${source["sourceHash"]})`,
+        };
+      }
+    } else {
+      const expectedHash = computeSemanticContentHash(semanticContent);
+      if (unitHeader["contentHash"] !== expectedHash) {
+        return {
+          valid: false,
+          reason: `unit[${i}]: contentHash mismatch (expected ${expectedHash}, got ${unitHeader["contentHash"]})`,
+        };
+      }
     }
   }
 
@@ -1012,10 +1031,89 @@ export function computeContextGenerationHash(input: {
  * Uses canonical JSON serialization: deterministic key ordering for objects.
  * Two semantically equivalent JsonValue objects with different key insertion
  * order must hash identically (Notion: stable canonical JSON serialization).
+ *
+ * This is the PAYLOAD-PLANE hash. It is the canonical basis for V2 static
+ * units (P0–P4, which by contract carry no kind/disposition/derivationRefs)
+ * and for the legacy v1-basis rows fenced in the persistence layer.
+ *
+ * The canonical DURABLE ContextMessageUnitV1 contentHash — which must cover
+ * semanticContent + kind + historianDisposition + derivationRefs +
+ * semanticSchemaId — is computed by
+ * {@link computeContextMessageUnitContentHashV1} (Feature A5, #113).
  */
 export function computeSemanticContentHash(content: JsonValue): string {
   const canonical = canonicalJsonStringify(content);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/**
+ * The one versioned canonical hash basis for the durable
+ * ContextMessageUnitV1.contentHash (Feature A5, #113).
+ *
+ * Covers exactly: semanticContent + kind + historianDisposition +
+ * derivationRefs + semanticSchemaId. The basis object is canonicalized
+ * (sorted keys, version tag) so write, pairing-update, restart/read, P5
+ * projection and strict V2 validation all agree on ONE hash value for ONE
+ * durable semantic state. Any change to a basis field changes the hash —
+ * tamper fails closed.
+ */
+export interface ContextMessageUnitContentHashBasisV1 {
+  readonly semanticSchemaId: string;
+  readonly kind: RuntimeEventKind;
+  readonly historianDisposition: HistorianDisposition;
+  readonly derivationRefs: SemanticDerivationRefsV1;
+  readonly semanticContent: JsonValue;
+}
+
+/** Version tag of the canonical durable unit contentHash basis. */
+export const CONTEXT_MESSAGE_UNIT_CONTENT_HASH_BASIS_VERSION =
+  "iris.context_message_unit.content_hash.v1" as const;
+
+/**
+ * Compute the canonical durable ContextMessageUnitV1.contentHash from its
+ * versioned basis (semanticContent + kind + historianDisposition +
+ * derivationRefs + semanticSchemaId).
+ *
+ * Used consistently for: durable write (ingest buildUnit), pairing update
+ * (updateUnitPairing, same SQL transaction as the payload), restart/read
+ * (rowToUnitRecord verification, fail-closed on tamper), P5 projection
+ * (the durable hash is preserved 1:1 into the V2 header) and strict V2
+ * validation (P5 units must preserve it through the source ref chain).
+ */
+export function computeContextMessageUnitContentHashV1(
+  basis: ContextMessageUnitContentHashBasisV1,
+): string {
+  const canonical = canonicalJsonStringify({
+    basis: CONTEXT_MESSAGE_UNIT_CONTENT_HASH_BASIS_VERSION,
+    semanticSchemaId: basis.semanticSchemaId,
+    kind: basis.kind,
+    historianDisposition: basis.historianDisposition,
+    derivationRefs: derivationRefsToJsonValue(basis.derivationRefs),
+    semanticContent: basis.semanticContent,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/**
+ * Lossless projection of SemanticDerivationRefsV1 into the canonical JSON
+ * plane for hashing: key presence is preserved (an empty array stays
+ * present), so write → read hash verification agrees byte-for-byte.
+ */
+function derivationRefsToJsonValue(refs: SemanticDerivationRefsV1): Record<string, JsonValue> {
+  const out: Record<string, JsonValue> = { schemaId: refs.schemaId };
+  if (refs.memoryRefs !== undefined) {
+    out["memoryRefs"] = [...refs.memoryRefs];
+  }
+  if (refs.compartmentIds !== undefined) {
+    out["compartmentIds"] = [...refs.compartmentIds];
+  }
+  if (refs.workSnapshotVersion !== undefined) {
+    out["workSnapshotVersion"] = refs.workSnapshotVersion;
+  }
+  if (refs.sourceContextMessageUnitIds !== undefined) {
+    out["sourceContextMessageUnitIds"] = [...refs.sourceContextMessageUnitIds];
+  }
+  return out;
 }
 
 /**

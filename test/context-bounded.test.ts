@@ -13,7 +13,10 @@ import {
   HARD_UNITS_CAP,
   MAX_UNITS_PER_SESSION,
 } from "../src/context/context-store.js";
-import type { ContextMessageUnitV1 } from "../src/contracts/context-v27.js";
+import {
+  computeContextMessageUnitContentHashV1,
+  type ContextMessageUnitV1,
+} from "../src/contracts/context-v27.js";
 import type { PiSeamEvent } from "../src/contracts/runtime-events.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
 import { runMinimalSlice } from "../src/runtime/vertical-slice.js";
@@ -72,7 +75,7 @@ function makeUnit(
   contextSeq: number,
   overrides: Partial<ContextMessageUnitV1> = {},
 ): ContextMessageUnitV1 {
-  return {
+  const unit: ContextMessageUnitV1 = {
     schemaId: "iris.context_message_unit.v1",
     contextLineageId: "identity-test",
     contextSeq,
@@ -82,11 +85,30 @@ function makeUnit(
     semanticSchemaId: "iris.semantic.context_message.user.v1",
     semanticContent: { role: "user", content: `body-${contextSeq}`, timestamp: 1 },
     historianDisposition: "include",
-    contentHash: `hash-${contextSeq}`,
+    contentHash: "",
     lifecycleState: "committed",
     createdAt: "2026-08-05T00:00:00.000Z",
     ...overrides,
   };
+  // Feature A5 (#113): the store verifies content_hash on read against the
+  // one versioned canonical basis — hand-built units must carry the real
+  // canonical hash of their own durable semantic state.
+  const contentHash =
+    unit.contentHash !== ""
+      ? unit.contentHash
+      : computeContextMessageUnitContentHashV1({
+          semanticSchemaId: unit.semanticSchemaId,
+          kind: unit.kind,
+          historianDisposition: unit.historianDisposition,
+          derivationRefs: unit.derivationRefs ?? {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          semanticContent: unit.semanticContent,
+        });
+  return { ...unit, contentHash };
 }
 
 let eventOrdinal = 0;
