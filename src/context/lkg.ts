@@ -1,3 +1,4 @@
+// MIGRATION ONLY — Not part of current production Context path per Notion v27.
 import { createHash } from "node:crypto";
 
 import type { AgentMessage } from "@iris/pi-agent-core";

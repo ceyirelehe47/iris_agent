@@ -2,10 +2,7 @@
  * Feature B (goal.txt §4) / Feature A6 — strict semantic schema validation.
  *
  * Proves, for every concrete schema in the GENERATED semantic registry:
- *  - unknown semanticSchemaId is rejected (fail closed) — including the
- *    FORBIDDEN escape hatch iris.semantic.p5.unknown.v1;
- *  - iris.semantic.text_v1 no longer exists (Feature A6 removed the
- *    bare-string escape contract) — referencing it fails closed as unknown;
+ *  - unknown semanticSchemaId is rejected (fail closed);
  *  - each concrete schema validates its payload shape (user/assistant/
  *    tool_result roles, message-shaped objects for tool_call/body_event/
  *    operational);
@@ -22,7 +19,6 @@ import {
   validateGenerationV2Strict,
   computeSemanticContentHash,
   computeContextGenerationHash,
-  isKnownSemanticSchemaId,
   CONTEXT_GENERATION_V2_SCHEMA_ID,
   CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID,
   CONTEXT_UNIT_V2_SCHEMA_ID,
@@ -35,10 +31,9 @@ import {
   type JsonValue,
 } from "../src/contracts/context-v27.js";
 
-/** Feature A6: the bare-string text schema was REMOVED — must fail closed. */
-const FORBIDDEN_TEXT_V1 = "iris.semantic.text_v1";
-/** Feature A6: the generic escape hatch is FORBIDDEN — must fail closed. */
-const FORBIDDEN_P5_UNKNOWN_V1 = "iris.semantic.p5.unknown.v1";
+/** Feature A6: the bare-string text schema and the generic escape hatch were
+ * REMOVED from the generated registry — referencing them fails closed as
+ * unknown, which the unknown-semanticSchemaId tests below prove. */
 const USER_V1 = "iris.semantic.context_message.user.v1";
 const ASSISTANT_V1 = "iris.semantic.context_message.assistant.v1";
 const TOOL_RESULT_V1 = "iris.semantic.context_message.tool_result.v1";
@@ -116,35 +111,6 @@ test("unknown semanticSchemaId is rejected through validateUnitV2Strict", () => 
   const result = validateUnitV2Strict(unit);
   assert.ok(!result.valid, "unknown schema must fail closed");
   assert.match(result.reason ?? "", /unknown semanticSchemaId/);
-});
-
-test("FORBIDDEN escape hatch iris.semantic.p5.unknown.v1 fails closed (Feature A6)", () => {
-  // Feature A6 removed the generic escape hatch: any payload under
-  // p5.unknown.v1 must be rejected as an unknown semanticSchemaId.
-  assert.ok(!isKnownSemanticSchemaId(FORBIDDEN_P5_UNKNOWN_V1));
-  for (const payload of [
-    "hello",
-    42,
-    { any: "thing" },
-    { role: "user", content: "well-formed but unknown schema" },
-    [1, 2, 3],
-  ] as JsonValue[]) {
-    const err = validateSemanticContentForSchema(FORBIDDEN_P5_UNKNOWN_V1, payload);
-    assert.match(err ?? "", /unknown semanticSchemaId/, `payload: ${JSON.stringify(payload)}`);
-    const unit = makeUnit("u-hatch", FORBIDDEN_P5_UNKNOWN_V1, payload);
-    assert.ok(!validateUnitV2Strict(unit).valid, `unit payload: ${JSON.stringify(payload)}`);
-  }
-});
-
-test("FORBIDDEN schema iris.semantic.text_v1 fails closed (Feature A6)", () => {
-  // Feature A6 removed the bare-string text schema. Referencing it is an
-  // unknown semanticSchemaId — the payload plane no longer accepts bare
-  // strings under ANY schema.
-  assert.ok(!isKnownSemanticSchemaId(FORBIDDEN_TEXT_V1));
-  const err = validateSemanticContentForSchema(FORBIDDEN_TEXT_V1, "hello world");
-  assert.match(err ?? "", /unknown semanticSchemaId/);
-  const unit = makeUnit("u1", FORBIDDEN_TEXT_V1, "hello world");
-  assert.ok(!validateUnitV2Strict(unit).valid, "text_v1 must fail closed");
 });
 
 // ---------------------------------------------------------------------------

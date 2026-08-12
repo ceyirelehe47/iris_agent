@@ -1,3 +1,4 @@
+// NOT PRODUCTION — Uses pass-taxonomy HardSignals (MIGRATION ONLY per Notion v27). R0 does not wire this.
 import { createHash } from "node:crypto";
 
 import {

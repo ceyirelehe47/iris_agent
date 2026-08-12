@@ -17,6 +17,7 @@ import {
   CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
   CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
   validateGenerationV2,
+  validateUnitV2Strict,
   hasForbiddenUnitFields,
   isLegacyFlatV1Generation,
   v1ToF2Fence,
@@ -182,7 +183,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
           ...makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" }).header,
           layer: 3,
         },
-        semanticContent: "x",
+        semanticContent: { role: "user", content: "x" },
       };
       assert.equal(hasForbiddenUnitFields(badUnit), true);
     });
@@ -194,7 +195,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
           ...makeUnit("u1", "iris.semantic.context_message.user.v1", { role: "user", content: "x" }).header,
           pLevel: 2,
         },
-        semanticContent: "x",
+        semanticContent: { role: "user", content: "x" },
       };
       assert.equal(hasForbiddenUnitFields(badUnit), true);
     });

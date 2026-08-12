@@ -1,3 +1,4 @@
+// NOT PRODUCTION — ContextRenderer uses pass-taxonomy (m0/m1/SOFT/HARD) which is MIGRATION ONLY per Notion v27.
 import { createHash } from "node:crypto";
 
 import type { AgentMessage } from "@iris/pi-agent-core";
