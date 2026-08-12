@@ -6,32 +6,37 @@ export const M0_EMPTY_BODY = "<session-history></session-history>";
 export const M1_EMPTY_PLACEHOLDER =
   "<session-history-since>(no new content since last materialization)</session-history-since>";
 
-// v27 naming: InvocationSourceBinding — the per-invocation binding of the
-// authoritative source (system prompt + identity) for one input, scoped to
-// the active Runtime Session/Epoch.
+/**
+ * The per-invocation binding for the Pi runtime capsule — what
+ * `prepareInvocation` returns to the runtime coordinator and the harness
+ * reads on every turn.
+ *
+ * Feature B (goal.txt §5): this is a MINIMAL Pi-runtime binding and is NOT
+ * Context assembly. It carries only:
+ *   - session binding (runtimeSessionId, epochId),
+ *   - source identity (contextSourceSnapshotId, personaSnapshotId,
+ *     declarationVersion, providerProfileId),
+ *   - the canonical system prompt + its projection hash (the authoritative
+ *     source the provider cache identity is derived from).
+ *
+ * It NEVER carries Context assembly state. m0/m1 materialization is owned by
+ * ContextRenderer + persistRender (context_lineages); the v12-era
+ * `materializationIdentity: "mock-m0m1-v1"` marker (PreparedInvocationSources)
+ * was removed with this feature. Continuity/recovery identifiers
+ * (continuitySeedId, runtimeRecoveryNoticeId, stableMemoryPoolVersion) are
+ * recorded on the lineage row when a producer supplies them — they are not
+ * part of the runtime binding.
+ */
 export interface InvocationSourceBinding {
+  /** Snapshot identity of the canonical source (derived from the system prompt). */
   contextSourceSnapshotId: string;
   runtimeSessionId: string;
   epochId: string;
   personaSnapshotId: string;
   declarationVersion: string;
-  continuitySeedId?: string;
-  runtimeRecoveryNoticeId?: string;
-  stableMemoryPoolVersion?: string;
   providerProfileId: string;
   canonicalSystemPrompt: string;
   systemProjectionHash: string;
-  preparedAt: string;
-}
-
-// v27 naming: PreparedInvocationSources — the prepared, invocation-scoped view
-// carried on the binding (what prepareInvocation returns to the runtime).
-export interface PreparedInvocationSources {
-  contextSourceSnapshotId: string;
-  runtimeSessionId: string;
-  canonicalSystemPrompt: string;
-  systemProjectionHash: string;
-  materializationIdentity: string;
   preparedAt: string;
 }
 

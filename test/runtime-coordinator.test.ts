@@ -382,3 +382,110 @@ test("harness throw marks failed and rejects the next prompt until reset", async
   coordinator.reset();
   assert.equal(coordinator.getPhase(), "idle");
 });
+
+test("generator closed while parked WITHOUT settled fails closed and KEEPS the latch (C5 #114)", async () => {
+  // iris_agent#114 (Feature C5): iter.return() on a generator that never
+  // observed native settled must NOT release the single-writer latch — the
+  // invocation may still be live. phase->"failed" and activeInvocation is
+  // kept; only reset() (explicit recovery) or a successful dispatch releases.
+  const runtime: AgentRuntimePort = {
+    async *prompt(): AsyncIterable<AgentRuntimeEvent> {
+      yield { type: "turn_start", invocationId: "invocation-input-0001" };
+      // The provider never emits again (stalled) — the inner await never
+      // settles, so the coordinator generator is parked at its OWN yield of
+      // turn_start when the consumer calls iter.return().
+      await new Promise<never>(() => {
+        /* never settles */
+      });
+    },
+    async abort(): Promise<void> {
+      return undefined;
+    },
+    getPhase(): "idle" | "turn" | "retry" | "compaction" | "branch_summary" | "failed" {
+      return "idle";
+    },
+  };
+
+  const coordinator = buildFakeCoordinator(runtime);
+  const invocationId = "invocation-input-0001";
+
+  const iterator = coordinator.prompt(sampleAgentInput())[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  assert.equal(first.done, false);
+  assert.equal(first.value.type, "turn_start");
+  assert.equal(coordinator.getPhase(), "turn");
+
+  // Close the generator while parked — the C5 fail-closed path.
+  await iterator.return?.();
+
+  // Generator cleanup is NOT native settled: fail closed with the latch kept.
+  assert.equal(coordinator.getPhase(), "failed", "parked close without settled -> failed");
+  assert.equal(
+    coordinator.getActiveInvocationId(),
+    invocationId,
+    "activeInvocation must be KEPT — the invocation may still be live",
+  );
+
+  // A new prompt is rejected while the latch is held.
+  await assert.rejects(
+    (async () => {
+      for await (const event of coordinator.prompt(sampleAgentInput())) {
+        void event;
+      }
+    })(),
+    /already active|failed state/,
+  );
+
+  // Explicit recovery (reset) releases the latch.
+  coordinator.reset();
+  assert.equal(coordinator.getPhase(), "idle");
+  assert.equal(coordinator.getActiveInvocationId(), null);
+});
+
+test("generator closed AFTER native settled releases the latch (C5 #114)", async () => {
+  // iris_agent#114 (Feature C5): when iter.return() interrupts the generator
+  // AFTER Pi native settled was positively observed (the abort unblocked the
+  // run and the settled event was forwarded), the settled observation — not
+  // the generator close — authorizes the release: phase->"idle",
+  // activeInvocation=null.
+  const runtime: AgentRuntimePort = {
+    async *prompt(): AsyncIterable<AgentRuntimeEvent> {
+      yield { type: "turn_start", invocationId: "invocation-input-0001" };
+      yield {
+        type: "settled",
+        invocationId: "invocation-input-0001",
+        nextTurnCount: 1,
+      };
+    },
+    async abort(): Promise<void> {
+      return undefined;
+    },
+    getPhase(): "idle" | "turn" | "retry" | "compaction" | "branch_summary" | "failed" {
+      return "idle";
+    },
+  };
+
+  const coordinator = buildFakeCoordinator(runtime);
+
+  const iterator = coordinator.prompt(sampleAgentInput())[Symbol.asyncIterator]();
+  await iterator.next(); // turn_start (coordinator's own)
+  await iterator.next(); // turn_start (forwarded)
+  const settled = await iterator.next(); // settled — generator now parked here
+  assert.equal(settled.done, false);
+  assert.equal(settled.value.type, "settled");
+
+  // Close the generator while parked AT the settled yield.
+  await iterator.return?.();
+
+  // Native settled was validated -> normal release, not fail-closed.
+  assert.equal(coordinator.getPhase(), "idle");
+  assert.equal(coordinator.getActiveInvocationId(), null);
+
+  // The latch is free: a fresh invocation may start and settle.
+  const events: string[] = [];
+  for await (const event of coordinator.prompt(sampleAgentInput())) {
+    events.push(event.type);
+  }
+  assert.ok(events.includes("settled"));
+  assert.equal(coordinator.getPhase(), "idle");
+});

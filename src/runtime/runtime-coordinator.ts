@@ -1,6 +1,6 @@
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
 import type { Model } from "@earendil-works/pi-ai";
@@ -119,17 +119,19 @@ export interface RuntimeCoordinatorOptions {
    */
   modelOverride?: ModelOverridePort;
   /**
-   * Derives InvocationSourceBinding + canonical system prompt for an input,
-   * scoped to the active runtime Session/Epoch. Called before every prompt().
-   * v13：invocation 只绑定 prepared sources（currentInvocation）；m0/m1/P5
-   * 物化由 ContextRenderer/contextController 在 provider render 时完成
-   * （v12 的 ContextRuntimePort.prepare 语义已删除）。
+   * Derives the InvocationSourceBinding (Pi-runtime binding: session binding +
+   * epoch info + canonical system prompt identity) for an input, scoped to
+   * the active runtime Session/Epoch. Called before every prompt().
+   * Feature B (goal.txt §5): the binding is a MINIMAL Pi-runtime binding —
+   * it carries NO Context assembly state. m0/m1 materialization is owned by
+   * ContextRenderer/contextController at provider render time (v12 的
+   * ContextRuntimePort.prepare / materializationIdentity mock 已删除).
    */
   prepareInvocation: (
     input: AgentInput,
     runtimeSessionId: string,
     epochId: string,
-  ) => Promise<PreparedInvocationSources>;
+  ) => Promise<InvocationSourceBinding>;
   /**
    * Fired exactly once per invocation when Pi native settled is observed on
    * the bound active Epoch. The Host uses this to release the invocation and,
@@ -288,17 +290,34 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       this.resolveRunCompletion?.();
       this.runCompletion = null;
       this.resolveRunCompletion = null;
-      // iris_agent#111: force-release the single-writer latch on EVERY exit
-      // path, including generator close (iter.return()) while parked at
-      // phase "turn". Previously this only cleared activeInvocation when
-      // phase was "idle" or "failed", leaving the latch permanently held
-      // after a watchdog-driven teardown — the generator's finally runs but
-      // phase is still "turn" because the settled/idle transition never
-      // happened. This bricked the runtime for all subsequent dispatches.
-      if (this.phase === "turn") {
+      // iris_agent#114 (Feature C5): the single-writer latch is released
+      // ONLY on a validated native settled boundary — never on generator
+      // cleanup alone ("generator cleanup != Pi native settled", goal.txt
+      // §6). Three exit shapes:
+      //  - settledSeen === true: Pi native settled was positively observed
+      //    on the bound Epoch — the normal release authority. phase->"idle",
+      //    activeInvocation=null. This also covers a generator closed by
+      //    iter.return() AFTER the abort unblocked the run (the body's
+      //    idle transition may not have run yet — the settled observation
+      //    is the authority, not the body's bookkeeping).
+      //  - phase === "turn" && !settledSeen: the generator was closed while
+      //    parked on the native stream WITHOUT a settled boundary (watchdog
+      //    iter.return() on a stalled run). Fail closed: phase->"failed"
+      //    and activeInvocation is deliberately KEPT — the invocation may
+      //    still be live, so the latch is only releasable through reset()
+      //    (explicit recovery) or a successful dispatch. This reverts the
+      //    iris_agent#111 force-release band-aid, which let Iris consider
+      //    the invocation idle merely because the outer generator closed.
+      //  - phase === "failed": normal completion without settled
+      //    (settled_not_observed / harness_error). The native run ended —
+      //    release the latch; phase "failed" still blocks new prompts
+      //    until reset().
+      if (settledSeen) {
         this.phase = "idle";
-      }
-      if (this.phase === "idle" || this.phase === "failed") {
+        this.activeInvocation = null;
+      } else if (this.phase === "turn") {
+        this.phase = "failed";
+      } else {
         this.activeInvocation = null;
       }
     }
@@ -398,27 +417,6 @@ export class RuntimeCoordinator implements AgentRuntimePort {
     if (runCompletion !== null) {
       await withTimeout(runCompletion, timeoutMs, "abort did not reach native settled");
     }
-  }
-
-  /**
-   * iris_agent#111: Signal abort to the native runtime WITHOUT waiting for
-   * runCompletion. Used by the supervisor's finally-block teardown to unblock
-   * a stalled generator before calling iter.return(). The coordinator's own
-   * finally (triggered by iter.return()) handles latch release and phase flip.
-   *
-   * Returns the invocation id that was signaled, or null if no invocation
-   * was active.
-   */
-  signalAbort(): string | null {
-    if (this.activeInvocation === null || this.phase !== "turn") {
-      return null;
-    }
-    const id = this.activeInvocation;
-    const handle = this.activeRuntime.getActiveRuntime();
-    // Fire-and-forget: the harness abort unblocks the stalled prompt,
-    // which lets the coordinator generator resume and reach its finally.
-    void handle.runtime.abort(id, "supervisor_signal_abort").catch(() => undefined);
-    return id;
   }
 
   /**

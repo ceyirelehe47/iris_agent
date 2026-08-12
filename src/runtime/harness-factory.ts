@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { Model, Models, ToolCall } from "@earendil-works/pi-ai";
 
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { computeToolExecutionKey, canonicalJson } from "../contracts/tool.js";
 import {
@@ -58,10 +58,15 @@ export interface HarnessObservers {
  * the transcript), so it is created once per runtime Session; each prompt()
  * invocation updates this binding so companion pairing and the context hook
  * reflect the CURRENT input, not the first one.
+ *
+ * Feature B (goal.txt §5): `prepared` is the minimal Pi-runtime binding
+ * (InvocationSourceBinding) — session binding + epoch + canonical system
+ * prompt identity. It carries NO Context assembly state; m0/m1 materialization
+ * is owned by ContextRenderer + persistRender (context_lineages).
  */
 export interface InvocationBinding {
   input: AgentInput;
-  prepared: PreparedInvocationSources;
+  prepared: InvocationSourceBinding;
   invocationId: string;
 }
 

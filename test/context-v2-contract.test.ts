@@ -143,7 +143,13 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
       assert.ok(source.sourceHash.length > 0);
     });
 
-    it("semanticContent accepts JsonValue (string, number, boolean, null, array, object)", () => {
+    it("semanticContent payload plane accepts JsonValue (type-level; shape is schema-enforced)", () => {
+      // The payload PLANE is JsonValue — any JSON is storable at the type
+      // level (Feature B: structural acceptance only). Concrete SHAPE is
+      // enforced per semanticSchemaId by validateUnitV2Strict — this test
+      // uses the by-design open schema (p5.unknown.v1) on purpose: text_v1
+      // now rejects everything that is not a plain string (see
+      // semantic-schema-validation.test.ts).
       const cases: JsonValue[] = [
         "hello",
         42,
@@ -153,7 +159,7 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
         { key: "value", nested: { deep: [1, 2] } },
       ];
       for (const content of cases) {
-        const unit = makeUnit("u", "iris.semantic.text_v1", content);
+        const unit = makeUnit("u", "iris.semantic.p5.unknown.v1", content);
         assert.deepEqual(unit.semanticContent, content);
       }
     });
@@ -395,8 +401,11 @@ describe("iris_agent#96: V2 Context Generation contract", () => {
               sourceId: "sys-source",
               sourceHash: "sys-hash",
             },
+            // Feature B (goal.txt §4): text_v1 is the plain-string text
+            // contract — a system prompt unit under text_v1 carries the
+            // prompt as a string, never a wrapped object.
             semanticSchemaId: "iris.semantic.text_v1",
-            semanticContent: { prompt: "You are Iris" },
+            semanticContent: "You are Iris",
           },
         ],
         p1Units: [],

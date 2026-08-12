@@ -29,7 +29,7 @@ import {
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
-import type { PreparedInvocationSources } from "../contracts/context.js";
+import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { directUserRequest } from "../contracts/origin.js";
 import { acquireDataRootLock } from "../host/lock.js";
@@ -97,27 +97,41 @@ export async function closeSessionStorage(repo: {
   await repo[Symbol.asyncDispose]();
 }
 
+/**
+ * Feature B (goal.txt §5): prepare the MINIMAL Pi-runtime binding for one
+ * invocation. Returns an InvocationSourceBinding — session binding + epoch +
+ * source identity + canonical system prompt — and NOTHING else. Context
+ * assembly state (m0/m1 materialization) is never carried on the binding;
+ * it is owned by ContextRenderer + persistRender (context_lineages). The
+ * v12-era `materializationIdentity: "mock-m0m1-v1"` marker was removed.
+ */
 export function prepareContextSources(
   input: AgentInput,
   runtimeSessionId: string,
   epochId: string,
   config: AgentConfigV3,
   now: string,
-): PreparedInvocationSources {
+): InvocationSourceBinding {
+  const personaSnapshotId = "persona-default-v1";
+  const declarationVersion = "decl-v1";
+  const providerProfileId = config.model.main_agent.active_profile;
   const canonicalSystemPrompt =
     `IRIS SYSTEM PROMPT V1\n` +
     `instance: ${config.instance_name}\n` +
     `runtimeSessionId: ${runtimeSessionId}\n` +
     `epochId: ${epochId}\n` +
     `inputId: ${input.inputId}\n` +
-    `providerProfileId: ${config.model.main_agent.active_profile}\n` +
+    `providerProfileId: ${providerProfileId}\n` +
     `binding: immutable-for-invocation\n`;
   return {
     contextSourceSnapshotId: `snapshot-${createHash("sha256").update(canonicalSystemPrompt).digest("hex").slice(0, 12)}`,
     runtimeSessionId,
+    epochId,
+    personaSnapshotId,
+    declarationVersion,
+    providerProfileId,
     canonicalSystemPrompt,
     systemProjectionHash: createHash("sha256").update(canonicalSystemPrompt).digest("hex"),
-    materializationIdentity: "mock-m0m1-v1",
     preparedAt: new Date(now).toISOString(),
   };
 }
@@ -143,12 +157,18 @@ export function sampleAgentInput(): AgentInput {
  * lineage 是 identity-level：一个 data root 恰好一条，跨多个 bounded Pi
  * Runtime Session 持久。首次创建时绑定当前 session；rollover 的新 session
  * 只重新绑定（bindCurrentSession），绝不创建新 lineage、绝不继承重置 m0。
+ *
+ * Feature B：identity 全部取自 invocation 的 Pi-runtime binding
+ * （InvocationSourceBinding）——不再接受 v12-era 的 mock 物化身份。
+ * materialization_id 是 lineage 的物化方案标签：真实 m0/m1 物化由
+ * ContextRenderer.persistRender 提交（materializeM0/M1ByContextSeq），
+ * 绑定侧从不携带物化状态。
  */
 function ensureLineage(
   contextStore: ContextStore,
   runtimeSessionId: string,
   epochId: string,
-  prepared: PreparedInvocationSources,
+  prepared: InvocationSourceBinding,
   providerProfileId: string,
 ): void {
   const lineageId = contextStore.lineageId;
@@ -164,13 +184,16 @@ function ensureLineage(
     runtimeSessionId,
     contextSourceSnapshotId: prepared.contextSourceSnapshotId,
     epochId,
-    personaSnapshotId: "persona-default-v1",
-    declarationVersion: "decl-v1",
+    personaSnapshotId: prepared.personaSnapshotId,
+    declarationVersion: prepared.declarationVersion,
     providerProfileId,
     canonicalSystemPrompt: prepared.canonicalSystemPrompt,
     systemProjectionHash: prepared.systemProjectionHash,
     preparedAt: prepared.preparedAt,
-    materializationId: prepared.materializationIdentity,
+    // Feature B: the v12-era `materializationIdentity: "mock-m0m1-v1"`
+    // marker is gone. The lineage's materialization scheme is the reviewed
+    // R2-P1 ContextRenderer (persistRender), never a binding-side mock.
+    materializationId: "context-renderer-v1",
     contextSerializerVersion: CONTEXT_SERIALIZER_VERSION,
     carrierSchemaVersion: CONTEXT_CARRIER_SCHEMA_VERSION,
   });

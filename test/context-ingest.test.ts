@@ -350,7 +350,7 @@ test("r2: input unit payload never stores raw wire before pairing (placeholder)"
   }
 });
 
-test("r2: empty context.db initializes cleanly; 0001-0007 applied and idempotent", () => {
+test("r2: empty context.db initializes cleanly; 0001-0008 applied and idempotent", () => {
   const dir = tempDir();
   try {
     const store = ContextStore.open(join(dir, "context.db"));
@@ -375,7 +375,7 @@ test("r2: empty context.db initializes cleanly; 0001-0007 applied and idempotent
     store.close();
     const reopened = ContextStore.open(join(dir, "context.db"));
     reopened.close();
-    assert.equal(LATEST_MIGRATION_VERSION, "0007_archive_staging");
+    assert.equal(LATEST_MIGRATION_VERSION, "0008_lifecycle_state");
   } finally {
     cleanupDir(dir);
   }

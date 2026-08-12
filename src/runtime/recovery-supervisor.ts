@@ -516,24 +516,23 @@ export class RecoverySupervisor {
           // Native loop threw — classify from the error.
           nativeFailedMessage = error instanceof Error ? error.message : String(error);
         } finally {
-          // iris_agent#111 BLOCKING fix: when the watchdog breaks out of the
-          // event loop, the coordinator's async generator is parked on a
-          // stalled inner `for await (handle.runtime.prompt(input))`. Calling
-          // iter.return() alone deadlocks — return() only takes effect once
-          // the suspended inner await settles, and nothing settles it.
+          // iris_agent#114 (Feature C5): the watchdog teardown no longer uses
+          // signalAbort — it was fire-and-forget and swallowed abort
+          // rejection (the ONLY pre-return production abort seam). The
+          // coordinator latch is NOT released by generator cleanup alone.
           //
-          // Fix: issue the abort BEFORE iter.return(). The abort causes the
-          // stalled harness prompt to settle, unblocking the inner await,
-          // which lets return() propagate (latch release, phase flip).
-          if (!nativeSettled) {
-            // iris_agent#111: signal abort (fire-and-forget, no runCompletion
-            // wait) to unblock the stalled harness, then call iter.return()
-            // which triggers the coordinator's finally (latch release).
-            // signalAbort bypasses the coordinator's abort() settlement wait
-            // that would create a circular deadlock.
-            this.runtime.signalAbort?.();
+          // When the watchdog broke out of the event loop (stallDetected),
+          // the coordinator's async generator is parked on a stalled inner
+          // `for await (handle.runtime.prompt(input))`. iter.return() here
+          // would deadlock: the queued return only takes effect once the
+          // suspended inner await settles, and nothing settles it without
+          // an abort. The post-finally stall handling below therefore
+          // issues the AWAITABLE abort FIRST (bounded by
+          // abortSettlementTimeoutMs, rejection/timeout fail-closed) and
+          // closes the generator AFTER the abort signal is in flight.
+          if (stallDetected === null) {
+            await iter.return?.().catch(() => undefined);
           }
-          await iter.return?.().catch(() => undefined);
         }
 
         // --- Success: clean exit ---
@@ -572,9 +571,10 @@ export class RecoverySupervisor {
           //       getActiveInvocationId() seam; when the runtime cannot
           //       identify the accepted invocation, fail closed with ZERO
           //       fallback dispatch (never skip abort and advance).
-          // Iterator cancellation (iter.return above) is NOT treated as
-          // proof the provider invocation is dead — the abort + validated
-          // settlement is the only proof accepted.
+          // Iterator cancellation (iter.return inside
+          // abortWithSettlementTimeout) is NOT treated as proof the provider
+          // invocation is dead — the abort + validated settlement is the
+          // only proof accepted.
           let targetInvocationId = activeInvocationId;
           if (targetInvocationId === null && this.runtime.getActiveInvocationId !== undefined) {
             targetInvocationId = this.runtime.getActiveInvocationId();
@@ -595,18 +595,27 @@ export class RecoverySupervisor {
             );
           }
           try {
-            // iris_agent#111: the finally-block signalAbort already unblocked
-            // the stalled generator and the coordinator's own finally released
-            // the latch. If the runtime has signalAbort and reports no active
-            // invocation, the teardown already settled it — skip the abort.
-            // Runtimes without signalAbort (mocks) still need the full abort.
-            const hasSignalAbort = this.runtime.signalAbort !== undefined;
-            const stillActive = this.runtime.getActiveInvocationId?.();
-            if (hasSignalAbort && (stillActive === null || stillActive === undefined)) {
-              // Teardown already settled — skip redundant abort
-            } else {
-              await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
-            }
+            // iris_agent#114 (Feature C5): abortWithSettlementTimeout now
+            // implements the production teardown order:
+            //   1. start the AWAITABLE abort (signal in flight — never
+            //      fire-and-forget; rejection surfaces below);
+            //   2. iter.return() AFTER the abort signal — the return is
+            //      queued while the generator is parked on the stalled
+            //      inner await, and once the abort settles the harness the
+            //      generator reaches its final yield where the queued
+            //      return takes effect: the coordinator's finally runs
+            //      (resolving runCompletion), which unblocks the abort's
+            //      settlement wait;
+            //   3. bounded settlement wait (abortSettlementTimeoutMs) —
+            //      reject/timeout fail closed below with ZERO fallback.
+            // The coordinator's own finally releases the latch only on a
+            // validated native settled boundary (C5); generator cleanup
+            // alone is never treated as settled proof.
+            await this.abortWithSettlementTimeout(
+              targetInvocationId,
+              `watchdog_${stallDetected}`,
+              iter,
+            );
           } catch (error) {
             // Abort rejected or did not settle in time: never advance or
             // dispatch a fallback over a possibly-live invocation. The
@@ -720,7 +729,13 @@ export class RecoverySupervisor {
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             logicalExecutionId,
             inputId: input.inputId,
-            dispatchId: this.runtime.getActiveInvocationId?.() ?? undefined,
+            // iris_agent#114 (C5 finding 5): the same-run reconcile uses the
+            // EXACT dispatch identity already persisted in the durable
+            // pending record — never a re-read of the mutable current-active
+            // id, which may already be cleared after teardown/coordinator
+            // finally. Restart reconciliation (reconcilePendingOutcomeUnknown)
+            // uses the same pending.dispatchId authority.
+            dispatchId: pending.dispatchId,
           });
           const normalized = normalizeReconcileOutcome(disposition);
           if (normalized === "ambiguous") {
@@ -1149,14 +1164,45 @@ export class RecoverySupervisor {
    * #100: Abort the exact active invocation and wait for validated
    * settlement within a bounded timeout. Throws on abort rejection or
    * timeout — the caller must NOT swallow the error.
+   *
+   * iris_agent#114 (Feature C5): when `iter` is provided (watchdog teardown
+   * of a PARKED generator), the production teardown order is:
+   *
+   *   1. START the abort (never fire-and-forget — the promise is awaited
+   *      below; a rejection is surfaced, not swallowed). Sending the
+   *      signal first is what unblocks the suspended inner native await;
+   *   2. THEN call iter.return(). The return is queued while the
+   *      coordinator generator is parked on the stalled inner await; once
+   *      the abort settles the harness, the generator reaches its final
+   *      yield, the queued return takes effect and the coordinator's
+   *      finally runs — resolving runCompletion, which is exactly what
+   *      unblocks the abort's own settlement wait (breaking the circular
+   *      deadlock by ordering, not by fire-and-forget);
+   *   3. bounded settlement wait. On reject/timeout the generator may
+   *      remain parked and the coordinator latch stays held — the caller
+   *      fails closed (zero fallback, runtime non-reusable until explicit
+   *      recovery).
    */
-  private async abortWithSettlementTimeout(invocationId: string, reason: string): Promise<void> {
+  private async abortWithSettlementTimeout(
+    invocationId: string,
+    reason: string,
+    iter?: AsyncIterator<AgentRuntimeEvent>,
+  ): Promise<void> {
     const abortTimeoutMs = this.config.abortSettlementTimeoutMs;
+    // 1. Abort signal in flight BEFORE the generator close. Note: the
+    //    coordinator's abort() itself validates the active invocation and
+    //    awaits runCompletion; that wait is resolved by step 2's queued
+    //    return once the abort unblocks the harness.
+    const abortPromise = this.runtime.abort(invocationId, reason);
+    // 2. Close the parked generator AFTER the abort signal. If the abort
+    //    rejects synchronously the generator stays parked (fail-closed —
+    //    the caller never advances over a possibly-live invocation).
+    const closePromise = iter?.return?.().catch(() => undefined) ?? Promise.resolve();
     const timer: { promise: Promise<"timeout">; cancel: () => void } =
       this.makeWatchdogTimer(abortTimeoutMs);
     try {
       const outcome = await Promise.race([
-        this.runtime.abort(invocationId, reason).then(() => "aborted" as const),
+        abortPromise.then(() => "aborted" as const),
         timer.promise.then(() => "timeout" as const),
       ]);
       if (outcome === "timeout") {
@@ -1164,7 +1210,9 @@ export class RecoverySupervisor {
           `abort settlement timeout for invocation ${invocationId} (reason: ${reason})`,
         );
       }
-      // Abort succeeded — the runtime has confirmed the invocation is settled
+      // Abort succeeded — the runtime has confirmed the invocation is settled.
+      // Ensure the generator close (step 2) also completed before advancing.
+      await closePromise;
     } finally {
       timer.cancel();
     }

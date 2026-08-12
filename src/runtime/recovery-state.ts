@@ -204,8 +204,7 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
             ? p["logicalExecutionId"]
             : "unknown-legacy-pending",
         // iris_agent#111: never guess inputId from current state.
-        inputId:
-          typeof p["inputId"] === "string" ? p["inputId"] : "unknown-legacy-pending",
+        inputId: typeof p["inputId"] === "string" ? p["inputId"] : "unknown-legacy-pending",
         model: typeof p["model"] === "string" ? p["model"] : null,
         occurredAt: p["occurredAt"] as string,
         ...(p["detail"] !== undefined ? { detail: p["detail"] as string } : {}),
