@@ -3,8 +3,8 @@ import {
   createModels,
   type Model,
   type Models,
-} from "@earendil-works/pi-ai";
-import { opencodeGoProvider } from "@earendil-works/pi-ai/providers/opencode-go";
+} from "@iris/pi-ai";
+import { opencodeGoProvider } from "@iris/pi-ai/providers/opencode-go";
 
 /**
  * R1-P1 live provider seam for the OpenCode Go development profile.

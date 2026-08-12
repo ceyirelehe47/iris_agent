@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { migrateDatabase } from "../db/migrate.js";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 import {
   KIND_TO_SEMANTIC_SCHEMA_ID,
   SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,

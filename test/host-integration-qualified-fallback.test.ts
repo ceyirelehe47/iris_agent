@@ -38,8 +38,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createModels, fauxProvider, type Model } from "@earendil-works/pi-ai";
-import type { AgentHarness, Session } from "@earendil-works/pi-agent-core";
+import { createModels, fauxProvider, type Model } from "@iris/pi-ai";
+import type { AgentHarness, Session } from "@iris/pi-agent-core";
 
 import type { AgentRuntimeEvent } from "../src/contracts/ports.js";
 import type { AgentInput } from "../src/contracts/origin.js";

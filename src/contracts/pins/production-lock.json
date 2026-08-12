@@ -10,9 +10,9 @@
   "pi": {
     "currentDependencySource": "file_link_adjacent_fork_checkout",
     "packages": {
-      "@earendil-works/pi-agent-core": "file:../pi/packages/agent",
-      "@earendil-works/pi-ai": "file:../pi/packages/ai",
-      "@earendil-works/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node"
+      "@iris/pi-agent-core": "file:../pi/packages/agent",
+      "@iris/pi-ai": "file:../pi/packages/ai",
+      "@iris/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node"
     },
     "fork": {
       "repository": "blueforst/pi",

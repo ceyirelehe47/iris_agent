@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { Type, type AssistantMessage } from "@earendil-works/pi-ai";
+import { Type, type AssistantMessage } from "@iris/pi-ai";
 
 import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
 import type { RuntimeEvent } from "../contracts/runtime-events.js";
@@ -20,12 +20,12 @@ import {
   type AgentHarnessTool,
   type Session,
   type SessionTreeEntry,
-} from "@earendil-works/pi-agent-core";
+} from "@iris/pi-agent-core";
 import {
   createNodeSqliteFactory,
   SqliteSessionRepository,
   type SqliteSessionMetadata,
-} from "@earendil-works/pi-storage-sqlite-node";
+} from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";

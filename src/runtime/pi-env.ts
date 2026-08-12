@@ -1,8 +1,8 @@
 import { mkdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { Result } from "@earendil-works/pi-agent-core";
-import type { SqliteSessionRepositoryEnv } from "@earendil-works/pi-storage-sqlite-node";
+import type { Result } from "@iris/pi-agent-core";
+import type { SqliteSessionRepositoryEnv } from "@iris/pi-storage-sqlite-node";
 
 export function nodeSqliteRepoEnv(root: string): SqliteSessionRepositoryEnv {
   return {

@@ -18,7 +18,7 @@ import {
 } from "../src/runtime/context-adapter.js";
 import { computeContentLayoutHash, createInputMetaCompanion } from "../src/runtime/companion.js";
 import { projectSessionMessages } from "../src/runtime/session-projection.js";
-import type { Session, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { Session, SessionTreeEntry } from "@iris/pi-agent-core";
 
 function makeInput(inputId: string, text = "hello iris"): AgentInput {
   return {
@@ -197,7 +197,7 @@ test("issue-6 #4: companion persisted as a real Pi custom_message entry", async 
   // Sanity: the companion is a REAL custom_message raw entry.
   const paths = resolveDataRootPaths(dataRoot, config);
   const { SqliteSessionRepository, createNodeSqliteFactory } =
-    await import("@earendil-works/pi-storage-sqlite-node");
+    await import("@iris/pi-storage-sqlite-node");
   const { nodeSqliteRepoEnv } = await import("../src/runtime/pi-env.js");
   const repo = new SqliteSessionRepository({
     env: nodeSqliteRepoEnv(dataRoot),
@@ -418,7 +418,7 @@ test("issue-6 #9: pi_user_entry_id equals the REAL raw UserMessage entry id (nev
   // Prove the raw entry itself is a "message" type carrying the user role.
   const paths = resolveDataRootPaths(dataRoot, config);
   const { SqliteSessionRepository, createNodeSqliteFactory } =
-    await import("@earendil-works/pi-storage-sqlite-node");
+    await import("@iris/pi-storage-sqlite-node");
   const { nodeSqliteRepoEnv } = await import("../src/runtime/pi-env.js");
   const repo = new SqliteSessionRepository({
     env: nodeSqliteRepoEnv(dataRoot),
@@ -641,7 +641,7 @@ test("issue-6 settle path: resolveCommittedPair binds pi_user_entry_id to the RE
     // NOT the model_change entry that precedes it in the raw array.
     const paths = resolveDataRootPaths(dataRoot, config);
     const { SqliteSessionRepository, createNodeSqliteFactory } =
-      await import("@earendil-works/pi-storage-sqlite-node");
+      await import("@iris/pi-storage-sqlite-node");
     const { nodeSqliteRepoEnv } = await import("../src/runtime/pi-env.js");
     const repo = new SqliteSessionRepository({
       env: nodeSqliteRepoEnv(dataRoot),

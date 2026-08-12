@@ -15,7 +15,7 @@ import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { runContextPass, applyContextPass } from "../src/context/pipeline.js";
 import { ContextStore } from "../src/context/context-store.js";

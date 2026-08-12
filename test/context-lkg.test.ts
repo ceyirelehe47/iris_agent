@@ -5,8 +5,8 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
-import type { TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
+import type { TextContent, ThinkingContent, ToolCall } from "@iris/pi-ai";
 
 import {
   LKG_SLOT_KEY,
@@ -378,7 +378,7 @@ test("lkg: reasoning part on a non-assistant message is rejected (reviewer F2)",
         role: "user",
         content: [{ type: "reasoning", text: "leaked" }],
         timestamp: 5,
-      } as unknown as import("@earendil-works/pi-agent-core").AgentMessage,
+      } as unknown as import("@iris/pi-agent-core").AgentMessage,
     },
   ];
   assert.equal(

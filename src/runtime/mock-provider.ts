@@ -7,7 +7,7 @@ import {
   type Model,
   type Models,
   type FauxResponseStep,
-} from "@earendil-works/pi-ai";
+} from "@iris/pi-ai";
 
 export interface MockProviderHandle {
   models: Models;

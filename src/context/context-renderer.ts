@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 
 import { M0_EMPTY_BODY, M1_EMPTY_PLACEHOLDER } from "../contracts/context.js";
 import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";

@@ -13,7 +13,7 @@
  * are absent from the V1 rows; attribution ordinals derive from batch
  * position in the runner.
  */
-import type { AgentMessage, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { historianBatchHash, type HistorianBatchV1 } from "../../src/contracts/historian.js";
 import type { ContextMessageUnitV1, JsonValue } from "../../src/contracts/context-v27.js";

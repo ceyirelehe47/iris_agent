@@ -26,7 +26,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { readContractPin } from "../src/contracts/memory-pin.js";
 import { SessionHistoryReadPort } from "../src/historian/history-read-port.js";

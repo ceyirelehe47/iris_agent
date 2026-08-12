@@ -22,7 +22,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { HistorianManager, historianSchedulerOptions } from "../src/historian/historian-manager.js";
 import type { ContextHistoryReadPort } from "../src/context/history-read-port.js";

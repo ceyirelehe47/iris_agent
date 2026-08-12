@@ -6,7 +6,7 @@ import { join } from "node:path";
 import {
   createNodeSqliteFactory,
   SqliteSessionRepository,
-} from "@earendil-works/pi-storage-sqlite-node";
+} from "@iris/pi-storage-sqlite-node";
 
 import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
 

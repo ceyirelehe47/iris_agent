@@ -9,8 +9,8 @@ import {
   computeMessageContentHash,
   JsonlSessionRepository,
   loadJsonlSessionMetadata,
-} from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+} from "@iris/pi-agent-core";
+import { NodeExecutionEnv } from "@iris/pi-agent-core/node";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { ContextIngest } from "../src/context/context-ingest.js";
@@ -638,7 +638,7 @@ test("f2-xrepo: the seam refuses to ingest an event whose payload contradicts it
       subscribe: (fn: typeof captured) => {
         captured = fn;
       },
-    } as unknown as import("@earendil-works/pi-agent-core").AgentHarness;
+    } as unknown as import("@iris/pi-agent-core").AgentHarness;
 
     attachRuntimeEventSeam(fakeHarness, {
       ledger,
@@ -755,7 +755,7 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     // ContextMessageUnit with a lineage-global monotonic contextSeq.
     const { models, model, providerProfileId } = await composeProvider("mock");
     const { harness } = createIrisHarness({
-      session: storage as unknown as import("@earendil-works/pi-agent-core").Session,
+      session: storage as unknown as import("@iris/pi-agent-core").Session,
       instanceEpoch: 1,
       models,
       model,
@@ -833,7 +833,7 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     const metadata2 = await loadJsonlSessionMetadata(fs, mixedPath);
     const storage2 = await repo.open(metadata2);
     const { harness: harness2 } = createIrisHarness({
-      session: storage2 as unknown as import("@earendil-works/pi-agent-core").Session,
+      session: storage2 as unknown as import("@iris/pi-agent-core").Session,
       instanceEpoch: 1,
       models,
       model,
@@ -988,7 +988,7 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     // harness runs on the FRESH handle that observed the torn tail.
     const { models, model, providerProfileId } = await composeProvider("mock");
     const { harness } = createIrisHarness({
-      session: reopened as unknown as import("@earendil-works/pi-agent-core").Session,
+      session: reopened as unknown as import("@iris/pi-agent-core").Session,
       instanceEpoch: 1,
       models,
       model,
@@ -1063,7 +1063,7 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     const metadata2 = await loadJsonlSessionMetadata(fs, mixedPath);
     const storage2 = await repo.open(metadata2);
     const { harness: harness2 } = createIrisHarness({
-      session: storage2 as unknown as import("@earendil-works/pi-agent-core").Session,
+      session: storage2 as unknown as import("@iris/pi-agent-core").Session,
       instanceEpoch: 1,
       models,
       model,

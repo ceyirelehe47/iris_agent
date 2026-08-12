@@ -50,8 +50,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AgentHarness } from "@earendil-works/pi-agent-core";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import { AgentHarness } from "@iris/pi-agent-core";
+import type { ImageContent } from "@iris/pi-ai";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import type { AgentConfigV3 } from "../src/config/schema.js";

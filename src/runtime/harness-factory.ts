@@ -11,8 +11,8 @@ import {
   type SettledEvent,
   type ToolCallEvent,
   type ToolResultEvent,
-} from "@earendil-works/pi-agent-core";
-import type { Model, Models, ToolCall } from "@earendil-works/pi-ai";
+} from "@iris/pi-agent-core";
+import type { Model, Models, ToolCall } from "@iris/pi-ai";
 
 import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";

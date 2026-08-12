@@ -87,7 +87,7 @@ test("r0: Pi package pins match package.json dependencies exactly", () => {
     assert.equal(pkg.dependencies[name], version, `package.json must pin ${name}@${version}`);
   }
   // The agent must not silently add other Pi packages without lock coverage.
-  const piPkgs = Object.keys(pkg.dependencies).filter((n) => n.startsWith("@earendil-works/pi-"));
+  const piPkgs = Object.keys(pkg.dependencies).filter((n) => n.startsWith("@iris/pi-"));
   assert.deepEqual(piPkgs.sort(), Object.keys(lock.pi.packages).sort());
 });
 

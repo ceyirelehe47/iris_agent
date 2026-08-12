@@ -1,4 +1,4 @@
-import { computeMessageContentHash, type AgentHarness } from "@earendil-works/pi-agent-core";
+import { computeMessageContentHash, type AgentHarness } from "@iris/pi-agent-core";
 
 import type { ContextIngestPort } from "../contracts/context-v27.js";
 import type { PiSeamEvent, RuntimeEventIngestPort } from "../contracts/runtime-events.js";

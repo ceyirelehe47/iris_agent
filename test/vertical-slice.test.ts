@@ -5,7 +5,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { CustomMessage, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { CustomMessage, SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";

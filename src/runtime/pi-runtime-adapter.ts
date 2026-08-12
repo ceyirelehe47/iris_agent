@@ -1,4 +1,4 @@
-import type { AgentHarness, Session } from "@earendil-works/pi-agent-core";
+import type { AgentHarness, Session } from "@iris/pi-agent-core";
 
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
@@ -91,15 +91,15 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
    * fallback dispatch. The harness.setModel() call is asynchronous and
    * atomic from the perspective of the next prompt().
    */
-  async setModel(model: import("@earendil-works/pi-ai").Model<string>): Promise<void> {
+  async setModel(model: import("@iris/pi-ai").Model<string>): Promise<void> {
     await this.harness.setModel(model);
   }
 
   /**
    * iris_agent#89: Get the current model from the harness.
    */
-  getModel(): import("@earendil-works/pi-ai").Model<string> {
-    return this.harness.getModel() as import("@earendil-works/pi-ai").Model<string>;
+  getModel(): import("@iris/pi-ai").Model<string> {
+    return this.harness.getModel() as import("@iris/pi-ai").Model<string>;
   }
 
   /**

@@ -35,9 +35,9 @@
     "bootstrap:pi": "node scripts/bootstrap-pi-checkout.mjs --check"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "file:../pi/packages/agent",
-    "@earendil-works/pi-ai": "file:../pi/packages/ai",
-    "@earendil-works/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node",
+    "@iris/pi-agent-core": "file:../pi/packages/agent",
+    "@iris/pi-ai": "file:../pi/packages/ai",
+    "@iris/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "proper-lockfile": "4.1.2"
