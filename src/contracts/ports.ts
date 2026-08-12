@@ -32,13 +32,6 @@ export interface AgentRuntimePort {
    */
   getActiveInvocationId?(): string | null;
   /**
-   * iris_agent#111: signal abort WITHOUT waiting for runCompletion. Used by
-   * the supervisor's finally-block teardown to unblock a stalled generator
-   * before calling iter.return(). Returns the signaled invocation id, or
-   * null if no invocation is active.
-   */
-  signalAbort?(): string | null;
-  /**
    * iris_agent#111: optional seam to abort whatever invocation is currently
    * active without needing its id. Used by the supervisor's finally-block
    * teardown to unblock a stalled generator before calling iter.return().

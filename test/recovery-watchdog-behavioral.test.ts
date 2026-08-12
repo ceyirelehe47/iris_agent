@@ -10,16 +10,21 @@
  *   - typed errors (RecoveryExhaustedError reason/message)
  *   - concurrency tracking (at most one live provider invocation)
  *
- * The mock runtime is modeled on the production RuntimeCoordinator contract:
+ * The mock runtime is modeled on the production RuntimeCoordinator contract
+ * (iris_agent#114 Feature C5):
  *   - a stalled dispatch is an async iterator whose next() never resolves
- *     while return() completes immediately (the iris_agent#111 teardown
- *     order: the supervisor aborts BEFORE iter.return(), and abort drives
- *     settlement — not the iterator close);
- *   - abort() validates the active invocation and settles the run (resolves
- *     runCompletion, clears the active id); a second abort for an
- *     already-settled invocation is an idempotent success;
+ *     while return() completes immediately — settlement is driven by abort,
+ *     not by the iterator close;
+ *   - abort() IS the production seam (signalAbort was removed in C5 — it
+ *     was fire-and-forget and swallowed abort rejection): it validates the
+ *     active invocation, sends the abort signal, then waits for
+ *     runCompletion (the validated settled boundary) exactly like
+ *     RuntimeCoordinator.abort(); a second abort for an already-settled
+ *     invocation is an idempotent success;
  *   - getActiveInvocationId() keeps returning the accepted invocation until
- *     abort settles it (coordinator phase stays "turn" through return()).
+ *     abort settles it (coordinator phase stays "turn" through return(),
+ *     and a generator closed without settled fails closed with the latch
+ *     held — C5).
  *
  * The watchdog timer is a REAL setTimeout inside the supervisor
  * (raceNextWithWatchdog / makeWatchdogTimer), so stalls use a small
@@ -104,9 +109,9 @@ function settledEvents(invocationId: string): AgentRuntimeEvent[] {
  * NOT a generator: `next()` can return a never-resolving promise (the
  * provider accepted the invocation but never emits again — the stall),
  * while `return()` completes immediately and reports closure — matching the
- * RuntimeCoordinator contract where iter.return() finishes the generator's
- * finally block without waiting on the stuck provider (with the #111
- * teardown order, settlement is driven by abort, not by the iterator close).
+ * RuntimeCoordinator contract where settlement is driven by abort (C5:
+ * iter.return() runs AFTER the abort signal is in flight), not by the
+ * iterator close.
  */
 class StallableIterator
   implements AsyncIterable<AgentRuntimeEvent>, AsyncIterator<AgentRuntimeEvent>
@@ -176,13 +181,17 @@ interface MockRuntimeOptions {
 /**
  * Mock AgentRuntimePort driving the RecoverySupervisor's injected dispatch.
  *
- * Behavior modeled on RuntimeCoordinator, with the iris_agent#111 teardown
- * order (the supervisor aborts BEFORE iter.return()):
+ * Behavior modeled on RuntimeCoordinator, with the iris_agent#114 (C5)
+ * teardown order (the supervisor's abortWithSettlementTimeout starts the
+ * abort signal, THEN calls iter.return(), then awaits the bounded
+ * settlement):
  *  - dispatch #1 emits firstEvents then stalls forever;
  *  - dispatch #N (N>=2) emits a settled sequence (fallback success);
- *  - abort() drives settlement: "settle" mode settles the run (resolves
- *    runCompletion, clears the active id) on the first call and is an
- *    idempotent success on a subsequent call for the same invocation;
+ *  - abort() IS the production seam (signalAbort removed in C5): "settle"
+ *    mode validates the active invocation, sends the signal, settles the
+ *    run (resolves runCompletion, clears the active id) and awaits the
+ *    validated boundary — the same contract as RuntimeCoordinator.abort();
+ *    a subsequent abort for the same invocation is an idempotent success;
  *    "reject" mode throws every time; "hang" mode accepts the first abort
  *    but never settles (subsequent aborts never resolve), so the
  *    supervisor's abortSettlementTimeoutMs governs;
@@ -366,10 +375,10 @@ function terminalEscalations(events: RecoverySupervisorEvent[]): RecoveryEscalat
 
 /**
  * Every abort the supervisor issued must target the EXACT stalled invocation
- * with the watchdog reason. The count is deliberately open-ended (>= 1): the
- * supervisor may abort once (pre-first-event stall, where the finally cannot
- * know the id yet) or twice (event-exposed id: the #111 teardown abort plus
- * the abortWithSettlementTimeout validation) — both are contract-legal.
+ * with the watchdog reason. C5 removed signalAbort, so the watchdog path
+ * issues exactly one abort (via abortWithSettlementTimeout — the finally no
+ * longer aborts), but the count is deliberately left open-ended (>= 1) so
+ * the assertion stays contract-robust.
  */
 function assertAllAbortsTargetExactInvocation(
   runtime: MockRuntime,
