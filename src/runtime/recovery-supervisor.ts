@@ -510,6 +510,23 @@ export class RecoverySupervisor {
           // Native loop threw — classify from the error.
           nativeFailedMessage = error instanceof Error ? error.message : String(error);
         } finally {
+          // iris_agent#111 BLOCKING fix: when the watchdog breaks out of the
+          // event loop, the coordinator's async generator is parked on a
+          // stalled inner `for await (handle.runtime.prompt(input))`. Calling
+          // iter.return() alone deadlocks — return() only takes effect once
+          // the suspended inner await settles, and nothing settles it.
+          //
+          // Fix: issue the abort BEFORE iter.return(). The abort causes the
+          // stalled harness prompt to settle, unblocking the inner await,
+          // which lets return() propagate (latch release, phase flip).
+          if (!nativeSettled) {
+            // iris_agent#111: signal abort (fire-and-forget, no runCompletion
+            // wait) to unblock the stalled harness, then call iter.return()
+            // which triggers the coordinator's finally (latch release).
+            // signalAbort bypasses the coordinator's abort() settlement wait
+            // that would create a circular deadlock.
+            this.runtime.signalAbort?.();
+          }
           await iter.return?.().catch(() => undefined);
         }
 

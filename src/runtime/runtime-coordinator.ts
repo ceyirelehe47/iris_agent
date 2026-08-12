@@ -393,6 +393,27 @@ export class RuntimeCoordinator implements AgentRuntimePort {
   }
 
   /**
+   * iris_agent#111: Signal abort to the native runtime WITHOUT waiting for
+   * runCompletion. Used by the supervisor's finally-block teardown to unblock
+   * a stalled generator before calling iter.return(). The coordinator's own
+   * finally (triggered by iter.return()) handles latch release and phase flip.
+   *
+   * Returns the invocation id that was signaled, or null if no invocation
+   * was active.
+   */
+  signalAbort(): string | null {
+    if (this.activeInvocation === null || this.phase !== "turn") {
+      return null;
+    }
+    const id = this.activeInvocation;
+    const handle = this.activeRuntime.getActiveRuntime();
+    // Fire-and-forget: the harness abort unblocks the stalled prompt,
+    // which lets the coordinator generator resume and reach its finally.
+    void handle.runtime.abort(id, "supervisor_signal_abort").catch(() => undefined);
+    return id;
+  }
+
+  /**
    * Abort whatever invocation is currently active without needing its id —
    * used by Host graceful shutdown. Returns false when no invocation is
    * active; otherwise aborts and waits for settled like abort().

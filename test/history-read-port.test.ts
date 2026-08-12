@@ -156,7 +156,6 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
         kind: "assistant",
         semanticSchemaId: "iris.semantic.context_message.assistant.v1",
         contextUnitId: "a-3",
-        rawArchiveRef: undefined,
         unitId: "a-3",
         sourceEventId: "e-3",
       }),

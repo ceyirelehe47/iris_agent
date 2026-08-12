@@ -193,12 +193,19 @@ function parsePendingOutcomeUnknown(raw: string | null): PendingOutcomeUnknown |
       const p = parsed as Record<string, unknown>;
       return {
         dispatchId: p["dispatchId"] as string,
-        // #107: carry durable logical execution + input identity
+        // iris_agent#111: NEVER substitute dispatchId for logicalExecutionId.
+        // Old records missing logicalExecutionId are LEGACY — fail closed by
+        // returning a synthetic pending that blocks all provider dispatch
+        // until an explicit migration or verified reconciliation resolves it.
+        // The legacy fence uses "unknown-legacy-pending" as a sentinel that
+        // no real reconciliation will accept as replay-safe.
         logicalExecutionId:
           typeof p["logicalExecutionId"] === "string"
             ? p["logicalExecutionId"]
-            : (p["dispatchId"] as string),
-        inputId: typeof p["inputId"] === "string" ? p["inputId"] : "unknown-missing-input-id",
+            : "unknown-legacy-pending",
+        // iris_agent#111: never guess inputId from current state.
+        inputId:
+          typeof p["inputId"] === "string" ? p["inputId"] : "unknown-legacy-pending",
         model: typeof p["model"] === "string" ? p["model"] : null,
         occurredAt: p["occurredAt"] as string,
         ...(p["detail"] !== undefined ? { detail: p["detail"] as string } : {}),
