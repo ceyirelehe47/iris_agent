@@ -238,7 +238,13 @@ export function unitLayer(
   generation: ContextGenerationV2,
   index: number,
 ): 0 | 1 | 2 | 3 | 4 | 5 | null {
-  const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
+  const ends = generation.header.layerEnds;
+  const e0 = ends[0] ?? -1;
+  const e1 = ends[1] ?? -1;
+  const e2 = ends[2] ?? -1;
+  const e3 = ends[3] ?? -1;
+  const e4 = ends[4] ?? -1;
+  const e5 = ends[5] ?? -1;
   if (index < 0 || index >= e5) return null;
   if (index < e0) return 0;
   if (index < e1) return 1;

@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.semantic_derivation_refs.v1",
+  "title": "SemanticDerivationRefsV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.semantic_derivation_refs.v1"
+    },
+    "memoryRefs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compartmentIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workSnapshotVersion": {
+      "type": "integer"
+    },
+    "sourceContextMessageUnitIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schemaId"
+  ],
+  "additionalProperties": false
+}
