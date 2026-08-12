@@ -1,3 +1,4 @@
+// NOT PRODUCTION — SQLite persistence layer stores legacy m0Body/m1Body columns. Migration per Notion v27 pending.
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
