@@ -589,7 +589,18 @@ export class RecoverySupervisor {
             );
           }
           try {
-            await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+            // iris_agent#111: the finally-block signalAbort already unblocked
+            // the stalled generator and the coordinator's own finally released
+            // the latch. If the runtime has signalAbort and reports no active
+            // invocation, the teardown already settled it — skip the abort.
+            // Runtimes without signalAbort (mocks) still need the full abort.
+            const hasSignalAbort = this.runtime.signalAbort !== undefined;
+            const stillActive = this.runtime.getActiveInvocationId?.();
+            if (hasSignalAbort && (stillActive === null || stillActive === undefined)) {
+              // Teardown already settled — skip redundant abort
+            } else {
+              await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+            }
           } catch (error) {
             // Abort rejected or did not settle in time: never advance or
             // dispatch a fallback over a possibly-live invocation. The

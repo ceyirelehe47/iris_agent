@@ -288,10 +288,18 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       this.resolveRunCompletion?.();
       this.runCompletion = null;
       this.resolveRunCompletion = null;
+      // iris_agent#111: force-release the single-writer latch on EVERY exit
+      // path, including generator close (iter.return()) while parked at
+      // phase "turn". Previously this only cleared activeInvocation when
+      // phase was "idle" or "failed", leaving the latch permanently held
+      // after a watchdog-driven teardown — the generator's finally runs but
+      // phase is still "turn" because the settled/idle transition never
+      // happened. This bricked the runtime for all subsequent dispatches.
+      if (this.phase === "turn") {
+        this.phase = "idle";
+      }
       if (this.phase === "idle" || this.phase === "failed") {
-        if (this.phase === "idle") {
-          this.activeInvocation = null;
-        }
+        this.activeInvocation = null;
       }
     }
   }

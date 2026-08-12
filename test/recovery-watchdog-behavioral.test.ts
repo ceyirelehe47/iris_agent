@@ -246,14 +246,11 @@ class MockRuntime implements AgentRuntimePort {
       throw this.abortError ?? new Error("mock runtime rejected abort");
     }
     if (this.abortMode === "hang") {
-      // First abort is accepted (forwards to the harness), but the native
-      // run never settles — subsequent aborts never resolve, so the
+      // Abort is accepted (forwards to the harness), but the native
+      // run never settles — the abort promise never resolves, so the
       // supervisor's abortSettlementTimeoutMs governs.
-      if (this.hangAccepted.has(invocationId)) {
-        await NEVER;
-        return;
-      }
       this.hangAccepted.add(invocationId);
+      await NEVER;
       return;
     }
     if (this.settledInvocations.has(invocationId)) {
