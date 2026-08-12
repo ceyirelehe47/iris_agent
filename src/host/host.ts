@@ -1109,7 +1109,7 @@ export class IrisHost {
               return options.outcomeReconciler!({
                 logicalExecutionId: signal.logicalExecutionId ?? "unknown",
                 inputId: signal.inputId ?? "unknown",
-                dispatchId: signal.detail ?? "unknown",
+                dispatchId: signal.dispatchId ?? "unknown",
               });
             }
           : async () => {

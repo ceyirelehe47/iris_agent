@@ -68,6 +68,12 @@ export interface RecoverySignal {
    * the input's effects landed before deciding replay safety.
    */
   inputId?: string | undefined;
+  /**
+   * iris_agent#111: the dispatch identity of the possibly-accepted
+   * dispatch. Lets a reconciler correlate the ambiguity to the exact
+   * provider dispatch record.
+   */
+  dispatchId?: string | undefined;
 }
 
 /**
@@ -714,6 +720,7 @@ export class RecoverySupervisor {
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             logicalExecutionId,
             inputId: input.inputId,
+            dispatchId: this.runtime.getActiveInvocationId?.() ?? undefined,
           });
           const normalized = normalizeReconcileOutcome(disposition);
           if (normalized === "ambiguous") {
@@ -1119,11 +1126,9 @@ export class RecoverySupervisor {
     try {
       const result = await this.reconcile({
         classification: "outcome_unknown" as RetryClassification,
-        // #107: use the DURABLE logical execution id and input id from the
-        // persisted pending record — never substitute dispatchId for
-        // logicalExecutionId, never borrow the current prompt's inputId.
         logicalExecutionId: pending.logicalExecutionId,
         inputId: pending.inputId,
+        dispatchId: pending.dispatchId,
         detail: pending.detail,
         model: pending.model ?? undefined,
       });
