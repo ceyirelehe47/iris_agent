@@ -80,6 +80,29 @@ export interface IrisHostOptions {
    * never re-prompted). Defaults to 1; override only for tests.
    */
   instanceEpoch?: number;
+  /**
+   * iris_agent#111: Operation-specific outcome_unknown reconciliation seam.
+   * When the supervisor encounters a possibly-accepted (outcome_unknown)
+   * dispatch, it calls this reconciler with the logical execution identity
+   * and input identity. The reconciler should query each affected subsystem's
+   * durable authority (provider dispatch status, tool idempotency receipt,
+   * Memory Publication acceptance, Body adapter receipt) and return:
+   * - `confirmed_applied`: the prior dispatch's effects were confirmed applied
+   *   → settle without replay (zero duplicate side effects).
+   * - `replay_safe`: the prior dispatch was confirmed NOT applied → replay
+   *   with the same logical execution/idempotency identity and retry budget.
+   * - `ambiguous`: cannot determine → fail closed (zero replay across restarts).
+   *
+   * Ingress `session_committed` MUST NOT be accepted as provider/effect
+   * outcome proof — it only proves user input entered Pi Session.
+   *
+   * When omitted, the default is always `ambiguous` (safe fail-closed).
+   */
+  outcomeReconciler?: (signal: {
+    logicalExecutionId: string;
+    inputId: string;
+    dispatchId: string;
+  }) => Promise<"confirmed_applied" | "replay_safe" | "ambiguous">;
 }
 
 /** Default Host instance epoch for the durable ingress dedupe namespace. */
@@ -1068,24 +1091,32 @@ export class IrisHost {
       const readyRecoveryStore = recoveryStore;
       const supervisor = new RecoverySupervisor({
         runtime: coordinator,
-        config: defaultFallbackConfig(models.getModels().map((m) => m.id)),
-        // iris_agent#107: the Host reconciler must NOT use ingress
-        // session_committed as proof that provider/tool/Memory/Body effects
-        // were applied. Ingress only proves user input + companion entered
-        // Pi Session — it says nothing about model dispatch outcomes.
-        // Without operation-specific durable evidence (idempotency key,
-        // provider read-after-write, tool receipt, Memory Publication
-        // acceptance, etc.), the safe answer is always "ambiguous" → fail
-        // closed (never replay an uncertain side effect).
-        // When operation-specific reconcilers are available, this dispatch
-        // should query them. For now, always return ambiguous to prevent
-        // duplicate side effects.
-        reconcileOutcomeUnknown: async () => {
-          // #107: without operation-specific durable effect evidence,
-          // we cannot determine whether the possibly-accepted dispatch
-          // was applied. Always fail closed.
-          return "ambiguous";
-        },
+        config: defaultFallbackConfig(models.getModels().map((m) => `${m.provider}/${m.id}`)),
+        // iris_agent#111: operation-specific reconciliation seam.
+        // When the caller provides an outcomeReconciler, the supervisor
+        // dispatches to it with the logical execution identity, input
+        // identity, and dispatch identity from the pending outcome_unknown
+        // record. The reconciler queries each affected subsystem's durable
+        // authority (provider dispatch status, tool idempotency receipt,
+        // Memory Publication acceptance, Body adapter receipt) and returns
+        // confirmed_applied / replay_safe / ambiguous.
+        //
+        // iris_agent#107: ingress session_committed MUST NOT be accepted
+        // as provider/effect outcome proof — it only proves user input
+        // entered Pi Session.
+        reconcileOutcomeUnknown: options.outcomeReconciler
+          ? async (signal) => {
+              return options.outcomeReconciler!({
+                logicalExecutionId: signal.logicalExecutionId ?? "unknown",
+                inputId: signal.inputId ?? "unknown",
+                dispatchId: signal.dispatchId ?? "unknown",
+              });
+            }
+          : async () => {
+              // No operation-specific reconciler configured: always fail
+              // closed (zero replay across restarts).
+              return "ambiguous" as const;
+            },
       });
       return new IrisHost({
         dataRoot: options.dataRoot,

@@ -15,10 +15,10 @@
  * ContextGenerationV2 is in-memory only, rebuildable from durable sources.
  */
 
-import type { ContextMessageUnit } from "../contracts/context-units.js";
 import {
   type ContextGenerationV2,
   type ContextGenerationHeaderV1,
+  type ContextMessageUnitV1,
   type ContextUnitV2,
   type ContextUnitHeaderV1,
   type ContextUnitSourceRefV1,
@@ -66,7 +66,7 @@ export interface FrozenContextSources {
   /** P4 memory units. */
   p4Units: readonly P0P1P2P3P4Unit[];
   /** P5 durable ContextMessageUnits (selected live units for this generation). */
-  p5Units: readonly ContextMessageUnit[];
+  p5Units: readonly ContextMessageUnitV1[];
 }
 
 /**
@@ -204,9 +204,10 @@ function projectStaticUnit(unit: P0P1P2P3P4Unit): ContextUnitV2 {
  * Per #103: reuses the durable unit's contextUnitId, semanticSchemaId, and
  * contentHash 1:1 — no second mapper or schema re-derivation.
  */
-function projectP5Unit(cmu: ContextMessageUnit): ContextUnitV2 {
-  // Serialize the AgentMessage payload as JsonValue
-  const semanticContent = cmu.payload as unknown as JsonValue;
+function projectP5Unit(cmu: ContextMessageUnitV1): ContextUnitV2 {
+  // Feature A (#110): the durable unit's semanticContent IS the canonical
+  // JsonValue payload plane — projected 1:1, no re-serialization.
+  const semanticContent = cmu.semanticContent;
 
   const header: ContextUnitHeaderV1 = {
     schemaId: CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,

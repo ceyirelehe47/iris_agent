@@ -133,31 +133,41 @@ function publishingStubPort(): ContextHistoryReadPort {
 
 function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistoryReadPort {
   const claim = (fromEntrySeq: number, toEntrySeq: number) => {
-    const units: import("../src/contracts/context-units.js").ContextMessageUnit[] = [];
+    const units: import("../src/contracts/context-v27.js").ContextMessageUnitV1[] = [];
     const head = mutable.length; // the fixture's notion of the session head
     for (let seq = fromEntrySeq; seq <= Math.min(toEntrySeq, head); seq++) {
       const entry = mutable[seq - 1];
       const message = (entry as { message?: unknown } | undefined)?.message;
       units.push({
-        lineageId: "identity-exit-gate",
-        runtimeSessionId: "identity-exit-gate",
-        contextSeq: seq,
+        schemaId: "iris.context_message_unit.v1",
         contextUnitId: `unit-${seq}`,
-        unitId: `unit-${seq}`,
-        sourceEventId: `evt-${seq}`,
+        contextLineageId: "identity-exit-gate",
+        contextSeq: seq,
         runtimeEventId: `evt-${seq}`,
-        unitType: "input",
+        kind: "user",
         semanticSchemaId: "iris.semantic.context_message.user.v1",
-        disposition: "include",
-        entryId: `entry-${seq}`,
-        entrySeq: seq,
+        semanticContent:
+          (message as unknown as import("../src/contracts/context-v27.js").JsonValue) ??
+          ({
+            role: "user",
+            content: `content-${seq}`,
+            timestamp: 1,
+          } as unknown as import("../src/contracts/context-v27.js").JsonValue),
+        historianDisposition: "include",
         contentHash: "e".repeat(64),
-        payload:
-          (message as import("../src/contracts/context-units.js").ContextMessageUnit["payload"]) ??
-          ({ role: "user", content: `content-${seq}`, timestamp: 1 } as never),
-        paired: false,
-        derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-        schemaVersion: "context-unit-v1",
+        derivationRefs: {
+          schemaId: "iris.semantic_derivation_refs.v1",
+          memoryRefs: [],
+          compartmentIds: [],
+          sourceContextMessageUnitIds: [],
+        },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1" as const,
+          runtimeSessionId: "identity-exit-gate",
+          startEntrySeq: seq,
+          entryIds: [`entry-${seq}`],
+        },
+        lifecycleState: "committed",
         createdAt: "2026-08-01T00:00:00.000Z",
       });
     }
@@ -180,8 +190,8 @@ function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistor
           contextUnitId: `unit-${seq}`,
           contextSeq: seq,
           runtimeEventId: `evt-${seq}`,
-          unitType: "input",
-          disposition: "include",
+          kind: "user",
+          historianDisposition: "include",
           contentHash: "e".repeat(64),
           derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         });
@@ -194,8 +204,8 @@ function publishingStubPortWithUnits(mutable: SessionTreeEntry[]): ContextHistor
         contextUnitId: view.contextUnitId,
         contextSeq: view.contextSeq,
         runtimeEventId: view.runtimeEventId,
-        unitType: view.unitType,
-        disposition: view.disposition,
+        kind: view.kind,
+        historianDisposition: view.historianDisposition,
         contentHash: view.contentHash,
         derivationRefs: view.derivationRefs,
         payload: { role: "user", content: `content-${view.contextSeq}`, timestamp: 0 },

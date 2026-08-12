@@ -68,6 +68,12 @@ export interface RecoverySignal {
    * the input's effects landed before deciding replay safety.
    */
   inputId?: string | undefined;
+  /**
+   * iris_agent#111: the dispatch identity of the possibly-accepted
+   * dispatch. Lets a reconciler correlate the ambiguity to the exact
+   * provider dispatch record.
+   */
+  dispatchId?: string | undefined;
 }
 
 /**
@@ -510,6 +516,23 @@ export class RecoverySupervisor {
           // Native loop threw — classify from the error.
           nativeFailedMessage = error instanceof Error ? error.message : String(error);
         } finally {
+          // iris_agent#111 BLOCKING fix: when the watchdog breaks out of the
+          // event loop, the coordinator's async generator is parked on a
+          // stalled inner `for await (handle.runtime.prompt(input))`. Calling
+          // iter.return() alone deadlocks — return() only takes effect once
+          // the suspended inner await settles, and nothing settles it.
+          //
+          // Fix: issue the abort BEFORE iter.return(). The abort causes the
+          // stalled harness prompt to settle, unblocking the inner await,
+          // which lets return() propagate (latch release, phase flip).
+          if (!nativeSettled) {
+            // iris_agent#111: signal abort (fire-and-forget, no runCompletion
+            // wait) to unblock the stalled harness, then call iter.return()
+            // which triggers the coordinator's finally (latch release).
+            // signalAbort bypasses the coordinator's abort() settlement wait
+            // that would create a circular deadlock.
+            this.runtime.signalAbort?.();
+          }
           await iter.return?.().catch(() => undefined);
         }
 
@@ -572,7 +595,18 @@ export class RecoverySupervisor {
             );
           }
           try {
-            await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+            // iris_agent#111: the finally-block signalAbort already unblocked
+            // the stalled generator and the coordinator's own finally released
+            // the latch. If the runtime has signalAbort and reports no active
+            // invocation, the teardown already settled it — skip the abort.
+            // Runtimes without signalAbort (mocks) still need the full abort.
+            const hasSignalAbort = this.runtime.signalAbort !== undefined;
+            const stillActive = this.runtime.getActiveInvocationId?.();
+            if (hasSignalAbort && (stillActive === null || stillActive === undefined)) {
+              // Teardown already settled — skip redundant abort
+            } else {
+              await this.abortWithSettlementTimeout(targetInvocationId, `watchdog_${stallDetected}`);
+            }
           } catch (error) {
             // Abort rejected or did not settle in time: never advance or
             // dispatch a fallback over a possibly-live invocation. The
@@ -686,6 +720,7 @@ export class RecoverySupervisor {
             ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             logicalExecutionId,
             inputId: input.inputId,
+            dispatchId: this.runtime.getActiveInvocationId?.() ?? undefined,
           });
           const normalized = normalizeReconcileOutcome(disposition);
           if (normalized === "ambiguous") {
@@ -1091,11 +1126,9 @@ export class RecoverySupervisor {
     try {
       const result = await this.reconcile({
         classification: "outcome_unknown" as RetryClassification,
-        // #107: use the DURABLE logical execution id and input id from the
-        // persisted pending record — never substitute dispatchId for
-        // logicalExecutionId, never borrow the current prompt's inputId.
         logicalExecutionId: pending.logicalExecutionId,
         inputId: pending.inputId,
+        dispatchId: pending.dispatchId,
         detail: pending.detail,
         model: pending.model ?? undefined,
       });

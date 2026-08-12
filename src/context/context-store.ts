@@ -7,7 +7,15 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateDatabase } from "../db/migrate.js";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ContextMessageUnit, UnitDispositionFilter } from "../contracts/context-units.js";
+import {
+  KIND_TO_SEMANTIC_SCHEMA_ID,
+  SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+  type ContextMessageUnitV1,
+  type JsonValue,
+  type RawArchiveRefV1,
+  type SemanticDerivationRefsV1,
+  type UnitDispositionFilter,
+} from "../contracts/context-v27.js";
 import type { ContextUnitStorePort } from "./context-ingest.js";
 
 /**
@@ -50,7 +58,149 @@ interface UnitRow {
   derivation_refs: string;
   schema_version: string;
   raw_archive_ref: string | null;
+  semantic_schema_id: string | null;
   created_at: string;
+}
+
+/**
+ * Feature A (#110): a canonical ContextMessageUnitV1 bundled with the
+ * persistence-layer-only metadata the SQLite mapping tracks. The V1 DTO has
+ * NO fields for sourceEventId/entryId/entrySeq/companionEntryId/pairKey/
+ * paired — those are physical mapping details owned by the store and are
+ * exposed only through this record (used by the ingest pairing flow).
+ */
+export interface UnitStoreRecord {
+  readonly unit: ContextMessageUnitV1;
+  readonly persistenceMeta: {
+    readonly sourceEventId: string;
+    readonly entryId: string | null;
+    readonly entrySeq: number | null;
+    readonly companionEntryId: string | null;
+    readonly pairKey: string | null;
+    readonly paired: boolean;
+  };
+}
+
+/**
+ * Feature A (#110): physical unit_type → canonical V1 kind mapping
+ * (input→user, assistant→assistant, tool_result→tool_result). Unknown
+ * physical values (schema drift) fail closed — never guessed.
+ */
+function physicalUnitTypeToKind(unitType: string): ContextMessageUnitV1["kind"] {
+  switch (unitType) {
+    case "input":
+      return "user";
+    case "assistant":
+      return "assistant";
+    case "tool_result":
+      return "tool_result";
+    default:
+      throw new Error(
+        `context rowToUnit: unknown physical unit_type ${JSON.stringify(unitType)} (fail closed)`,
+      );
+  }
+}
+
+/**
+ * Feature A (#110): V1 kind → physical unit_type for the SQLite CHECK
+ * constraint ('input'|'assistant'|'tool_result'). Kinds not representable in
+ * the physical schema (tool_call/body_event/operational) fail closed — never
+ * guessed into a wrong physical row.
+ */
+function kindToPhysicalUnitType(
+  kind: ContextMessageUnitV1["kind"],
+): "input" | "assistant" | "tool_result" {
+  switch (kind) {
+    case "user":
+      return "input";
+    case "assistant":
+      return "assistant";
+    case "tool_result":
+      return "tool_result";
+    case "tool_call":
+    case "body_event":
+    case "operational":
+      throw new Error(
+        `context insertUnit: kind ${kind} has no physical unit_type mapping (fail closed)`,
+      );
+  }
+}
+
+/**
+ * Feature A (#110): physical disposition → canonical V1 historianDisposition.
+ * The legacy 'retired' value (present in pre-constraint historical rows)
+ * maps to 'exclude' — a retired unit must never re-enter the provider or
+ * Historian basis view. Unknown values fail closed.
+ */
+function physicalDispositionToHistorian(
+  disposition: string,
+): ContextMessageUnitV1["historianDisposition"] {
+  switch (disposition) {
+    case "include":
+    case "reference_only":
+    case "exclude":
+      return disposition;
+    case "retired":
+      return "exclude";
+    default:
+      throw new Error(
+        `context rowToUnit: unknown physical disposition ${JSON.stringify(disposition)} (fail closed)`,
+      );
+  }
+}
+
+/**
+ * Feature A (#110): parse the stored derivation refs JSON into the canonical
+ * SemanticDerivationRefsV1. The physical column may hold either the legacy
+ * shape ({memoryRefs, compartmentIds, sourceContextMessageUnitIds}) or the
+ * canonical V1 shape (schemaId + optional fields). Corrupt/unparseable →
+ * undefined (the V1 unit then simply omits derivationRefs — nothing is
+ * fabricated on a read-only path).
+ */
+function parseStoredDerivationRefs(raw: string): SemanticDerivationRefsV1 | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  const stringList = (value: unknown): string[] | undefined =>
+    Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : undefined;
+  const memoryRefs = stringList(record["memoryRefs"]);
+  const compartmentIds = stringList(record["compartmentIds"]);
+  const sourceContextMessageUnitIds = stringList(record["sourceContextMessageUnitIds"]);
+  const workSnapshotVersion =
+    typeof record["workSnapshotVersion"] === "number" ? record["workSnapshotVersion"] : undefined;
+  return {
+    schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+    ...(memoryRefs !== undefined && memoryRefs.length > 0 ? { memoryRefs } : {}),
+    ...(compartmentIds !== undefined && compartmentIds.length > 0 ? { compartmentIds } : {}),
+    ...(workSnapshotVersion !== undefined ? { workSnapshotVersion } : {}),
+    ...(sourceContextMessageUnitIds !== undefined && sourceContextMessageUnitIds.length > 0
+      ? { sourceContextMessageUnitIds }
+      : {}),
+  };
+}
+
+/**
+ * Feature A (#110): parse the stored raw archive ref into the canonical
+ * RawArchiveRefV1. New writes store canonical JSON; pre-Feature-A rows hold
+ * the legacy `pi://session/<id>/entry/<entryId>` string form, which the
+ * persistence layer keeps as-is (no structural type needed at this layer).
+ */
+function parseStoredRawArchiveRef(raw: string): RawArchiveRefV1 {
+  if (raw.startsWith("{")) {
+    try {
+      return JSON.parse(raw) as RawArchiveRefV1;
+    } catch {
+      // fall through to the legacy string form
+    }
+  }
+  return raw as unknown as RawArchiveRefV1;
 }
 
 /**
@@ -536,7 +686,7 @@ export class ContextStore implements ContextUnitStorePort {
   }
 
   insertUnit(
-    unit: ContextMessageUnit,
+    unit: ContextMessageUnitV1,
     options?: {
       /**
        * iris_agent#52: recovery mode skips the session-binding validation.
@@ -547,32 +697,67 @@ export class ContextStore implements ContextUnitStorePort {
        * the fail-closed session check.
        */
       verifySessionBinding?: boolean;
+      /**
+       * Feature A (#110): the current Runtime Session id used for the
+       * fail-closed session→lineage binding check, per-lineage cap accounting
+       * and emergency-state marking. The V1 DTO is lineage-bound and carries
+       * no session id; the ingest layer supplies the session. Absent → the
+       * insert degrades to lineage-direct semantics (recovery-style, no
+       * session verification).
+       */
+      runtimeSessionId?: string;
     },
   ): void {
-    const verify = options?.verifySessionBinding !== false;
+    const sessionId = options?.runtimeSessionId;
+    const verify = options?.verifySessionBinding !== false && sessionId !== undefined;
     const count = verify
-      ? this.countUnits(unit.runtimeSessionId)
-      : this.countUnitsByLineage(unit.lineageId);
+      ? this.countUnits(sessionId)
+      : this.countUnitsByLineage(unit.contextLineageId);
     if (count >= this.hardUnitsCap) {
-      const error = new ContextBoundsExceededError(unit.runtimeSessionId, this.hardUnitsCap);
-      const lineage = verify
-        ? this.getLineage(unit.runtimeSessionId)
-        : this.getLineageByLineageId(unit.lineageId);
-      if (lineage !== undefined) {
-        this.setEmergencyState(
-          unit.runtimeSessionId,
-          "emergency_fail_closed",
-          error.message,
-          verify ? undefined : unit.lineageId,
-        );
+      const error = new ContextBoundsExceededError(
+        sessionId ?? unit.contextLineageId,
+        this.hardUnitsCap,
+      );
+      if (sessionId !== undefined) {
+        const lineage = verify
+          ? this.getLineage(sessionId)
+          : this.getLineageByLineageId(unit.contextLineageId);
+        if (lineage !== undefined) {
+          this.setEmergencyState(
+            sessionId,
+            "emergency_fail_closed",
+            error.message,
+            verify ? undefined : unit.contextLineageId,
+          );
+        }
       }
       throw error;
     }
-    const disposition = count >= this.maxUnitsPerSession ? "exclude" : unit.disposition;
-    const boundLineageId = verify ? this.resolveLineageId(unit.runtimeSessionId) : unit.lineageId;
-    if (verify && unit.lineageId !== boundLineageId) {
-      throw new ContextLineageResolutionError(unit.runtimeSessionId);
+    const disposition = count >= this.maxUnitsPerSession ? "exclude" : unit.historianDisposition;
+    const boundLineageId = verify ? this.resolveLineageId(sessionId) : unit.contextLineageId;
+    if (verify && unit.contextLineageId !== boundLineageId) {
+      throw new ContextLineageResolutionError(sessionId);
     }
+    // Physical mapping (SQLite columns are implementation details; the V1
+    // DTO maps losslessly at this boundary):
+    //  - unit_type: kind user→'input' (CHECK constraint), others 1:1;
+    //  - source_event_id: exactly-once anchor := runtimeEventId (the ingest
+    //    source event IS the runtime event);
+    //  - entry_id/entry_seq: denormalized from rawArchiveRef (Pi archive
+    //    attribution — never stored on the V1 DTO itself);
+    //  - paired/companion_entry_id/pair_key: fresh inserts are always
+    //    unpaired; the companion flow owns pairing via updateUnitPairing;
+    //  - schema_version: physical-only constant (V1 dropped schemaVersion);
+    //  - raw_archive_ref: canonical JSON of the V1 RawArchiveRefV1.
+    const archiveRef = unit.rawArchiveRef;
+    const entryId = archiveRef?.entryIds?.[0] ?? null;
+    const entrySeq = archiveRef?.startEntrySeq ?? archiveRef?.endEntrySeq ?? null;
+    const derivationRefs: SemanticDerivationRefsV1 = unit.derivationRefs ?? {
+      schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+      memoryRefs: [],
+      compartmentIds: [],
+      sourceContextMessageUnitIds: [],
+    };
     this.db
       .prepare(
         `INSERT INTO context_units (
@@ -586,20 +771,20 @@ export class ContextStore implements ContextUnitStorePort {
         boundLineageId,
         unit.contextSeq,
         unit.contextUnitId,
-        unit.runtimeEventId ?? null,
-        unit.sourceEventId,
-        unit.unitType,
+        unit.runtimeEventId,
+        unit.runtimeEventId,
+        kindToPhysicalUnitType(unit.kind),
         disposition,
-        unit.entryId ?? null,
-        unit.entrySeq ?? null,
+        entryId,
+        entrySeq,
         unit.contentHash,
-        JSON.stringify(unit.payload),
-        unit.companionEntryId ?? null,
-        unit.pairKey ?? null,
-        unit.paired ? 1 : 0,
-        JSON.stringify(unit.derivationRefs),
-        unit.schemaVersion,
-        unit.rawArchiveRef ?? null,
+        JSON.stringify(unit.semanticContent),
+        null,
+        null,
+        0,
+        JSON.stringify(derivationRefs),
+        "context-unit-v1",
+        archiveRef === undefined ? null : JSON.stringify(archiveRef),
         unit.createdAt,
         unit.semanticSchemaId,
       );
@@ -668,7 +853,7 @@ export class ContextStore implements ContextUnitStorePort {
       limit?: number;
       disposition?: UnitDispositionFilter;
     } = {},
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     // R2-P3：store 级默认过滤——只返回 disposition="include" 的单元（provider
     // 视图），renderer（renderForProviderCall / renderProviderMessages /
     // rebuildM0Body / renderHistorySince）与 harness 均消费本方法，因此 excluded
@@ -703,7 +888,7 @@ export class ContextStore implements ContextUnitStorePort {
       limit?: number;
       disposition?: UnitDispositionFilter;
     } = {},
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     const disposition = options.disposition ?? "include";
     const afterContextSeq = options.afterContextSeq;
     let sql = "SELECT * FROM context_units WHERE context_lineage_id = ?";
@@ -731,7 +916,7 @@ export class ContextStore implements ContextUnitStorePort {
     lineageId: string,
     fromEntrySeq: number,
     toEntrySeq: number,
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     const rows = this.db
       .prepare(
         "SELECT * FROM context_units WHERE context_lineage_id = ? AND entry_seq BETWEEN ? AND ? ORDER BY context_seq",
@@ -748,7 +933,7 @@ export class ContextStore implements ContextUnitStorePort {
     lineageId: string,
     fromContextSeq: number,
     toContextSeq: number,
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     const rows = this.db
       .prepare(
         "SELECT * FROM context_units WHERE context_lineage_id = ? AND context_seq BETWEEN ? AND ? ORDER BY context_seq",
@@ -784,11 +969,11 @@ export class ContextStore implements ContextUnitStorePort {
     return seq ?? undefined;
   }
 
-  findBySourceEvent(eventId: string): ContextMessageUnit | undefined {
+  findBySourceEvent(eventId: string): UnitStoreRecord | undefined {
     const row = this.db
       .prepare("SELECT * FROM context_units WHERE source_event_id = ? LIMIT 1")
       .get(eventId) as UnitRow | undefined;
-    return row === undefined ? undefined : this.rowToUnit(row);
+    return row === undefined ? undefined : this.rowToUnitRecord(row);
   }
 
   maxContextSeq(runtimeSessionId: string): number {
@@ -839,40 +1024,56 @@ export class ContextStore implements ContextUnitStorePort {
     return row?.seq ?? null;
   }
 
-  private rowToUnit(row: UnitRow): ContextMessageUnit {
-    return {
-      lineageId: row.context_lineage_id,
-      runtimeSessionId: row.context_lineage_id,
-      contextSeq: row.context_seq,
+  /**
+   * Feature A (#110): SQLite row → canonical ContextMessageUnitV1 (the
+   * single durable Context semantic DTO). Physical column names are
+   * implementation details; the V1 shape maps losslessly at this boundary.
+   */
+  private rowToUnit(row: UnitRow): ContextMessageUnitV1 {
+    return this.rowToUnitRecord(row).unit;
+  }
+
+  /** Row → V1 unit + persistence-layer-only metadata (entry/pairing). */
+  private rowToUnitRecord(row: UnitRow): UnitStoreRecord {
+    const kind = physicalUnitTypeToKind(row.unit_type);
+    const historianDisposition = physicalDispositionToHistorian(row.disposition);
+    // semanticSchemaId from the new column (migration 0005 backfills existing
+    // rows); fallback derives it from unit_type via the canonical map.
+    const semanticSchemaId =
+      row.semantic_schema_id ??
+      KIND_TO_SEMANTIC_SCHEMA_ID[kind] ??
+      "iris.semantic.context_message.unknown.v1";
+    const derivationRefs = parseStoredDerivationRefs(row.derivation_refs);
+    const unit: ContextMessageUnitV1 = {
+      schemaId: "iris.context_message_unit.v1",
       contextUnitId: row.unit_id,
-      unitId: row.unit_id,
-      sourceEventId: row.source_event_id,
-      ...(row.runtime_event_id !== null ? { runtimeEventId: row.runtime_event_id } : {}),
-      unitType: row.unit_type as ContextMessageUnit["unitType"],
-      // semanticSchemaId from the new column (migration 0005 backfills existing rows)
-      semanticSchemaId:
-        (row as { semantic_schema_id?: string }).semantic_schema_id ??
-        (() => {
-          // Fallback for pre-migration rows: derive from unit_type
-          const map: Record<string, string> = {
-            input: "iris.semantic.context_message.user.v1",
-            assistant: "iris.semantic.context_message.assistant.v1",
-            tool_result: "iris.semantic.context_message.tool_result.v1",
-          };
-          return map[row.unit_type] ?? "iris.semantic.context_message.unknown.v1";
-        })(),
-      disposition: row.disposition as ContextMessageUnit["disposition"],
-      ...(row.entry_id !== null ? { entryId: row.entry_id } : {}),
-      ...(row.entry_seq !== null ? { entrySeq: row.entry_seq } : {}),
+      contextLineageId: row.context_lineage_id,
+      contextSeq: row.context_seq,
+      runtimeEventId: row.runtime_event_id ?? row.source_event_id,
+      kind,
+      semanticSchemaId,
+      semanticContent: JSON.parse(row.payload) as JsonValue,
+      historianDisposition,
+      ...(derivationRefs !== undefined ? { derivationRefs } : {}),
+      ...(row.raw_archive_ref !== null
+        ? { rawArchiveRef: parseStoredRawArchiveRef(row.raw_archive_ref) }
+        : {}),
       contentHash: row.content_hash,
-      payload: JSON.parse(row.payload) as AgentMessage,
-      ...(row.companion_entry_id !== null ? { companionEntryId: row.companion_entry_id } : {}),
-      ...(row.pair_key !== null ? { pairKey: row.pair_key } : {}),
-      paired: row.paired === 1,
-      derivationRefs: JSON.parse(row.derivation_refs) as ContextMessageUnit["derivationRefs"],
-      schemaVersion: row.schema_version,
-      ...(row.raw_archive_ref !== null ? { rawArchiveRef: row.raw_archive_ref } : {}),
+      // The physical table has no lifecycle column; every stored row is a
+      // committed unit (historian eligibility is derived downstream).
+      lifecycleState: "committed",
       createdAt: row.created_at,
+    };
+    return {
+      unit,
+      persistenceMeta: {
+        sourceEventId: row.source_event_id,
+        entryId: row.entry_id,
+        entrySeq: row.entry_seq,
+        companionEntryId: row.companion_entry_id,
+        pairKey: row.pair_key,
+        paired: row.paired === 1,
+      },
     };
   }
 

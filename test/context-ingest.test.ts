@@ -128,8 +128,8 @@ test("r2: contextSeq is per-session monotonic and gap-free", () => {
       [1, 2, 3],
     );
     assert.deepEqual(
-      units.map((unit) => unit.unitType),
-      ["input", "assistant", "input"],
+      units.map((unit) => unit.kind),
+      ["user", "assistant", "user"],
     );
     store.close();
     ledger.close();
@@ -188,14 +188,18 @@ test("r2: companion pair is folded at ingest with pairKey and provenance text", 
     const units = ingest.ensureUnitsUpTo("session-1");
     assert.equal(units.length, 1, "companion folds into the input unit, no separate unit");
     const input = units[0];
-    assert.equal(input?.unitType, "input");
-    assert.equal(input?.paired, true);
+    assert.equal(input?.kind, "user");
+    // 配对元数据（paired/pairKey/companionEntryId）是持久化层细节，
+    // V1 DTO 不携带 → 经 store 的 UnitStoreRecord 读取物理列。
+    const inputRecord = store.findBySourceEvent(input?.runtimeEventId ?? "");
+    assert.equal(inputRecord?.persistenceMeta.paired, true);
     assert.ok(
-      typeof input?.pairKey === "string" && input.pairKey.length > 0,
+      typeof inputRecord?.persistenceMeta.pairKey === "string" &&
+        inputRecord.persistenceMeta.pairKey.length > 0,
       "pairKey must be present",
     );
-    assert.equal(input?.companionEntryId, "comp-1");
-    const content = (input?.payload as { content?: unknown })?.content;
+    assert.equal(inputRecord?.persistenceMeta.companionEntryId, "comp-1");
+    const content = (input?.semanticContent as { content?: unknown })?.content;
     assert.equal(typeof content, "string");
     assert.ok(String(content).includes("hello iris"));
     store.close();
@@ -212,9 +216,12 @@ test("r2: unverified pair degrades to UNVERIFIED placeholder (fail-conservative)
     ledger.ingest(sampleEvent({ entryId: "user-1", role: "user", payload: userMessageWire() }));
     ledger.ingest(sampleEvent({ entryId: "comp-1", role: "custom", payload: stubCompanionWire() }));
     const units = ingest.ensureUnitsUpTo("session-1");
-    assert.equal(units[0]?.paired, false);
     assert.equal(
-      (units[0]?.payload as { content?: unknown })?.content,
+      store.findBySourceEvent(units[0]?.runtimeEventId ?? "")?.persistenceMeta.paired,
+      false,
+    );
+    assert.equal(
+      (units[0]?.semanticContent as { content?: unknown })?.content,
       "[USER REQUEST | UNVERIFIED]",
     );
     store.close();
@@ -298,14 +305,25 @@ test("r2: multi-input session never mis-pairs a replayed companion (reviewer B B
     assert.equal(units.length, 2);
     const first = units[0];
     const second = units[1];
-    assert.equal(first?.companionEntryId, "comp-1", "input-1 must pair with comp-1");
+    // 配对元数据是持久化层细节（V1 DTO 不携带）→ 经 store 读取物理列。
     assert.equal(
-      second?.companionEntryId,
+      store.findBySourceEvent(first?.runtimeEventId ?? "")?.persistenceMeta.companionEntryId,
+      "comp-1",
+      "input-1 must pair with comp-1",
+    );
+    assert.equal(
+      store.findBySourceEvent(second?.runtimeEventId ?? "")?.persistenceMeta.companionEntryId,
       "comp-2",
       "input-2 must pair with comp-2, never re-paired by comp-1",
     );
-    assert.equal(first?.paired, true);
-    assert.equal(second?.paired, true);
+    assert.equal(
+      store.findBySourceEvent(first?.runtimeEventId ?? "")?.persistenceMeta.paired,
+      true,
+    );
+    assert.equal(
+      store.findBySourceEvent(second?.runtimeEventId ?? "")?.persistenceMeta.paired,
+      true,
+    );
     store.close();
     ledger.close();
   } finally {
@@ -322,7 +340,7 @@ test("r2: input unit payload never stores raw wire before pairing (placeholder)"
     // 绝不能是 IRIS_INPUT_V1 raw wire。
     const units = ingest.ensureUnitsUpTo("session-1");
     assert.equal(
-      (units[0]?.payload as { content?: unknown })?.content,
+      (units[0]?.semanticContent as { content?: unknown })?.content,
       "[USER REQUEST | UNVERIFIED]",
     );
     store.close();

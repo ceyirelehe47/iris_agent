@@ -122,8 +122,14 @@ test("c1: crash -> rollover -> restart recovers Session A into the SAME lineage 
     // rawArchiveRef (the unit row's runtimeSessionId field is the lineage id
     // by existing rowToUnit semantics; attribution lives in the archive ref
     // and in the RuntimeEvent ledger row, which stays on A).
-    assert.match(reconciled.units[0]?.rawArchiveRef ?? "", new RegExp(s.epoch.runtimeSessionId));
-    assert.equal(reconciled.units[0]?.lineageId, reconciled.lineageId);
+    assert.match(
+      ((reconciled.units[0]?.rawArchiveRef as
+        { runtimeSessionId?: string } | string | undefined) instanceof Object
+        ? (reconciled.units[0]?.rawArchiveRef as { runtimeSessionId?: string }).runtimeSessionId
+        : (reconciled.units[0]?.rawArchiveRef as string | undefined)) ?? "",
+      new RegExp(s.epoch.runtimeSessionId),
+    );
+    assert.equal(reconciled.units[0]?.contextLineageId, reconciled.lineageId);
 
     // A second reconciliation is a no-op (receipt acked; unit idempotent).
     const again = await reconcileHistoricalSession({
@@ -369,21 +375,23 @@ test("c5: single-current-binding guard, ambiguity fail-closed and unmasked hard-
       for (let i = 1; i <= 2; i += 1) {
         hard.insertUnit(
           {
-            lineageId: "lineage-c5",
-            runtimeSessionId: "some-other-session",
+            schemaId: "iris.context_message_unit.v1",
+            contextLineageId: "lineage-c5",
             contextSeq: i,
             contextUnitId: `u${i}`,
-            unitId: `u${i}`,
-            sourceEventId: `evt-${i}`,
             runtimeEventId: `evt-${i}`,
-            unitType: "assistant",
+            kind: "assistant",
             semanticSchemaId: "iris.semantic.context_message.assistant.v1",
-            disposition: "include",
+            historianDisposition: "include",
             contentHash: "c".repeat(64),
-            payload: { role: "assistant", content: [{ type: "text", text: "x" }] } as never,
-            paired: false,
-            derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-            schemaVersion: "context-unit-v1",
+            semanticContent: { role: "assistant", content: [{ type: "text", text: "x" }] } as never,
+            derivationRefs: {
+              schemaId: "iris.semantic_derivation_refs.v1",
+              memoryRefs: [],
+              compartmentIds: [],
+              sourceContextMessageUnitIds: [],
+            },
+            lifecycleState: "committed",
             createdAt: "2026-08-05T00:00:00.000Z",
           },
           { verifySessionBinding: false },
@@ -393,25 +401,26 @@ test("c5: single-current-binding guard, ambiguity fail-closed and unmasked hard-
         () => {
           hard.insertUnit(
             {
-              lineageId: "lineage-c5",
-              runtimeSessionId: "some-other-session",
+              schemaId: "iris.context_message_unit.v1",
+              contextLineageId: "lineage-c5",
               contextSeq: 3,
               contextUnitId: "u3",
-              unitId: "u3",
-              sourceEventId: "evt-3",
               runtimeEventId: "evt-3",
-              unitType: "assistant",
+              kind: "assistant",
               semanticSchemaId: "iris.semantic.context_message.assistant.v1",
-              disposition: "include",
+              historianDisposition: "include",
               contentHash: "c".repeat(64),
-              payload: { role: "assistant", content: [{ type: "text", text: "x" }] } as never,
-              paired: false,
+              semanticContent: {
+                role: "assistant",
+                content: [{ type: "text", text: "x" }],
+              } as never,
               derivationRefs: {
+                schemaId: "iris.semantic_derivation_refs.v1",
                 memoryRefs: [],
                 compartmentIds: [],
                 sourceContextMessageUnitIds: [],
               },
-              schemaVersion: "context-unit-v1",
+              lifecycleState: "committed",
               createdAt: "2026-08-05T00:00:00.000Z",
             },
             { verifySessionBinding: false },

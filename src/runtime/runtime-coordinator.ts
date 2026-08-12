@@ -288,10 +288,18 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       this.resolveRunCompletion?.();
       this.runCompletion = null;
       this.resolveRunCompletion = null;
+      // iris_agent#111: force-release the single-writer latch on EVERY exit
+      // path, including generator close (iter.return()) while parked at
+      // phase "turn". Previously this only cleared activeInvocation when
+      // phase was "idle" or "failed", leaving the latch permanently held
+      // after a watchdog-driven teardown — the generator's finally runs but
+      // phase is still "turn" because the settled/idle transition never
+      // happened. This bricked the runtime for all subsequent dispatches.
+      if (this.phase === "turn") {
+        this.phase = "idle";
+      }
       if (this.phase === "idle" || this.phase === "failed") {
-        if (this.phase === "idle") {
-          this.activeInvocation = null;
-        }
+        this.activeInvocation = null;
       }
     }
   }
@@ -357,7 +365,12 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       // Skip applyModelOverride when the model is already active — avoids
       // unnecessary harness.setModel() calls that can reset provider state
       // (mock providers, response counters, etc.) on initial dispatch.
-      if (this.modelOverride.getActiveModelId?.() !== resolved.id) {
+      // iris_agent#111: compare using QUALIFIED identity (provider/model),
+      // not just model.id — the same model id across providers must still
+      // trigger setModel.
+      const currentQualified = this.modelOverride.getActiveModelId?.();
+      const resolvedQualified = `${resolved.provider}/${resolved.id}`;
+      if (currentQualified !== resolvedQualified) {
         await this.modelOverride.applyModelOverride(resolved);
       }
     }
@@ -385,6 +398,27 @@ export class RuntimeCoordinator implements AgentRuntimePort {
     if (runCompletion !== null) {
       await withTimeout(runCompletion, timeoutMs, "abort did not reach native settled");
     }
+  }
+
+  /**
+   * iris_agent#111: Signal abort to the native runtime WITHOUT waiting for
+   * runCompletion. Used by the supervisor's finally-block teardown to unblock
+   * a stalled generator before calling iter.return(). The coordinator's own
+   * finally (triggered by iter.return()) handles latch release and phase flip.
+   *
+   * Returns the invocation id that was signaled, or null if no invocation
+   * was active.
+   */
+  signalAbort(): string | null {
+    if (this.activeInvocation === null || this.phase !== "turn") {
+      return null;
+    }
+    const id = this.activeInvocation;
+    const handle = this.activeRuntime.getActiveRuntime();
+    // Fire-and-forget: the harness abort unblocks the stalled prompt,
+    // which lets the coordinator generator resume and reach its finally.
+    void handle.runtime.abort(id, "supervisor_signal_abort").catch(() => undefined);
+    return id;
   }
 
   /**

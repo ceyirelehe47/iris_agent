@@ -129,8 +129,8 @@ function stubHistoryPort(texts?: string[]): ContextHistoryReadPort {
           contextUnitId: `unit-${seq}`,
           contextSeq: seq,
           runtimeEventId: `evt-${seq}`,
-          unitType: "input",
-          disposition: "include",
+          kind: "user",
+          historianDisposition: "include",
           contentHash: "b".repeat(64),
           derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
         });
@@ -148,30 +148,36 @@ function stubHistoryPort(texts?: string[]): ContextHistoryReadPort {
     claimHistorianBatch({ afterContextSeqExclusive, throughContextSeqInclusive }) {
       // iris_agent#76: full committed units (payload included), keyed by
       // global contextSeq — the runner's normal semantic input.
-      const units: import("../src/contracts/context-units.js").ContextMessageUnit[] = [];
+      const units: import("../src/contracts/context-v27.js").ContextMessageUnitV1[] = [];
       for (let seq = afterContextSeqExclusive + 1; seq <= throughContextSeqInclusive; seq++) {
         units.push({
-          lineageId: "identity-b5",
-          runtimeSessionId: SESSION,
-          contextSeq: seq,
+          schemaId: "iris.context_message_unit.v1",
           contextUnitId: `unit-${seq}`,
-          unitId: `unit-${seq}`,
-          sourceEventId: `evt-${seq}`,
+          contextLineageId: "identity-b5",
+          contextSeq: seq,
           runtimeEventId: `evt-${seq}`,
-          unitType: "input",
+          kind: "user",
           semanticSchemaId: "iris.semantic.context_message.user.v1",
-          disposition: "include",
-          entryId: `entry-${seq}`,
-          entrySeq: seq,
-          contentHash: "b".repeat(64),
-          payload: {
+          semanticContent: {
             role: "user",
             content: texts?.[seq - 1] ?? `content-${seq}`,
             timestamp: 1,
           },
-          paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-          schemaVersion: "context-unit-v1",
+          historianDisposition: "include",
+          contentHash: "b".repeat(64),
+          derivationRefs: {
+            schemaId: "iris.semantic_derivation_refs.v1",
+            memoryRefs: [],
+            compartmentIds: [],
+            sourceContextMessageUnitIds: [],
+          },
+          rawArchiveRef: {
+            schemaId: "iris.raw_archive_ref.v1" as const,
+            runtimeSessionId: SESSION,
+            startEntrySeq: seq,
+            entryIds: [`entry-${seq}`],
+          },
+          lifecycleState: "committed",
           createdAt: "2026-08-01T00:00:00.000Z",
         });
       }
@@ -213,8 +219,8 @@ async function runOneCycle(
     throughContextSeqInclusive: head,
   }).units;
   const claimedEntries = claimed
-    .filter((unit) => unit.entrySeq !== undefined)
-    .map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+    .filter((unit) => unit.rawArchiveRef?.startEntrySeq !== undefined)
+    .map((unit) => contextUnitToSequencedEntry(SESSION, unit, unit.rawArchiveRef?.startEntrySeq));
   void entries;
   // R3-P1 适配：freezeBoundary 拆分为 { rawSeamInput, lineageBoundary? }。
   // 不传 lineageBoundary = 纯 raw 语义（与 R3-P0 分支行为一致）。
@@ -496,8 +502,7 @@ test("B5: a publication with recall projections commits assessment deltas in the
         afterContextSeqExclusive: 0,
         throughContextSeqInclusive: entries.length,
       })
-      .units.filter((unit) => unit.entrySeq !== undefined)
-      .map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+      .units.map((unit, i) => contextUnitToSequencedEntry(SESSION, unit, i + 1));
     // R3-P1 适配：freezeBoundary 拆分为 { rawSeamInput }。
     const freeze = freezeBoundary({
       rawSeamInput: {
@@ -566,8 +571,7 @@ test("B5: a publication commit-hook failure rolls back cursor + publication + ou
         afterContextSeqExclusive: 0,
         throughContextSeqInclusive: entries.length,
       })
-      .units.filter((unit) => unit.entrySeq !== undefined)
-      .map((unit) => contextUnitToSequencedEntry(SESSION, unit));
+      .units.map((unit, i) => contextUnitToSequencedEntry(SESSION, unit, i + 1));
     // R3-P1 适配：freezeBoundary 拆分为 { rawSeamInput }。
     const freeze = freezeBoundary({
       rawSeamInput: {

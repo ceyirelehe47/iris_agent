@@ -13,7 +13,7 @@ import {
   HARD_UNITS_CAP,
   MAX_UNITS_PER_SESSION,
 } from "../src/context/context-store.js";
-import type { ContextMessageUnit } from "../src/contracts/context-units.js";
+import type { ContextMessageUnitV1 } from "../src/contracts/context-v27.js";
 import type { PiSeamEvent } from "../src/contracts/runtime-events.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
 import { runMinimalSlice } from "../src/runtime/vertical-slice.js";
@@ -70,27 +70,20 @@ function makeLineageInput(runtimeSessionId: string = SESSION) {
 function makeUnit(
   runtimeSessionId: string,
   contextSeq: number,
-  overrides: Partial<ContextMessageUnit> = {},
-): ContextMessageUnit {
+  overrides: Partial<ContextMessageUnitV1> = {},
+): ContextMessageUnitV1 {
   return {
-    lineageId: "identity-test",
-    runtimeSessionId,
+    schemaId: "iris.context_message_unit.v1",
+    contextLineageId: "identity-test",
     contextSeq,
     contextUnitId: `unit-${contextSeq}`,
-    unitId: `unit-${contextSeq}`,
-    sourceEventId: `event-${contextSeq}`,
-    unitType: "input",
+    runtimeEventId: `event-${contextSeq}`,
+    kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
-    disposition: "include",
+    semanticContent: { role: "user", content: `body-${contextSeq}`, timestamp: 1 },
+    historianDisposition: "include",
     contentHash: `hash-${contextSeq}`,
-    payload: {
-      role: "user",
-      content: `body-${contextSeq}`,
-      timestamp: 1,
-    },
-    paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-    schemaVersion: "context-unit-v1",
+    lifecycleState: "committed",
     createdAt: "2026-08-05T00:00:00.000Z",
     ...overrides,
   };
@@ -122,14 +115,14 @@ test("r2-p3: soft cap marks over-cap units excluded without deleting rows (appen
   try {
     store.createLineage(makeLineageInput());
     for (let seq = 1; seq <= 5; seq += 1) {
-      store.insertUnit(makeUnit(SESSION, seq));
+      store.insertUnit(makeUnit(SESSION, seq), { runtimeSessionId: SESSION });
     }
     // append-only：全部 5 行都在（disposition:"all" 读全部行）。
     const all = store.listUnits(SESSION, { disposition: "all" });
     assert.equal(all.length, 5);
     // 软 cap 语义：前 3 个 include，第 4-5 个被标记 exclude。
     assert.deepEqual(
-      all.map((unit) => unit.disposition),
+      all.map((unit) => unit.historianDisposition),
       ["include", "include", "include", "exclude", "exclude"],
     );
     // provider 视图默认过滤：只返回 include。
@@ -156,7 +149,7 @@ test("r2-p3: renderer never renders excluded units; watermark advances past them
   try {
     store.createLineage(makeLineageInput());
     for (let seq = 1; seq <= 5; seq += 1) {
-      store.insertUnit(makeUnit(SESSION, seq));
+      store.insertUnit(makeUnit(SESSION, seq), { runtimeSessionId: SESSION });
     }
     const allUnits = store.listUnits(SESSION, { disposition: "all" });
     assert.equal(allUnits.length, 5);
@@ -217,12 +210,12 @@ test("r2-p3: hard cap throws typed error and records emergency state (fail-close
   try {
     store.createLineage(makeLineageInput());
     for (let seq = 1; seq <= 4; seq += 1) {
-      store.insertUnit(makeUnit(SESSION, seq));
+      store.insertUnit(makeUnit(SESSION, seq), { runtimeSessionId: SESSION });
     }
     // 硬 cap = 2×2 = 4：第 5 次写入被拒绝（typed 失败）。
     assert.throws(
       () => {
-        store.insertUnit(makeUnit(SESSION, 5));
+        store.insertUnit(makeUnit(SESSION, 5), { runtimeSessionId: SESSION });
       },
       (error: unknown) => error instanceof ContextBoundsExceededError,
     );
@@ -260,7 +253,7 @@ test("r2-p3: ingest surfaces hard-cap failure as typed error; rows before throw 
     const all = store.listUnits(SESSION, { disposition: "all" });
     assert.equal(all.length, 2);
     assert.deepEqual(
-      all.map((unit) => unit.disposition),
+      all.map((unit) => unit.historianDisposition),
       ["include", "exclude"],
     );
   } finally {
@@ -291,12 +284,12 @@ test("r2-p3: default caps keep normal sessions fully included (no regression)", 
   try {
     store.createLineage(makeLineageInput());
     for (let seq = 1; seq <= 5; seq += 1) {
-      store.insertUnit(makeUnit(SESSION, seq));
+      store.insertUnit(makeUnit(SESSION, seq), { runtimeSessionId: SESSION });
     }
     assert.equal(HARD_UNITS_CAP, 2 * MAX_UNITS_PER_SESSION, "hard cap = 2× soft cap");
     const all = store.listUnits(SESSION, { disposition: "all" });
     assert.deepEqual(
-      all.map((unit) => unit.disposition),
+      all.map((unit) => unit.historianDisposition),
       ["include", "include", "include", "include", "include"],
     );
   } finally {

@@ -1,13 +1,17 @@
 import type { AgentMessage, CustomMessage } from "@earendil-works/pi-agent-core";
 
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contracts/context.js";
-import type {
-  ContextMessageUnit,
-  ContextIngestPort,
-  UnitDispositionFilter,
-} from "../contracts/context-units.js";
-import { KIND_TO_SEMANTIC_SCHEMA_ID } from "../contracts/context-v27.js";
-import type { RuntimeEventIngestPort } from "../contracts/runtime-events.js";
+import {
+  KIND_TO_SEMANTIC_SCHEMA_ID,
+  SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+  computeSemanticContentHash,
+  type ContextIngestPort,
+  type ContextMessageUnitV1,
+  type JsonValue,
+  type RawArchiveRefV1,
+  type UnitDispositionFilter,
+} from "../contracts/context-v27.js";
+import type { RuntimeEvent, RuntimeEventIngestPort } from "../contracts/runtime-events.js";
 import {
   type IrisInputMetaDetails,
   decodeInputFrames,
@@ -15,13 +19,22 @@ import {
 } from "../runtime/companion.js";
 import type { IrisBlockLayoutV1 } from "../contracts/tool.js";
 import type { OriginEnvelope } from "../contracts/origin.js";
+import type { UnitStoreRecord } from "./context-store.js";
 
 /**
- * R2-P0：ContextMessageUnit 的持久化端口（context.db，context_units 表）。
+ * R2-P0：ContextMessageUnitV1 的持久化端口（context.db，context_units 表）。
+ *
+ * Feature A (#110)：端口携带 canonical ContextMessageUnitV1。Entry/pairing
+ * 元数据（entryId/entrySeq/paired/companionEntryId/pairKey）不在 V1 DTO 上 —
+ * 那是持久化层私有细节，通过 UnitStoreRecord（findBySourceEvent）或
+ * updateUnitPairing 物理列更新暴露。
  */
 export interface ContextUnitStorePort {
   hasUnitForEvent(eventId: string): boolean;
-  insertUnit(unit: ContextMessageUnit, options?: { verifySessionBinding?: boolean }): void;
+  insertUnit(
+    unit: ContextMessageUnitV1,
+    options?: { verifySessionBinding?: boolean; runtimeSessionId?: string },
+  ): void;
   updateUnitPairing(
     runtimeSessionId: string,
     contextSeq: number,
@@ -30,9 +43,9 @@ export interface ContextUnitStorePort {
   listUnits(
     runtimeSessionId: string,
     options?: { afterContextSeq?: number; limit?: number; disposition?: UnitDispositionFilter },
-  ): ContextMessageUnit[];
-  /** 按源事件找单元（companion 邻接配对的幂等锚点）。 */
-  findBySourceEvent(eventId: string): ContextMessageUnit | undefined;
+  ): ContextMessageUnitV1[];
+  /** 按源事件找单元（companion 邻接配对的幂等锚点），携带持久化元数据。 */
+  findBySourceEvent(eventId: string): UnitStoreRecord | undefined;
   lastUnpairedInputSeq(runtimeSessionId: string): number | undefined;
   maxContextSeq(runtimeSessionId: string): number;
   /**
@@ -45,7 +58,7 @@ export interface ContextUnitStorePort {
   listUnitsByLineage(
     lineageId: string,
     options?: { afterContextSeq?: number; limit?: number; disposition?: UnitDispositionFilter },
-  ): ContextMessageUnit[];
+  ): ContextMessageUnitV1[];
   updateUnitPairingByLineage(
     lineageId: string,
     contextSeq: number,
@@ -61,6 +74,22 @@ export interface ContextUnitStorePort {
  * 修改）经 harness emitOwn rethrow 把该错误继续传播到 prompt 调用方 → slice 大声
  * 失败（fail-closed）。
  */
+
+/**
+ * Feature A (#110): stable contextUnitId prefix for a V1 kind. Keeps the
+ * legacy id convention (input-/assistant-/tool_result-) so durable unit
+ * identities are stable across the legacy→V1 migration.
+ */
+function unitIdPrefixForKind(kind: "user" | "assistant" | "tool_result"): string {
+  switch (kind) {
+    case "user":
+      return "input";
+    case "assistant":
+      return "assistant";
+    case "tool_result":
+      return "tool_result";
+  }
+}
 
 function isInputMetaCompanion(message: AgentMessage): message is CustomMessage<unknown> {
   return (
@@ -191,10 +220,68 @@ export class ContextIngest implements ContextIngestPort {
     return this.units.maxContextSeq(runtimeSessionId) + 1;
   }
 
+  /**
+   * Feature A (#110)：为已提交的 message_finalized 事件构建 canonical
+   * ContextMessageUnitV1。
+   *
+   * 映射（legacy → V1）：
+   *  - unitType input/assistant/tool_result → kind user/assistant/tool_result；
+   *  - payload (AgentMessage) → semanticContent (JsonValue)；
+   *  - disposition → historianDisposition；
+   *  - schemaVersion → 移除（V1 只有 schemaId）；
+   *  - sourceEventId → runtimeEventId（源事件即运行时事件）；
+   *  - entryId/entrySeq/paired/companionEntryId/pairKey → 持久化层元数据
+   *    （entryId/entrySeq 从 rawArchiveRef 派生；配对走 updateUnitPairing）；
+   *  - contentHash → computeSemanticContentHash(semanticContent)——绝不是 raw
+   *    event hash（wire 字节永不进入语义平面）。
+   */
+  private buildUnit(
+    runtimeSessionId: string,
+    event: RuntimeEvent,
+    seq: number,
+    kind: "user" | "assistant" | "tool_result",
+    semanticContent: JsonValue,
+  ): ContextMessageUnitV1 {
+    const unit: ContextMessageUnitV1 = {
+      schemaId: "iris.context_message_unit.v1",
+      contextUnitId: `${unitIdPrefixForKind(kind)}-${event.entryId ?? event.eventId}`,
+      contextLineageId: this.lineageId,
+      contextSeq: seq,
+      runtimeEventId: event.eventId,
+      kind,
+      semanticSchemaId: KIND_TO_SEMANTIC_SCHEMA_ID[kind],
+      semanticContent,
+      historianDisposition: "include",
+      derivationRefs: {
+        schemaId: SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
+        memoryRefs: [],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
+      contentHash: computeSemanticContentHash(semanticContent),
+      lifecycleState: "committed",
+      ...(event.entryId !== undefined
+        ? {
+            // Pi Session 只作 raw archive（v27：永不作为 Context 语义源）。
+            rawArchiveRef: {
+              schemaId: "iris.raw_archive_ref.v1",
+              runtimeSessionId,
+              ...(event.entrySeq !== undefined
+                ? { startEntrySeq: event.entrySeq, endEntrySeq: event.entrySeq }
+                : {}),
+              entryIds: [event.entryId],
+            } satisfies RawArchiveRefV1,
+          }
+        : {}),
+      createdAt: event.occurredAt,
+    };
+    return unit;
+  }
+
   ensureUnitsUpTo(
     runtimeSessionId: string,
     options: { limit?: number } = {},
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     const events = this.ledger.listBySession(runtimeSessionId, options);
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index];
@@ -216,37 +303,17 @@ export class ContextIngest implements ContextIngestPort {
 
       if (message.role === "user") {
         const seq = this.nextContextSeq(runtimeSessionId);
+        // 插入时用 UNVERIFIED 占位：context.db 永不存 raw wire（reviewer A
+        // NB-2）；companion 到达时折叠为 provenance 文本。contentHash 覆盖
+        // 该语义内容（Feature A #110：不是 raw event hash）。
+        const semanticContent: JsonValue = {
+          role: "user",
+          content: "[USER REQUEST | UNVERIFIED]",
+          timestamp: message.timestamp,
+        };
         this.units.insertUnit(
-          {
-            lineageId: this.lineageId,
-            runtimeSessionId,
-            contextSeq: seq,
-            contextUnitId: `input-${event.entryId ?? event.eventId}`,
-            unitId: `input-${event.entryId ?? event.eventId}`,
-            sourceEventId: event.eventId,
-            runtimeEventId: event.eventId,
-            unitType: "input",
-            semanticSchemaId: KIND_TO_SEMANTIC_SCHEMA_ID.user,
-            disposition: "include",
-            ...(event.entryId !== undefined ? { entryId: event.entryId } : {}),
-            ...(event.entrySeq !== undefined ? { entrySeq: event.entrySeq } : {}),
-            contentHash: event.contentHash ?? "",
-            // 插入时用 UNVERIFIED 占位：context.db 永不存 raw wire（reviewer A
-            // NB-2）；companion 到达时折叠为 provenance 文本。
-            payload: {
-              role: "user",
-              content: "[USER REQUEST | UNVERIFIED]",
-              timestamp: message.timestamp,
-            },
-            paired: false,
-            derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-            schemaVersion: "context-unit-v1",
-            ...(event.entryId !== undefined
-              ? { rawArchiveRef: `pi://session/${runtimeSessionId}/entry/${event.entryId}` }
-              : {}),
-            createdAt: event.occurredAt,
-          },
-          this.recovery ? { verifySessionBinding: false } : undefined,
+          this.buildUnit(runtimeSessionId, event, seq, "user", semanticContent),
+          this.recovery ? { verifySessionBinding: false } : { runtimeSessionId },
         );
         continue;
       }
@@ -255,7 +322,9 @@ export class ContextIngest implements ContextIngestPort {
         // 事件邻接配对：companion 只与紧邻前驱 user 事件配对（ledger
         // event_seq 顺序 = pi append 顺序）。历史 companion 重放时前驱 user
         // unit 已配对 → 幂等跳过，绝不与"最新未配对 input"错配
-        // （reviewer B BLOCKING #1）。
+        // （reviewer B BLOCKING #1）。配对元数据（paired/companionEntryId/
+        // pairKey）是持久化层细节，经 UnitStoreRecord + updateUnitPairing
+        // 访问（V1 DTO 不携带）。
         const prev = events[index - 1];
         if (
           prev?.type !== "message_finalized" ||
@@ -265,12 +334,12 @@ export class ContextIngest implements ContextIngestPort {
           continue; // 邻接失败：孤立/乱序 companion（fail-closed）
         }
         const userUnit = this.units.findBySourceEvent(prev.eventId);
-        if (userUnit?.unitType !== "input" || userUnit.paired) {
+        if (userUnit?.unit.kind !== "user" || userUnit.persistenceMeta.paired) {
           continue; // 前驱 user 无单元或已配对（重放幂等）
         }
         // 折叠数据源是前驱事件 payload（raw user message，在事件 ledger）；
-        // user unit 的 payload 从插入到配对保持 UNVERIFIED 占位，context.db
-        // 永不存 raw wire（reviewer A NB-2）。
+        // user unit 的 semanticContent 从插入到配对保持 UNVERIFIED 占位，
+        // context.db 永不存 raw wire（reviewer A NB-2）。
         let prevMessage: AgentMessage;
         try {
           prevMessage = JSON.parse(prev.payload) as AgentMessage;
@@ -279,14 +348,14 @@ export class ContextIngest implements ContextIngestPort {
         }
         const folded = foldUserPayload(prevMessage as AgentMessage & { role: "user" }, message);
         if (this.recovery) {
-          this.units.updateUnitPairingByLineage(this.lineageId, userUnit.contextSeq, {
+          this.units.updateUnitPairingByLineage(this.lineageId, userUnit.unit.contextSeq, {
             companionEntryId: event.entryId ?? "",
             pairKey: folded.pairKey,
             paired: folded.paired,
             payload: folded.payload,
           });
         } else {
-          this.units.updateUnitPairing(runtimeSessionId, userUnit.contextSeq, {
+          this.units.updateUnitPairing(runtimeSessionId, userUnit.unit.contextSeq, {
             companionEntryId: event.entryId ?? "",
             pairKey: folded.pairKey,
             paired: folded.paired,
@@ -296,44 +365,19 @@ export class ContextIngest implements ContextIngestPort {
         continue;
       }
 
-      const unitType =
+      const kind =
         message.role === "assistant"
           ? "assistant"
           : message.role === "toolResult"
             ? "tool_result"
             : null;
-      if (unitType === null) {
+      if (kind === null) {
         continue; // 其他 role（如 reasoning/compaction 标签）不建单元
       }
       const seq = this.nextContextSeq(runtimeSessionId);
       this.units.insertUnit(
-        {
-          lineageId: this.lineageId,
-          runtimeSessionId,
-          contextSeq: seq,
-          contextUnitId: `${unitType}-${event.entryId ?? event.eventId}`,
-          unitId: `${unitType}-${event.entryId ?? event.eventId}`,
-          sourceEventId: event.eventId,
-          runtimeEventId: event.eventId,
-          unitType,
-          semanticSchemaId:
-            unitType === "assistant"
-              ? KIND_TO_SEMANTIC_SCHEMA_ID.assistant
-              : KIND_TO_SEMANTIC_SCHEMA_ID.tool_result,
-          disposition: "include",
-          ...(event.entryId !== undefined ? { entryId: event.entryId } : {}),
-          ...(event.entrySeq !== undefined ? { entrySeq: event.entrySeq } : {}),
-          contentHash: event.contentHash ?? "",
-          payload: message,
-          paired: false,
-          derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-          schemaVersion: "context-unit-v1",
-          ...(event.entryId !== undefined
-            ? { rawArchiveRef: `pi://session/${runtimeSessionId}/entry/${event.entryId}` }
-            : {}),
-          createdAt: event.occurredAt,
-        },
-        this.recovery ? { verifySessionBinding: false } : undefined,
+        this.buildUnit(runtimeSessionId, event, seq, kind, message as unknown as JsonValue),
+        this.recovery ? { verifySessionBinding: false } : { runtimeSessionId },
       );
     }
     if (this.recovery) {
@@ -349,7 +393,7 @@ export class ContextIngest implements ContextIngestPort {
       limit?: number;
       disposition?: UnitDispositionFilter;
     } = {},
-  ): ContextMessageUnit[] {
+  ): ContextMessageUnitV1[] {
     return this.units.listUnits(runtimeSessionId, options);
   }
 

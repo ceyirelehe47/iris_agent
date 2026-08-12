@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import type { ContextMessageUnit } from "../src/contracts/context-units.js";
+import type { ContextMessageUnitV1, JsonValue } from "../src/contracts/context-v27.js";
 import { ContextStore } from "../src/context/context-store.js";
 import {
   createContextHistoryReadPort,
@@ -60,22 +60,28 @@ function closeStore(store: ContextStore, dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function makeUnit(overrides: Partial<ContextMessageUnit>): ContextMessageUnit {
+function makeUnit(
+  overrides: Partial<ContextMessageUnitV1> & Record<string, unknown>,
+): ContextMessageUnitV1 {
+  const seq = (overrides["contextSeq"] as number | undefined) ?? 0;
   return {
-    lineageId: "identity-test",
-    runtimeSessionId: SESSION,
-    contextSeq: 0,
-    contextUnitId: "unit-x",
-    unitId: "unit-x",
-    sourceEventId: "evt-x",
-    unitType: "input",
+    schemaId: "iris.context_message_unit.v1",
+    contextUnitId: `unit-${seq}`,
+    contextLineageId: "identity-test",
+    contextSeq: seq,
+    runtimeEventId: `evt-${seq}`,
+    kind: "user",
     semanticSchemaId: "iris.semantic.context_message.user.v1",
-    disposition: "include",
+    historianDisposition: "include",
     contentHash: "h",
-    payload: { role: "user", content: "x", timestamp: 0 } as AgentMessage,
-    paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-    schemaVersion: "context-unit-v1",
+    semanticContent: { role: "user", content: "x", timestamp: 0 } as unknown as JsonValue,
+    lifecycleState: "committed",
+    derivationRefs: {
+      schemaId: "iris.semantic_derivation_refs.v1",
+      memoryRefs: [],
+      compartmentIds: [],
+      sourceContextMessageUnitIds: [],
+    },
     createdAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
   };
@@ -121,25 +127,33 @@ test("R3-P1 port: after HARD fold, representedThroughEntrySeq = MAX(entry_seq) o
     store.insertUnit(
       makeUnit({
         contextSeq: 1,
-        entrySeq: 3,
         contextUnitId: "u-1",
-        unitId: "u-1",
-        sourceEventId: "e-1",
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 3,
+          entryIds: ["entry-1"],
+        },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
         contextSeq: 2,
-        entrySeq: 8,
         contextUnitId: "a-2",
-        unitId: "a-2",
-        sourceEventId: "e-2",
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 8,
+          entryIds: ["entry-2"],
+        },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
         contextSeq: 3,
-        unitType: "assistant",
+        kind: "assistant",
         semanticSchemaId: "iris.semantic.context_message.assistant.v1",
         contextUnitId: "a-3",
         unitId: "a-3",
@@ -177,16 +191,28 @@ test("R3-P1 port: units with NULL entry_seq inside the prefix are skipped (MAX o
     // 前缀内唯一携带 entry_seq 的是 contextSeq 2（entry_seq 5）；contextSeq 1
     // 无 entry_seq → 不参与，MAX 仍为 5。
     store.insertUnit(
-      makeUnit({ contextSeq: 1, contextUnitId: "u-1", unitId: "u-1", sourceEventId: "e-1" }),
+      makeUnit({
+        contextSeq: 1,
+        contextUnitId: "u-1",
+        unitId: "u-1",
+        sourceEventId: "e-1",
+      }),
+      { runtimeSessionId: SESSION },
     );
     store.insertUnit(
       makeUnit({
         contextSeq: 2,
-        entrySeq: 5,
         contextUnitId: "a-2",
         unitId: "a-2",
         sourceEventId: "e-2",
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 5,
+          entryIds: ["entry-2"],
+        },
       }),
+      { runtimeSessionId: SESSION },
     );
     store.materializeM0ByContextSeq({
       runtimeSessionId: SESSION,

@@ -49,8 +49,8 @@ function makeUnitViews(overrides: Partial<HistorianUnitView>[]): HistorianUnitVi
     contextUnitId: `unit-${i + 1}`,
     contextSeq: i + 1,
     runtimeEventId: `evt-${i + 1}`,
-    unitType: "input",
-    disposition: "include",
+    kind: "user",
+    historianDisposition: "include",
     contentHash: "a".repeat(64),
     derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
     ...o,
@@ -69,8 +69,8 @@ function fakeHistoryPort(units: HistorianUnitView[]): ContextHistoryReadPort {
         contextUnitId: unit.contextUnitId,
         contextSeq: unit.contextSeq,
         runtimeEventId: unit.runtimeEventId,
-        unitType: unit.unitType,
-        disposition: unit.disposition,
+        kind: unit.kind,
+        historianDisposition: unit.historianDisposition,
         contentHash: unit.contentHash,
         derivationRefs: unit.derivationRefs,
         payload: { role: "user", content: `content-${unit.contextSeq}`, timestamp: 0 },
@@ -161,7 +161,7 @@ test("r3 anti-echo wiring: derived-only batch persists derivedOnly=true and empt
   try {
     const units = makeUnitViews([
       {
-        unitType: "assistant",
+        kind: "assistant",
         derivationRefs: {
           memoryRefs: ["mem-1"],
           compartmentIds: [],
@@ -169,7 +169,7 @@ test("r3 anti-echo wiring: derived-only batch persists derivedOnly=true and empt
         },
       },
       {
-        unitType: "assistant",
+        kind: "assistant",
         derivationRefs: {
           memoryRefs: [],
           compartmentIds: ["comp-1"],
@@ -200,10 +200,10 @@ test("r3 anti-echo wiring: new observation batch persists non-empty basis", () =
   const store = HistorianStore.open({ databasePath: join(dir, "historian.db") });
   try {
     const units = makeUnitViews([
-      { contextUnitId: "unit-1", unitType: "input" },
+      { contextUnitId: "unit-1", kind: "user" },
       {
         contextUnitId: "unit-2",
-        unitType: "tool_result",
+        kind: "tool_result",
       },
     ]);
     runPublication(store, fakeHistoryPort(units), [1, 2]);
@@ -233,8 +233,8 @@ test("r3 anti-echo wiring: reference_only unit never enters basis", () => {
   const store = HistorianStore.open({ databasePath: join(dir, "historian.db") });
   try {
     const units = makeUnitViews([
-      { contextUnitId: "unit-1", unitType: "input" },
-      { contextUnitId: "unit-2", unitType: "input" },
+      { contextUnitId: "unit-1", kind: "user" },
+      { contextUnitId: "unit-2", kind: "user" },
     ]);
     runPublication(store, fakeHistoryPort(units), [1, 2]);
 
@@ -261,50 +261,64 @@ test("r3 anti-echo wiring: real ContextStore port end-to-end", () => {
   try {
     store.createLineage(makeLineageInput());
     // 插入一个 include input + 一个 derived-only assistant(有 entry_seq)。
-    store.insertUnit({
-      lineageId: "identity-test",
-      runtimeSessionId: SESSION,
-      contextSeq: 1,
-      contextUnitId: "u1",
-      unitId: "u1",
-      sourceEventId: "evt-1",
-      runtimeEventId: "evt-1",
-      unitType: "input",
-      semanticSchemaId: "iris.semantic.context_message.user.v1",
-      disposition: "include",
-      entryId: "entry-1",
-      entrySeq: 1,
-      contentHash: "c".repeat(64),
-      payload: { role: "user", content: "hello" } as never,
-      paired: false,
-      derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-      schemaVersion: "context-unit-v1",
-      createdAt: "t",
-    });
-    store.insertUnit({
-      lineageId: "identity-test",
-      runtimeSessionId: SESSION,
-      contextSeq: 2,
-      contextUnitId: "u2",
-      unitId: "u2",
-      sourceEventId: "evt-2",
-      runtimeEventId: "evt-2",
-      unitType: "assistant",
-      semanticSchemaId: "iris.semantic.context_message.assistant.v1",
-      disposition: "include",
-      entryId: "entry-2",
-      entrySeq: 2,
-      contentHash: "d".repeat(64),
-      payload: { role: "assistant", content: "as you recall..." } as never,
-      paired: false,
-      derivationRefs: {
-        memoryRefs: ["mem-1"],
-        compartmentIds: [],
-        sourceContextMessageUnitIds: [],
+    store.insertUnit(
+      {
+        schemaId: "iris.context_message_unit.v1",
+        contextUnitId: "u1",
+        contextLineageId: "identity-test",
+        contextSeq: 1,
+        runtimeEventId: "evt-1",
+        kind: "user",
+        semanticSchemaId: "iris.semantic.context_message.user.v1",
+        semanticContent: { role: "user", content: "hello" },
+        historianDisposition: "include",
+        contentHash: "c".repeat(64),
+        derivationRefs: {
+          schemaId: "iris.semantic_derivation_refs.v1",
+          memoryRefs: [],
+          compartmentIds: [],
+          sourceContextMessageUnitIds: [],
+        },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 1,
+          entryIds: ["entry-1"],
+        },
+        lifecycleState: "committed",
+        createdAt: "t",
       },
-      schemaVersion: "context-unit-v1",
-      createdAt: "t",
-    });
+      { runtimeSessionId: SESSION },
+    );
+    store.insertUnit(
+      {
+        schemaId: "iris.context_message_unit.v1",
+        contextUnitId: "u2",
+        contextLineageId: "identity-test",
+        contextSeq: 2,
+        runtimeEventId: "evt-2",
+        kind: "assistant",
+        semanticSchemaId: "iris.semantic.context_message.assistant.v1",
+        semanticContent: { role: "assistant", content: "as you recall..." },
+        historianDisposition: "include",
+        contentHash: "d".repeat(64),
+        derivationRefs: {
+          schemaId: "iris.semantic_derivation_refs.v1",
+          memoryRefs: ["mem-1"],
+          compartmentIds: [],
+          sourceContextMessageUnitIds: [],
+        },
+        rawArchiveRef: {
+          schemaId: "iris.raw_archive_ref.v1",
+          runtimeSessionId: SESSION,
+          startEntrySeq: 2,
+          entryIds: ["entry-2"],
+        },
+        lifecycleState: "committed",
+        createdAt: "t",
+      },
+      { runtimeSessionId: SESSION },
+    );
 
     const port = createContextHistoryReadPort(store);
     const historian = HistorianStore.open({ databasePath: join(dir, "historian.db") });

@@ -241,7 +241,7 @@ export function validateRange(input: ValidateRangeInput): ValidationOutcome {
     throughContextSeqInclusive: last === undefined ? 0 : contextSeqOf(last),
     units: eligibleEntries.map((entry) => ({
       contextSeq: contextSeqOf(entry),
-      unitId: entry.entryId,
+      contextUnitId: entry.entryId,
       contentHash: entry.contentHash,
     })),
   });

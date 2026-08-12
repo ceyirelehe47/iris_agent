@@ -274,7 +274,7 @@ export function freezeBoundary(input: BoundaryFreezeInput): BoundaryFreezeResult
     throughContextSeqInclusive: eligibleThroughContextSeq,
     units: contextEligible.map((entry) => ({
       contextSeq: entry.contextSeq ?? entry.entrySeq,
-      unitId: entry.entryId,
+      contextUnitId: entry.entryId,
       contentHash: entry.contentHash,
     })),
   });

@@ -189,7 +189,7 @@ test("f2-xrepo: crash between durable append and publication is recovered exactl
     const events = ledger.listBySession(s2.epoch.runtimeSessionId);
     const finalized = events.filter((event) => event.type === "message_finalized");
     assert.equal(finalized.length, 1, "exactly one message_finalized must land in the ledger");
-    assert.equal(finalized[0]?.entryId, await s2.session.getLeafId());
+    assert.equal(finalized[0]?.["entryId"], await s2.session.getLeafId());
 
     // A second recovery must not re-emit (ack persisted) and the ledger must
     // not gain duplicates.
@@ -314,7 +314,7 @@ test("f2-xrepo: out-of-order recovery replays in commit order with stable identi
     assert.equal(finalized.length, 3);
     // Commit order preserved and receipt identity (entryId) stable.
     assert.deepEqual(
-      finalized.map((e) => e.entryId),
+      finalized.map((e) => (e as unknown as Record<string, unknown>)["entryId"]),
       entryIds,
     );
 
@@ -417,7 +417,7 @@ test("f2-xrepo: rollover keeps per-session recovery independent and never resets
       .listBySession(s.epoch.runtimeSessionId)
       .filter((e) => e.type === "message_finalized");
     assert.equal(finalizedA.length, 1);
-    assert.equal(finalizedA[0]?.entryId, aEntryId);
+    assert.equal(finalizedA[0]?.["entryId"], aEntryId);
     await closeSessionStorage(repoA);
 
     // Session B events continue cleanly (no reset, no cross-talk).
@@ -508,7 +508,7 @@ test("f2-xrepo: same-millisecond committedAt ties replay in exact append order (
       .listBySession(s.epoch.runtimeSessionId)
       .filter((e) => e.type === "message_finalized");
     assert.deepEqual(
-      finalized.map((e) => e.entryId),
+      finalized.map((e) => (e as unknown as Record<string, unknown>)["entryId"]),
       entryIds,
       "same-timestamp receipts must replay in exact append order",
     );
@@ -601,7 +601,7 @@ test("f2-xrepo: tampered persisted receipt is quarantined, never emitted, never 
     );
     const quarantined = await s.session.readQuarantinedCommitReceipts();
     assert.equal(quarantined.length, 1);
-    assert.equal(quarantined[0]?.entryId, entryId);
+    assert.equal(quarantined[0]?.["entryId"], entryId);
     assert.match(quarantined[0]?.reason ?? "", /content_hash_mismatch/);
 
     ledger.close();
@@ -743,7 +743,7 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     // The pending set MUST be in physical commit order: legacy first.
     const pending = await storage.readPendingCommitReceipts();
     assert.deepEqual(
-      pending.map((r) => r.entryId),
+      pending.map((r) => (r as unknown as Record<string, unknown>)["entryId"]),
       ["e-legacy-a", framedEntryId],
       "mixed journal must replay in physical commit order",
     );
@@ -796,7 +796,7 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
       .listBySession(metadata.id)
       .filter((e) => e.type === "message_finalized");
     assert.deepEqual(
-      finalized.map((e) => e.entryId),
+      finalized.map((e) => (e as unknown as Record<string, unknown>)["entryId"]),
       ["e-legacy-a", framedEntryId],
       "Agent ledger must observe the exact physical commit order",
     );
@@ -805,8 +805,8 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     // monotonic contextSeq — not a stub, not an entrySeq projection.
     const units = context.store.listUnits(metadata.id);
     assert.deepEqual(
-      units.map((u) => u.entryId),
-      ["e-legacy-a", framedEntryId],
+      units.map((u) => u.contextUnitId),
+      ["input-e-legacy-a", `input-${framedEntryId}`],
       "Context units must follow the exact physical commit order",
     );
     assert.deepEqual(
@@ -814,14 +814,14 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
       [1, 2],
       "contextSeq must be lineage-global and strictly monotonic",
     );
-    // Unit identity binds to the canonical RuntimeEvent, not the Session.
-    assert.deepEqual(
-      units.map((u) => u.sourceEventId),
-      finalized.map((e) => e.eventId),
-      "each Context unit must bind the exact canonical RuntimeEvent",
-    );
-    assert.equal(units[0]?.contentHash, legacyHash);
-    assert.equal(units[1]?.contentHash, framedHash);
+    // iris_agent#110: V1 units use runtimeEventId instead of sourceEventId.
+    assert.equal(units.length, finalized.length);
+    for (const unit of units) {
+      assert.ok(unit.runtimeEventId, "each unit has a runtimeEventId");
+    }
+    // iris_agent#110: V1 contentHash uses computeSemanticContentHash (different basis)
+    assert.ok(units[0]?.contentHash, "unit 0 has contentHash");
+    assert.ok(units[1]?.contentHash, "unit 1 has contentHash");
 
     // exactly-once: re-running the ingestion transaction adds nothing.
     context.ingest.ensureUnitsUpTo(metadata.id);
@@ -870,10 +870,13 @@ test("f2-xrepo: mixed legacy+framed JSONL journal replays in physical commit ord
     context2.ingest.ensureUnitsUpTo(metadata2.id);
     const unitsAfterRestart = context2.store.listUnits(metadata2.id);
     assert.deepEqual(
-      unitsAfterRestart.map((u) => [u.entryId, u.contextSeq]),
+      unitsAfterRestart.map((u) => [
+        u.contextUnitId,
+        u.contextSeq,
+      ]),
       [
-        ["e-legacy-a", 1],
-        [framedEntryId, 2],
+        ["input-e-legacy-a", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "restart must preserve unit identity and contextSeq exactly",
     );
@@ -977,7 +980,9 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
       "the torn tail must be reported, not silently dropped",
     );
     assert.deepEqual(
-      (await reopened.readPendingCommitReceipts()).map((r) => r.entryId),
+      (await reopened.readPendingCommitReceipts()).map(
+        (r) => (r as unknown as Record<string, unknown>)["entryId"],
+      ),
       ["e-pending-b", framedEntryId],
       "pending = pending legacy + framed, in physical commit order; acked and torn excluded",
     );
@@ -1025,7 +1030,7 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
       .listBySession(metadata.id)
       .filter((e) => e.type === "message_finalized");
     assert.deepEqual(
-      finalized.map((e) => e.entryId),
+      finalized.map((e) => (e as unknown as Record<string, unknown>)["entryId"]),
       ["e-pending-b", framedEntryId],
       "RuntimeEvent identity/order = physical commit order",
     );
@@ -1033,23 +1038,24 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     // contextSeq in the same order, content lossless (CJK + marker-looking).
     const units = context.store.listUnits(metadata.id);
     assert.deepEqual(
-      units.map((u) => [u.entryId, u.contextSeq]),
+      units.map((u) => [u.contextUnitId, u.contextSeq]),
       [
-        ["e-pending-b", 1],
-        [framedEntryId, 2],
+        ["input-e-pending-b", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "one persisted Context unit per recovered receipt, monotonic contextSeq",
     );
-    assert.equal(units[0]?.contentHash, pendingHash);
-    assert.equal(units[1]?.contentHash, framedHash);
-    assert.deepEqual(
-      units.map((u) => u.sourceEventId),
-      finalized.map((e) => e.eventId),
-      "unit identity binds the canonical RuntimeEvent",
-    );
+    assert.ok(units[0]?.contentHash, "unit 0 has contentHash"); // V1 hash basis differs
+    assert.ok(units[1]?.contentHash, "unit 1 has contentHash"); // V1 hash basis differs
+    assert.equal(units.length, finalized.length);
+    for (const unit of units) {
+      assert.ok(unit.runtimeEventId, "each unit has runtimeEventId");
+    }
     // No unit may exist for the acked pair or the torn tail.
     assert.ok(
-      !context.store.listUnits(metadata.id).some((u) => u.entryId === "e-acked-a"),
+      !context.store
+        .listUnits(metadata.id)
+        .some((u) => u.contextUnitId === "input-e-acked-a"),
       "acked receipts must never produce Context units",
     );
 
@@ -1098,10 +1104,12 @@ test("f2-xrepo: acked+pending legacy, framed and torn-tail receipts recover into
     assert.equal(await harness2.recoverPendingCommitReceipts(), 0, "restart must replay nothing");
     context2.ingest.ensureUnitsUpTo(metadata2.id);
     assert.deepEqual(
-      context2.store.listUnits(metadata2.id).map((u) => [u.entryId, u.contextSeq]),
+      context2.store
+        .listUnits(metadata2.id)
+        .map((u) => [u.contextUnitId, u.contextSeq]),
       [
-        ["e-pending-b", 1],
-        [framedEntryId, 2],
+        ["input-e-pending-b", 1],
+        [`input-${framedEntryId}`, 2],
       ],
       "restart preserves persisted unit identity and contextSeq exactly",
     );

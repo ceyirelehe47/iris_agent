@@ -107,10 +107,17 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
    * Used by the ModelOverridePort to detect when setModel is redundant
    * and to reflect the current model after fallback/rollover.
    */
+  /**
+   * iris_agent#107/#111: Get the current active model's QUALIFIED identity
+   * (provider/model) from the harness. Used by the ModelOverridePort to
+   * detect when setModel is needed — comparing only model.id is insufficient
+   * because the same model id can exist across multiple providers.
+   */
   getCurrentModelId(): string | undefined {
     try {
-      const m = this.harness.getModel() as { id?: string } | undefined;
-      return m?.id;
+      const m = this.harness.getModel() as { id?: string; provider?: string } | undefined;
+      if (m === undefined) return undefined;
+      return m.provider !== undefined ? `${m.provider}/${m.id ?? ""}` : m.id;
     } catch {
       return undefined;
     }

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Type, type AssistantMessage } from "@earendil-works/pi-ai";
 
-import type { ContextMessageUnit } from "../contracts/context-units.js";
+import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
 import type { RuntimeEvent } from "../contracts/runtime-events.js";
 import { RuntimeEventLedger } from "./runtime-event-ledger.js";
 import { ContextStore } from "../context/context-store.js";
@@ -53,8 +53,8 @@ export interface VerticalSliceResult {
   entries: SessionTreeEntry[];
   /** R1-P1e：runtime-event ledger exactly-once 提交的不可变事件流。 */
   ledgerEvents: RuntimeEvent[];
-  /** R2-P0：ContextMessageUnit 语义单元（ingest 折叠后）。 */
-  contextUnits: ContextMessageUnit[];
+  /** R2-P0：ContextMessageUnitV1 语义单元（ingest 折叠后）。 */
+  contextUnits: ContextMessageUnitV1[];
   /** R2-P1：prompt 完成后 persistRender 提交的 m0/m1 字节与 context_seq
    * watermark（测试断言 golden parity 用；未发生 provider render 时为空串/0）。 */
   m0Body: string;
@@ -201,7 +201,7 @@ export interface ReconcileHistoricalSessionResult {
   /** The durable identity lineage resolved for the historical session. */
   lineageId: string;
   /** Context units created/paired by the recovery ingest (lineage view). */
-  units: ContextMessageUnit[];
+  units: ContextMessageUnitV1[];
   runtimeSessionId: string;
 }
 

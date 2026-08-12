@@ -13,8 +13,9 @@ import type {
   HistorianSessionState,
   SequencedSessionEntry,
 } from "../contracts/historian.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextHistoryReadPort } from "../context/history-read-port.js";
-import type { ContextMessageUnit } from "../contracts/context-units.js";
+import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
 import type { HistorianStore } from "./historian-store.js";
 import {
   buildAnalysisView,
@@ -26,28 +27,34 @@ import {
 /**
  * iris_agent#66/#76: adapt committed Context semantic units to the runner's
  * internal SequencedSessionEntry shape. The payload IS the canonical
- * AgentMessage (role/content/toolCall), so the existing pure freeze/
+ * semanticContent (AgentMessage-shaped JsonValue), so the existing pure freeze/
  * analysis functions keep working — but the SOURCE is Context-owned
  * committed units, never Pi Session transcript. The session id and the
  * entrySeq survive only as opaque attribution; semantic identity/order come
  * from contextSeq (entrySeq is the narrow archive mapping).
  *
- * iris_agent#76: units without a Pi entrySeq (e.g. legacy-recovered units)
- * are still full batch members — the caller assigns a deterministic
- * monotonic attribution ordinal so the pure seam/arc analysis keeps a total
- * order.
+ * iris_agent#76: units without a Pi entrySeq are still full batch members —
+ * the caller assigns a deterministic monotonic attribution ordinal so the
+ * pure seam/arc analysis keeps a total order. Feature A (#110): the V1 DTO
+ * carries no entrySeq — the attribution ordinal is ALWAYS the batch
+ * position (strictly increasing).
  */
 export function contextUnitToSequencedEntry(
   runtimeSessionId: string,
-  unit: ContextMessageUnit,
+  unit: ContextMessageUnitV1,
   ordinalFallback?: number,
 ): SequencedSessionEntry {
   return {
     runtimeSessionId,
-    entrySeq: unit.entrySeq ?? ordinalFallback ?? 0,
-    ...(unit.contextSeq !== undefined ? { contextSeq: unit.contextSeq } : {}),
-    entryId: unit.unitId,
-    entry: { type: "message", message: unit.payload },
+    // iris_agent#110: V1 units no longer carry a physical entrySeq. Use
+    // contextSeq as the entry-level ordinal — it IS globally monotonic within
+    // the lineage and uniquely ordered, which is exactly what the freeze/commit
+    // cursor needs to track progress across batches. The ordinalFallback is
+    // only used when contextSeq is absent (should not happen for committed units).
+    entrySeq: unit.contextSeq ?? ordinalFallback ?? 0,
+    contextSeq: unit.contextSeq,
+    entryId: unit.contextUnitId,
+    entry: { type: "message", message: unit.semanticContent as unknown as AgentMessage },
     contentHash: unit.contentHash,
   };
 }
@@ -55,26 +62,24 @@ export function contextUnitToSequencedEntry(
 /**
  * iris_agent#76: map a claimed Context batch (ascending contextSeq order) to
  * the runner's internal entries. The attribution ordinal is ALWAYS the
- * strictly-increasing batch position: units WITH a monotonic Pi entrySeq
- * keep it verbatim; units whose raw entrySeq would break monotonicity (a
- * new Session's reset numbering, gaps, duplicates) get the next ordinal —
- * so the seam/arc math stays total and the frozen hash window covers the
- * WHOLE batch (never silently dropping units because their attribution
- * collides with another Session's numbering).
+ * strictly-increasing batch position — Feature A (#110) V1 units carry no
+ * Pi entrySeq, so the ordinal IS the batch position (1-based), keeping the
+ * seam/arc math total and the frozen hash window covering the WHOLE batch.
  */
 export function unitsToSequencedEntries(
   runtimeSessionId: string,
-  units: ContextMessageUnit[],
+  units: ContextMessageUnitV1[],
 ): SequencedSessionEntry[] {
   let ordinal = 0;
   return units.map((unit) => {
-    ordinal = unit.entrySeq !== undefined ? Math.max(unit.entrySeq, ordinal + 1) : ordinal + 1;
+    ordinal += 1;
     return {
       runtimeSessionId,
-      entrySeq: ordinal,
-      ...(unit.contextSeq !== undefined ? { contextSeq: unit.contextSeq } : {}),
-      entryId: unit.unitId,
-      entry: { type: "message", message: unit.payload },
+      // iris_agent#110: use contextSeq as entrySeq (globally monotonic within lineage)
+      entrySeq: unit.contextSeq ?? ordinal,
+      contextSeq: unit.contextSeq,
+      entryId: unit.contextUnitId,
+      entry: { type: "message", message: unit.semanticContent as unknown as AgentMessage },
       contentHash: unit.contentHash,
     };
   });

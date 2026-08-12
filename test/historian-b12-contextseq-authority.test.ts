@@ -65,26 +65,39 @@ function insertUnit(
     contentHash?: string;
   },
 ): void {
-  store.insertUnit({
-    lineageId: LINEAGE,
-    runtimeSessionId: input.runtimeSessionId,
-    contextSeq: input.contextSeq,
-    contextUnitId: input.contextUnitId ?? input.unitId,
-    unitId: input.unitId,
-    sourceEventId: `evt-${input.contextSeq}`,
-    runtimeEventId: `evt-${input.contextSeq}`,
-    unitType: "input",
-    semanticSchemaId: "iris.semantic.context_message.user.v1",
-    disposition: "include",
-    entryId: input.entrySeq === undefined ? "no-archive-map" : `entry-${input.contextSeq}`,
-    ...(input.entrySeq === undefined ? {} : { entrySeq: input.entrySeq }),
-    contentHash: input.contentHash ?? "c".repeat(64),
-    payload: { role: "user" as const, content: `content-${input.contextSeq}`, timestamp: 1 },
-    paired: false,
-    derivationRefs: { memoryRefs: [], compartmentIds: [], sourceContextMessageUnitIds: [] },
-    schemaVersion: "context-unit-v1",
-    createdAt: "t",
-  });
+  store.insertUnit(
+    {
+      schemaId: "iris.context_message_unit.v1",
+      contextUnitId: input.contextUnitId ?? input.unitId,
+      contextLineageId: LINEAGE,
+      contextSeq: input.contextSeq,
+      runtimeEventId: `evt-${input.contextSeq}`,
+      kind: "user",
+      semanticSchemaId: "iris.semantic.context_message.user.v1",
+      semanticContent: { role: "user", content: `content-${input.contextSeq}`, timestamp: 1 },
+      historianDisposition: "include",
+      contentHash: input.contentHash ?? "c".repeat(64),
+      ...(input.entrySeq === undefined
+        ? {}
+        : {
+            rawArchiveRef: {
+              schemaId: "iris.raw_archive_ref.v1" as const,
+              runtimeSessionId: input.runtimeSessionId,
+              startEntrySeq: input.entrySeq,
+              entryIds: [`entry-${input.contextSeq}`],
+            },
+          }),
+      derivationRefs: {
+        schemaId: "iris.semantic_derivation_refs.v1",
+        memoryRefs: [],
+        compartmentIds: [],
+        sourceContextMessageUnitIds: [],
+      },
+      lifecycleState: "committed",
+      createdAt: "t",
+    },
+    { runtimeSessionId: input.runtimeSessionId },
+  );
 }
 
 test("B12-AC1: attribution-absent units (no Pi entrySeq) are FULL batch members", async () => {
@@ -125,7 +138,7 @@ test("B12-AC1: attribution-absent units (no Pi entrySeq) are FULL batch members"
         throughContextSeqInclusive: Number.MAX_SAFE_INTEGER,
       });
       assert.deepEqual(
-        batch.units.map((u) => u.unitId),
+        batch.units.map((u) => u.contextUnitId),
         ["u1", "u2", "u3"],
         "batch membership is contextSeq-keyed; entrySeq absence changes nothing",
       );
@@ -197,8 +210,8 @@ test("B12-AC2/AC3: identical batch identity across Session boundaries; rollover 
     });
     assert.equal(batchAgain.batchHash, batchA.batchHash, "batch identity is session-independent");
     assert.deepEqual(
-      batchAgain.units.map((u) => u.unitId),
-      batchA.units.map((u) => u.unitId),
+      batchAgain.units.map((u) => u.contextUnitId),
+      batchA.units.map((u) => u.contextUnitId),
     );
 
     // B12-AC3: Session B's window starts strictly after Session A's ceiling
@@ -210,13 +223,12 @@ test("B12-AC2/AC3: identical batch identity across Session boundaries; rollover 
     assert.deepEqual(
       batchB.units.map((u) => ({
         contextUnitId: u.contextUnitId,
-        unitId: u.unitId,
         contextSeq: u.contextSeq,
-        entrySeq: u.entrySeq,
+        entrySeq: u.rawArchiveRef?.startEntrySeq,
       })),
       [
-        { contextUnitId: "b-4", unitId: "b-4", contextSeq: 4, entrySeq: 1 },
-        { contextUnitId: "b-5", unitId: "b-5", contextSeq: 5, entrySeq: 2 },
+        { contextUnitId: "b-4", contextSeq: 4, entrySeq: 1 },
+        { contextUnitId: "b-5", contextSeq: 5, entrySeq: 2 },
       ],
       "membership/order by contextSeq only; B's reset entrySeq is attribution",
     );
@@ -344,7 +356,7 @@ test("B12-AC84: process Session A then rollover — Session B must NOT re-claim 
         throughContextSeqInclusive: Number.MAX_SAFE_INTEGER,
       });
       assert.deepEqual(
-        batch.units.map((u) => u.unitId),
+        batch.units.map((u) => u.contextUnitId),
         ["b-4", "b-5"],
         "B's batch contains ONLY B's units (4..5), never A's 1..3",
       );
@@ -435,8 +447,8 @@ test("B12-AC5: a frozen batch is replayable — identical window ⇒ identical b
     });
     assert.equal(b1.batchHash, b2.batchHash, "immutable + replayable");
     assert.deepEqual(
-      b1.units.map((u) => u.unitId),
-      b2.units.map((u) => u.unitId),
+      b1.units.map((u) => u.contextUnitId),
+      b2.units.map((u) => u.contextUnitId),
       "identical membership",
     );
     assert.equal(b1.throughContextSeqInclusive, 4, "actual endpoints are clamped to the store max");
@@ -543,7 +555,7 @@ test("B12-AC94-1: Session A commit → process restart → Session B claims only
         throughContextSeqInclusive: Number.MAX_SAFE_INTEGER,
       });
       assert.deepEqual(
-        batch.units.map((u) => u.unitId),
+        batch.units.map((u) => u.contextUnitId),
         ["b-4", "b-5"],
         "restart recovery claims only 4..5, never A's units",
       );
