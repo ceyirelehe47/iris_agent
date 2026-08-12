@@ -1,3 +1,4 @@
+// NOT PRODUCTION — Test/dev vertical slice. Imports context-renderer (MIGRATION ONLY per Notion v27).
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Type, type AssistantMessage } from "@iris/pi-ai";

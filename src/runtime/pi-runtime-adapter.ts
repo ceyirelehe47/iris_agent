@@ -67,6 +67,16 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
   private readonly session: Session;
   private readonly binding: InvocationBinding;
   private phase: AgentRuntimePhase = "idle";
+  /**
+   * C6 (#119/#114/#100): Native settlement receipt — resolves ONLY when the
+   * adapter observes the native Pi "settled" event for the current invocation.
+   * This is distinct from runCompletion (generator cleanup) and is the
+   * authoritative proof that the provider invocation has reached a terminal
+   * native state.
+   */
+  private settlementResolve: (() => void) | null = null;
+  private settlementReject: ((error: Error) => void) | null = null;
+  private nativeSettlementReceipt: Promise<void> | null = null;
 
   constructor(options: {
     harness: AgentHarness;
@@ -172,6 +182,11 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
     let settledSeen = false;
     let failedCode: string | undefined;
     const queue = new EventQueue<AgentRuntimeEvent>();
+    // C6: Create native settlement receipt for this invocation.
+    this.nativeSettlementReceipt = new Promise<void>((resolve, reject) => {
+      this.settlementResolve = resolve;
+      this.settlementReject = reject;
+    });
     try {
       // NOTE: the Coordinator emits turn_start; the adapter must not duplicate
       // it (single event truth for the port stream).
@@ -203,6 +218,8 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
             return;
           case "settled":
             settledSeen = true;
+            // C6: Resolve the native settlement receipt — proves native terminal state.
+            this.settlementResolve?.();
             queue.push({ type: "settled", invocationId, nextTurnCount: event.nextTurnCount });
             return;
           default:
@@ -243,12 +260,33 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
     } finally {
       unsubscribe?.();
       queue.close();
+      // C6: If the prompt exits WITHOUT observing settled, reject the receipt.
+      if (!settledSeen) {
+        this.settlementReject?.(new Error("prompt ended without native settled"));
+      }
+      this.nativeSettlementReceipt = null;
+      this.settlementResolve = null;
+      this.settlementReject = null;
     }
   }
 
-  async abort(invocationId: string, reason?: string): Promise<void> {
+  /**
+   * C6 (#119/#114/#100): Abort and wait for NATIVE settled proof.
+   * This is distinct from RuntimeCoordinator.runCompletion (generator cleanup).
+   * The abort() waits for the nativeSettlementReceipt which resolves ONLY
+   * when the adapter observes the native "settled" event.
+   */
+  async abort(invocationId: string, reason?: string, timeoutMs = 15000): Promise<void> {
     void reason;
+    const receipt = this.nativeSettlementReceipt;
     await this.harness.abort();
+    if (receipt === null) return;
+    await Promise.race([
+      receipt,
+      new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error(`native settlement timeout for ${invocationId} after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
   }
 
   /** Release the failed latch so the Epoch can be recovered/replaced. */
