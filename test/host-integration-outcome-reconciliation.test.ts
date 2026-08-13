@@ -60,7 +60,11 @@ import { directUserRequest } from "../src/contracts/origin.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
 import { InputAcceptanceLedger } from "../src/host/ingress.js";
 import { IrisHost } from "../src/host/host.js";
-import { freshRecoveryState, RecoveryStateStore } from "../src/runtime/recovery-state.js";
+import {
+  DurableOutcomeResolutionStore,
+  freshRecoveryState,
+  RecoveryStateStore,
+} from "../src/runtime/recovery-state.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures / helpers
@@ -160,12 +164,16 @@ function loadSnapshot(dataRoot: string, logicalExecutionId: string) {
   }
 }
 
-/** Stub the provider call (AgentHarness.prototype.prompt) to throw an
- * outcome_unknown-classified error — the ONLY mock boundary in these tests. */
-function installThrowingProvider(): void {
-  mock.method(AgentHarness.prototype, "prompt", async () => {
-    throw new Error("provider dispatch outcome_unknown: ambiguous status");
-  });
+/**
+ * Round 7 (#124/#118): provider dispatch failures must flow through the REAL
+ * harness failure path — the faux provider throws, the real AgentHarness
+ * catches it (emitRunFailure → failure message → agent_end → native settled).
+ * Mocking AgentHarness.prototype.prompt to throw directly bypassed the harness
+ * and could never emit native settled, which made the C6 adapter fail closed
+ * ("prompt ended without native settled") on every D5 scenario.
+ */
+function providerFailure(): Error {
+  return new Error("provider dispatch outcome_unknown: ambiguous status");
 }
 
 /** Wrap the provider call with a call counter (real implementation runs). */
@@ -193,13 +201,13 @@ test("D5: same-run outcome_unknown — supervisor persists dispatchId, reconcile
   const events: string[] = [];
 
   // MOCK boundary #1: the provider call surfaces an ambiguous dispatch.
-  installThrowingProvider();
   let host: IrisHost | undefined;
   try {
     host = await IrisHost.open({
       dataRoot,
       config,
       provider: "mock",
+      mockProviderError: providerFailure(),
       outcomeReconciler: makeReconciler(calls, "ambiguous"),
     });
     const unsubscribe = host.onEvent((event) => events.push(event.type));
@@ -420,21 +428,30 @@ test("D5: confirmed_applied — settle without replay (zero provider dispatch)",
     await host?.shutdown().catch(() => undefined);
   }
 
-  // The durable pending fence is deliberately KEPT (never cleared while the
-  // input is still accepted): it is the guard that makes repeated restarts
-  // re-consult the reconciler instead of replaying the uncommitted input.
+  // Round 7 (#118/#125): confirmed_applied is a DURABLE terminal resolution —
+  // the pending fence is replaced by the resolution record. Restart reads the
+  // resolution and performs ZERO re-query and ZERO replay.
   const snapshot = loadSnapshot(dataRoot, logicalExecutionId);
   assert.ok(snapshot !== undefined);
   assert.equal(
-    snapshot.pendingOutcomeUnknown?.dispatchId,
-    "dispatch-d5-applied-88",
-    "confirmed_applied must keep the durable pending fence (zero-replay guard)",
+    snapshot.pendingOutcomeUnknown,
+    null,
+    "confirmed_applied must clear the pending fence (replaced by durable resolution)",
   );
   assert.equal(snapshot.exhausted, false, "confirmed_applied is not a failure state");
+  const resolutionStore = new DurableOutcomeResolutionStore(
+    join(dataRoot, "recovery-state.db"),
+  );
+  const resolution = resolutionStore.load(logicalExecutionId);
+  assert.ok(resolution !== null, "confirmed_applied must persist a durable resolution");
+  assert.equal(resolution?.resolution, "confirmed_applied");
+  assert.equal(resolution?.dispatchId, "dispatch-d5-applied-88");
+  assert.equal(resolution?.inputId, input.inputId);
+  resolutionStore.close();
 
-  // A SECOND restart re-consults the reconciler and again settles WITHOUT
-  // replay — repeated restarts never replay an accepted-but-uncommitted
-  // input whose effects were confirmed applied.
+  // A SECOND restart reads the durable resolution: ZERO external re-query
+  // (reconciler not called) and ZERO replay — the #118 durable-resolution
+  // requirement, replacing the old re-consult-forever design.
   const calls2: ReconcilerCall[] = [];
   const counter2 = { promptCalls: 0 };
   installPromptCounter(counter2);
@@ -447,12 +464,11 @@ test("D5: confirmed_applied — settle without replay (zero provider dispatch)",
       outcomeReconciler: makeReconciler(calls2, "confirmed_applied"),
     });
     const pump2 = host2.run();
-    await waitFor(() => calls2.length >= 1);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     assert.equal(
-      calls2[0]?.dispatchId,
-      "dispatch-d5-applied-88",
-      "restart re-consultation uses the persisted dispatchId",
+      calls2.length,
+      0,
+      "restart after confirmed_applied must read the durable resolution — zero re-query",
     );
     assert.equal(
       counter2.promptCalls,
@@ -558,13 +574,13 @@ test("D5: dispatchId stability — same-run pending.dispatchId === restart pendi
   // Same-run: provider ambiguity → supervisor persists pending → reconciler
   // gets the same dispatchId → ambiguous → fail-closed.
   const calls1: ReconcilerCall[] = [];
-  installThrowingProvider();
   let host1: IrisHost | undefined;
   try {
     host1 = await IrisHost.open({
       dataRoot,
       config,
       provider: "mock",
+      mockProviderError: providerFailure(),
       outcomeReconciler: makeReconciler(calls1, "ambiguous"),
     });
     const pump1 = host1.run();

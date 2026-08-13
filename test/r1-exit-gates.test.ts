@@ -16,9 +16,10 @@ import {
   makeReadOnlyTestTool,
   openOrCreateSession,
   prepareContextSources,
-  runMinimalSlice,
+  
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
 import { attachRuntimeEventSeam } from "../src/runtime/runtime-event-seam.js";
 

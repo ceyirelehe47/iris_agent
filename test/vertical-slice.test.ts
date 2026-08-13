@@ -27,9 +27,9 @@ import {
 } from "../src/runtime/companion.js";
 import {
   reopenActiveSession,
-  runMinimalSlice,
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 /** R3-P1：记录 enqueueIncremental 调用的 mock manager（不触碰真实 freeze/runner）。 */
 class RecordingHistorianManager extends HistorianManager {

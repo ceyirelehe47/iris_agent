@@ -7,9 +7,189 @@
       "const": "assistant"
     },
     "content": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "text"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "text"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "image"
+                  },
+                  "data": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "data", "mimeType"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "toolCall"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "arguments": {
+                    "type": "object"
+                  },
+                  "thoughtSignature": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "id", "name", "arguments"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "thinking"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string"
+                  },
+                  "redacted": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["type", "text"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "api": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "responseModel": {
       "type": "string"
+    },
+    "responseId": {
+      "type": "string"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "message"],
+        "additionalProperties": false
+      }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "cacheRead": {
+          "type": "number"
+        },
+        "cacheWrite": {
+          "type": "number"
+        },
+        "cacheWrite1h": {
+          "type": "number"
+        },
+        "reasoning": {
+          "type": "number"
+        },
+        "totalTokens": {
+          "type": "number"
+        },
+        "cost": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "number"
+            },
+            "output": {
+              "type": "number"
+            },
+            "cacheRead": {
+              "type": "number"
+            },
+            "cacheWrite": {
+              "type": "number"
+            },
+            "total": {
+              "type": "number"
+            }
+          },
+          "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
+      "additionalProperties": false
+    },
+    "stopReason": {
+      "type": "string",
+      "enum": ["pending", "stop", "length", "toolUse", "error", "aborted"]
+    },
+    "errorMessage": {
+      "type": "string"
+    },
+    "rawStopReason": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "number"
     }
   },
-  "required": ["role", "content"],
-  "additionalProperties": true
+  "required": ["role", "content", "timestamp"],
+  "additionalProperties": false
 }

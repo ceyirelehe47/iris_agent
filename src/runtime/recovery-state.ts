@@ -294,6 +294,21 @@ export class RecoveryStateStore {
   }
 
   /**
+   * Round 7 (#118/#125): all logical executions that still carry a durable
+   * pendingOutcomeUnknown — these MUST be reconciled at Host startup BEFORE
+   * any dispatch, even when their input was already appended to the Pi
+   * Session (the crash window persists pending first, appends second).
+   */
+  listWithPendingOutcomeUnknown(): RecoveryStateSnapshot[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM recovery_state WHERE pending_outcome_unknown IS NOT NULL ORDER BY created_at",
+      )
+      .all() as unknown as RecoveryStateRow[];
+    return rows.map(rowToSnapshot);
+  }
+
+  /**
    * Insert or update a snapshot. `updatedAt` is always set to now. Use this
    * after every recovery transition so durability holds across restart.
    */

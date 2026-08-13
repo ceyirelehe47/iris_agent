@@ -58,6 +58,7 @@ import {
   type RecoveryEscalationEvent,
 } from "../runtime/recovery-supervisor.js";
 import {
+  DurableOutcomeResolutionStore,
   defaultFallbackConfig,
   freshRecoveryState,
   logicalExecutionIdFor,
@@ -69,6 +70,13 @@ export interface IrisHostOptions {
   config?: AgentConfigV3;
   /** Provider mode for the active Capsule. */
   provider: "mock" | "live";
+  /**
+   * Test seam: when provider === "mock", make the faux provider throw this
+   * error on its first provider call. The REAL harness failure path then runs
+   * (emitRunFailure → failure message → agent_end → native settled), which is
+   * how production provider dispatch failures behave.
+   */
+  mockProviderError?: Error;
   /**
    * Durable ingress dedupe identity dimension (M4). Semantics: the Host
    * INSTANCE epoch, NOT the Runtime Session Epoch ordinal. It is stable
@@ -176,6 +184,7 @@ export class IrisHost {
   /** SQLite-backed durable recovery state (one row per logical execution). */
   private readonly recoveryStore: RecoveryStateStore;
   private readonly providerMode: "mock" | "live";
+  private readonly mockProviderError: Error | undefined;
 
   private readyFlag = false;
   private shuttingDown = false;
@@ -206,10 +215,12 @@ export class IrisHost {
     currentEpoch: RuntimeSessionEpoch;
     instanceEpoch: number;
     settledTokenBox: { value: { epochId: string; invocationId: string } | null };
+    mockProviderError?: Error;
   }) {
     this.dataRoot = options.dataRoot;
     this.config = options.config;
     this.providerMode = options.provider;
+    this.mockProviderError = options.mockProviderError;
     this.lock = options.lock;
     this.epochStore = options.epochStore;
     this.ingress = options.ingress;
@@ -986,7 +997,11 @@ export class IrisHost {
         }
       }
 
-      const { models, model, providerProfileId } = await composeProvider(options.provider);
+      const { models, model, providerProfileId } = await composeProvider(
+        options.provider,
+        undefined,
+        options.mockProviderError,
+      );
 
       const binding: InvocationBinding = {
         input: emptyPlaceholderInput(),
@@ -1086,9 +1101,13 @@ export class IrisHost {
       // state (recovery-state.db in the data root).
       recoveryStore = new RecoveryStateStore(join(paths.dataRoot, "recovery-state.db"));
       const readyRecoveryStore = recoveryStore;
+      const resolutionStore = new DurableOutcomeResolutionStore(
+        join(paths.dataRoot, "recovery-state.db"),
+      );
       const supervisor = new RecoverySupervisor({
         runtime: coordinator,
         config: defaultFallbackConfig(models.getModels().map((m) => `${m.provider}/${m.id}`)),
+        resolutionStore,
         // iris_agent#111: operation-specific reconciliation seam.
         // When the caller provides an outcomeReconciler, the supervisor
         // dispatches to it with the logical execution identity, input
@@ -1121,6 +1140,69 @@ export class IrisHost {
               return "ambiguous" as const;
             },
       });
+
+      // Round 7 (#118/#125): reconcile durable pendingOutcomeUnknown that can
+      // NEVER reach the dispatch path again. The crash window persists
+      // pending FIRST, then appends the Pi pair; when a pending record's
+      // input already has a verified Pi pair, ingress classification marks it
+      // session_committed and the supervisor would never reconcile it. Those
+      // are reconciled here, BEFORE the pump starts. Pending records WITHOUT
+      // a session pair are left to the dispatch path (reconcile-before-dispatch
+      // in the supervisor) so host open alone never consumes them.
+      //   confirmed_applied → durable resolution + session_committed (zero
+      //                       replay, zero re-query on later restarts)
+      //   replay_safe      → pending cleared; normal dispatch replays with
+      //                       the same logical execution identity
+      //   ambiguous        → exhausted persisted (fail closed); the input is
+      //                       session_committed so it never dispatches again
+      const pendingExecutions = readyRecoveryStore.listWithPendingOutcomeUnknown();
+      if (pendingExecutions.length > 0) {
+        const entries = await session.getEntries();
+        const projected = projectSessionMessages(entries);
+        const pairs = findInputPairsByProjection(projected);
+        const pairByInputId = new Map<string, string>();
+        for (const pair of pairs) {
+          const details = (pair.companion.message.details ?? {}) as {
+            iris?: { inputId?: string };
+          };
+          const inputId = details.iris?.inputId;
+          if (typeof inputId === "string" && inputId !== "") {
+            pairByInputId.set(inputId, pair.user.entryId);
+          }
+        }
+        for (const snapshot of pendingExecutions) {
+          const pendingInputId = snapshot.pendingOutcomeUnknown?.inputId;
+          if (pendingInputId === undefined) {
+            continue;
+          }
+          if (!pairByInputId.has(pendingInputId)) {
+            // No Pi pair yet — the dispatch path will reconcile before any
+            // provider dispatch (supervisor prompt entry).
+            continue;
+          }
+          const disposition = await supervisor.reconcilePendingOnStartup(snapshot);
+          const updated = supervisor.getState();
+          if (updated !== null) {
+            readyRecoveryStore.save(updated);
+          }
+          if (disposition === "ambiguous") {
+            // Fail closed: exhausted persisted, zero replay. The input is
+            // session_committed below so it never dispatches again.
+          }
+          // Effects confirmed applied (or ambiguous): the input must never be
+          // re-prompted — it is already bound to its Pi pair.
+          const userEntryId = pairByInputId.get(pendingInputId);
+          if (userEntryId !== undefined) {
+            ingress.markSessionCommitted(
+              pendingInputId,
+              instanceEpoch,
+              epoch.runtimeSessionId,
+              userEntryId,
+            );
+          }
+        }
+      }
+
       return new IrisHost({
         dataRoot: options.dataRoot,
         config,
@@ -1135,6 +1217,9 @@ export class IrisHost {
         currentEpoch: epoch,
         instanceEpoch,
         settledTokenBox,
+        ...(options.mockProviderError === undefined
+          ? {}
+          : { mockProviderError: options.mockProviderError }),
       });
     } catch (error) {
       // Setup failed partway (review-pass-2 #4): release every acquired

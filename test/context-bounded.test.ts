@@ -19,7 +19,7 @@ import {
 } from "../src/contracts/context-v27.js";
 import type { PiSeamEvent } from "../src/contracts/runtime-events.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
-import { runMinimalSlice } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 /**
  * R2-P3：context_units 有界性 gate（Roadmap v13 "R2 有界 = context_units

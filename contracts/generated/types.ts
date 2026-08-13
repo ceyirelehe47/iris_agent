@@ -3,8 +3,8 @@
  * DO NOT EDIT BY HAND. All changes must go through the source file + codegen.
  *
  * Registry: iris.agent-domain-contracts.v1
- * Status: R0_codegen_authoritative
- * Locked: 2026-08-13
+ * Status: design_locked_pending_R0_codegen
+ * Locked: 2026-08-09
  *
  * This is the single machine-authoritative TypeScript contract.
  * No handwritten duplicate interface may exist elsewhere.
@@ -24,8 +24,7 @@ export type ContextMessageUnitLifecycleState =
   | "historian_claimed"
   | "compartmentalized_pending_bust"
   | "represented_in_p3"
-  | "retired"
-  | "legacy_committed_unknown";
+  | "retired";
 
 // --- Schema ID constants ---
 export const IRIS_RAW_ARCHIVE_REF_V1_SCHEMA_ID = "iris.raw_archive_ref.v1" as const;

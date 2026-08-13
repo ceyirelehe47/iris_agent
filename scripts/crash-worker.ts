@@ -28,7 +28,8 @@ import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.
 import { acquireDataRootLock } from "../src/host/lock.js";
 import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
 import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
-import { runMinimalSlice, sampleAgentInput } from "../src/runtime/vertical-slice.js";
+import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";
 
 const boundaryIndex = process.argv.indexOf("--boundary");

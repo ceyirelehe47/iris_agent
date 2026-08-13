@@ -41,7 +41,10 @@ const semantic_context_message_body_event_v1 =
 const semantic_context_message_operational_v1 =
   require("./json-schemas/semantic-context_message-operational-v1.schema.json") as AnySchema;
 
-const ajv = new Ajv({ allErrors: true, strict: true });
+// strictTypes is disabled because generated JsonValue unions are legal JSON
+// Schema (union of primitive/array/object) that Ajv's strictTypes check
+// rejects; all other strict checks stay on and validation remains fail-closed.
+const ajv = new Ajv({ allErrors: true, strictTypes: false });
 addFormats(ajv);
 
 ajv.addSchema(raw_archive_ref_v1, "iris.raw_archive_ref.v1");
@@ -413,6 +416,11 @@ export function validateSemantic_iris_semantic_context_message_tool_call_v1(data
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contextSeq"],
       };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
     if ("semanticSchemaId" in obj)
       return {
         valid: false,
@@ -423,6 +431,16 @@ export function validateSemantic_iris_semantic_context_message_tool_call_v1(data
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contentHash"],
       };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
     if ("layer" in obj)
       return {
         valid: false,
@@ -432,6 +450,11 @@ export function validateSemantic_iris_semantic_context_message_tool_call_v1(data
       return {
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
       };
   }
   const validate = ajv.getSchema("iris.semantic.context_message.tool_call.v1");
@@ -474,6 +497,11 @@ export function validateSemantic_iris_semantic_context_message_tool_result_v1(da
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contextSeq"],
       };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
     if ("semanticSchemaId" in obj)
       return {
         valid: false,
@@ -484,6 +512,16 @@ export function validateSemantic_iris_semantic_context_message_tool_result_v1(da
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contentHash"],
       };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
     if ("layer" in obj)
       return {
         valid: false,
@@ -493,6 +531,11 @@ export function validateSemantic_iris_semantic_context_message_tool_result_v1(da
       return {
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
       };
   }
   const validate = ajv.getSchema("iris.semantic.context_message.tool_result.v1");
@@ -535,6 +578,11 @@ export function validateSemantic_iris_semantic_context_message_body_event_v1(dat
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contextSeq"],
       };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
     if ("semanticSchemaId" in obj)
       return {
         valid: false,
@@ -545,6 +593,16 @@ export function validateSemantic_iris_semantic_context_message_body_event_v1(dat
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contentHash"],
       };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
     if ("layer" in obj)
       return {
         valid: false,
@@ -554,6 +612,11 @@ export function validateSemantic_iris_semantic_context_message_body_event_v1(dat
       return {
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
       };
   }
   const validate = ajv.getSchema("iris.semantic.context_message.body_event.v1");
@@ -596,6 +659,11 @@ export function validateSemantic_iris_semantic_context_message_operational_v1(da
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contextSeq"],
       };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
     if ("semanticSchemaId" in obj)
       return {
         valid: false,
@@ -606,6 +674,16 @@ export function validateSemantic_iris_semantic_context_message_operational_v1(da
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: contentHash"],
       };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
     if ("layer" in obj)
       return {
         valid: false,
@@ -615,6 +693,11 @@ export function validateSemantic_iris_semantic_context_message_operational_v1(da
       return {
         valid: false,
         errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
       };
   }
   const validate = ajv.getSchema("iris.semantic.context_message.operational.v1");

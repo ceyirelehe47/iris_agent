@@ -1,4 +1,5 @@
 import type { AgentHarness, Session } from "@iris/pi-agent-core";
+import type { AssistantMessage } from "@iris/pi-ai";
 
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
@@ -229,7 +230,12 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
 
       // The binding was updated by the Coordinator before prompt(); encode the
       // CURRENT input's frames so companion pairing never uses a stale input.
-      const promptPromise = this.harness.prompt(encodeInputFrames(input.blocks));
+      let promptResult: AssistantMessage | undefined;
+      const promptPromise = this.harness
+        .prompt(encodeInputFrames(input.blocks))
+        .then((message) => {
+          promptResult = message;
+        });
       for (;;) {
         const event = await Promise.race([queue.next(), promptPromise.then(() => undefined)]);
         if (event === undefined) {
@@ -247,6 +253,20 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
         failedCode = "settled_not_observed";
         this.phase = "failed";
         yield { type: "failed", invocationId, code: failedCode };
+      } else if (promptResult?.errorMessage !== undefined) {
+        // The harness ran its REAL failure path (emitRunFailure): the run
+        // produced a native failure message and still settled. Surface the
+        // native failure so the RecoverySupervisor can classify it
+        // (outcome_unknown / transient / terminal) instead of treating a
+        // failed dispatch as success.
+        failedCode = "native_failure";
+        this.phase = "failed";
+        yield {
+          type: "failed",
+          invocationId,
+          code: failedCode,
+          message: promptResult.errorMessage,
+        };
       } else {
         this.phase = "idle";
       }

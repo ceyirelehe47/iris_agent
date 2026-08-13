@@ -8,7 +8,13 @@ export type AgentRuntimeEvent =
   | { type: "tool_call"; invocationId: string; toolCallId: string; toolName: string }
   | { type: "tool_result"; invocationId: string; toolCallId: string; toolName: string }
   | { type: "settled"; invocationId: string; nextTurnCount: number }
-  | { type: "failed"; invocationId: string; code: string };
+  | {
+      type: "failed";
+      invocationId: string;
+      code: string;
+      /** Native failure message (e.g. the harness failure-message errorMessage). */
+      message?: string;
+    };
 
 export interface AgentRuntimePort {
   prompt(input: AgentInput): AsyncIterable<AgentRuntimeEvent>;

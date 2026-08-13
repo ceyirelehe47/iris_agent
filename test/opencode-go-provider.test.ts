@@ -15,9 +15,10 @@ import {
 } from "../src/runtime/opencode-go-provider.js";
 import {
   reopenActiveSession,
-  runMinimalSlice,
+  
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 const ORIGINAL_KEY = process.env[OPENCODE_GO_API_KEY_ENV];
 

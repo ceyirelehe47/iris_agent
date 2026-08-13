@@ -6,6 +6,7 @@ import {
   type PendingOutcomeUnknown,
   type RecoveryStateSnapshot,
   type RetryClassification,
+  DurableOutcomeResolutionStore,
   freshRecoveryState,
 } from "./recovery-state.js";
 
@@ -126,6 +127,13 @@ export interface RecoverySupervisorOptions {
    * callers SHOULD supply a real reconciler.
    */
   reconcileOutcomeUnknown?: (signal: RecoverySignal) => Promise<ReconcileOutcome>;
+  /**
+   * Round 7 (#118/#125): durable terminal-resolution store. When provided,
+   * confirmed_applied / replay_safe decisions are persisted so a restart
+   * reads the durable resolution instead of re-querying external subsystems
+   * forever.
+   */
+  resolutionStore?: DurableOutcomeResolutionStore;
   /**
    * Optional override for the wall clock. Returns epoch milliseconds. Used by
    * tests to avoid real waits. Defaults to Date.now().
@@ -266,6 +274,12 @@ export class RecoverySupervisor {
   private readonly sleep: (ms: number) => Promise<void>;
   /** #102: stored inputId from the current prompt() call for reconciliation. */
   private currentInputId: string | undefined;
+  /**
+   * Round 7 (#118/#125): durable terminal-resolution store. When provided,
+   * confirmed_applied / replay_safe decisions are persisted so a restart
+   * reads the resolution instead of re-querying external subsystems forever.
+   */
+  private readonly resolutionStore: DurableOutcomeResolutionStore | undefined;
 
   /**
    * In-memory mirror of the durable snapshot. On dispatch, the supervisor loads
@@ -281,6 +295,74 @@ export class RecoverySupervisor {
     this.reconcile = options.reconcileOutcomeUnknown ?? (() => Promise.resolve(false));
     this.now = options.now ?? (() => Date.now());
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.resolutionStore = options.resolutionStore;
+  }
+
+  /**
+   * Round 7 (#118/#125): persist a durable terminal resolution for a logical
+   * execution. Identity + evidence are preserved; evidenceSource/evidenceRef
+   * identify the subsystem that produced the proof.
+   */
+  private persistResolution(input: {
+    logicalExecutionId: string;
+    inputId: string;
+    dispatchId: string;
+    resolution: "confirmed_applied" | "replay_safe";
+    evidenceSource: string;
+    evidenceRef: string;
+  }): void {
+    this.resolutionStore?.save({
+      ...input,
+      resolvedAt: new Date(this.now()).toISOString(),
+    });
+  }
+
+  /**
+   * Round 7 (#118/#125): reconcile a DURABLE pendingOutcomeUnknown at Host
+   * startup — before ANY dispatch — even when the input was already appended
+   * to the Pi Session (the crash window persists pending first). Persists the
+   * durable result and returns the disposition.
+   *
+   * - confirmed_applied: durable resolution written + pending cleared →
+   *   restart performs zero replay and zero external re-query.
+   * - replay_safe: durable resolution written + pending cleared → bounded
+   *   replay preserves the original recovery budget and identity.
+   * - ambiguous: pending kept + exhausted persisted → fail closed.
+   */
+  async reconcilePendingOnStartup(
+    snapshot: RecoveryStateSnapshot,
+  ): Promise<"confirmed_applied" | "replay_safe" | "ambiguous"> {
+    const pending = snapshot.pendingOutcomeUnknown;
+    if (pending === null) {
+      return "replay_safe";
+    }
+    const outcome = await this.reconcilePendingOutcomeUnknown(pending);
+    if (outcome === "settled") {
+      this.persistResolution({
+        logicalExecutionId: snapshot.logicalExecutionId,
+        inputId: pending.inputId,
+        dispatchId: pending.dispatchId,
+        resolution: "confirmed_applied",
+        evidenceSource: "outcome_reconciler",
+        evidenceRef: `reconciled:${pending.dispatchId}`,
+      });
+      this.state = { ...snapshot, pendingOutcomeUnknown: null, exhausted: false };
+      return "confirmed_applied";
+    }
+    if (outcome === "ambiguous") {
+      this.state = { ...snapshot, exhausted: true };
+      return "ambiguous";
+    }
+    this.persistResolution({
+      logicalExecutionId: snapshot.logicalExecutionId,
+      inputId: pending.inputId,
+      dispatchId: pending.dispatchId,
+      resolution: "replay_safe",
+      evidenceSource: "outcome_reconciler",
+      evidenceRef: `reconciled:${pending.dispatchId}`,
+    });
+    this.state = { ...snapshot, pendingOutcomeUnknown: null };
+    return "replay_safe";
   }
 
   getPhase(): "idle" | "turn" | "retry" | "compaction" | "branch_summary" | "failed" {
@@ -382,6 +464,34 @@ export class RecoverySupervisor {
           );
         }
 
+        // Round 7 (#125): a durable confirmed_applied resolution is a
+        // restart-stable terminal decision — zero replay AND zero external
+        // re-query. Read it BEFORE any dispatch or reconciliation.
+        const durableResolution = this.resolutionStore?.load(logicalExecutionId);
+        if (durableResolution !== null && durableResolution !== undefined) {
+          if (durableResolution.resolution === "confirmed_applied") {
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "terminal",
+              detail: "durable_confirmed_applied_settle_without_replay",
+            };
+            return;
+          }
+          if (durableResolution.resolution === "replay_safe") {
+            // The prior dispatch was confirmed NOT applied; bounded replay
+            // preserves the original recovery budget and identity.
+            yield {
+              type: "recovery_escalation",
+              logicalExecutionId,
+              reason: "outcome_unknown",
+              action: "fallback",
+              detail: "durable_replay_safe",
+            };
+          }
+        }
+
         // iris_agent#102: a pending outcome_unknown restored from durable
         // state must be reconciled BEFORE any provider/runtime dispatch on
         // restart. Zero dispatches happen until the reconciliation
@@ -389,10 +499,21 @@ export class RecoverySupervisor {
         // confirmed_applied → settle without replay; ambiguous → fail closed
         // durably, pending stays set so repeated restarts never replay).
         if (this.state.pendingOutcomeUnknown !== null) {
-          const outcome = await this.reconcilePendingOutcomeUnknown(
-            this.state.pendingOutcomeUnknown,
-          );
+          const pending = this.state.pendingOutcomeUnknown;
+          const outcome = await this.reconcilePendingOutcomeUnknown(pending);
           if (outcome === "settled") {
+            // Round 7 (#118/#125): confirmed_applied becomes a DURABLE
+            // terminal resolution — restart reads it instead of re-querying
+            // the reconciler forever.
+            this.persistResolution({
+              logicalExecutionId,
+              inputId: pending.inputId,
+              dispatchId: pending.dispatchId,
+              resolution: "confirmed_applied",
+              evidenceSource: "outcome_reconciler",
+              evidenceRef: `reconciled:${pending.dispatchId}`,
+            });
+            persist({ ...this.state, pendingOutcomeUnknown: null, exhausted: false });
             return;
           }
           if (outcome === "ambiguous") {
@@ -411,7 +532,16 @@ export class RecoverySupervisor {
               "outcome_unknown_ambiguous_fail_closed",
             );
           }
-          // "retry" — clear pending, fall through to the normal dispatch.
+          // "retry" — durable replay_safe resolution, clear pending, fall
+          // through to the normal dispatch.
+          this.persistResolution({
+            logicalExecutionId,
+            inputId: pending.inputId,
+            dispatchId: pending.dispatchId,
+            resolution: "replay_safe",
+            evidenceSource: "outcome_reconciler",
+            evidenceRef: `reconciled:${pending.dispatchId}`,
+          });
           persist({ ...this.state, pendingOutcomeUnknown: null });
         }
 
@@ -498,6 +628,9 @@ export class RecoverySupervisor {
                   nativeSettled = true;
                 } else if (restEvent.type === "failed") {
                   nativeFailedCode = restEvent.code;
+                  if (restEvent.message !== undefined) {
+                    nativeFailedMessage = restEvent.message;
+                  }
                 }
                 yield restEvent;
                 rest = await iter.next();
@@ -506,7 +639,9 @@ export class RecoverySupervisor {
             }
             if (event.type === "failed") {
               nativeFailedCode = event.code;
-              // Don't break — the iterator may produce more. But classify after.
+              if (event.message !== undefined) {
+                nativeFailedMessage = event.message;
+              }
               yield event;
             } else {
               yield event;

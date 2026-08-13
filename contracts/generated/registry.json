@@ -1,7 +1,7 @@
 {
   "registryId": "iris.agent-domain-contracts.v1",
-  "status": "R0_codegen_authoritative",
-  "lockedAt": "2026-08-13",
+  "status": "design_locked_pending_R0_codegen",
+  "lockedAt": "2026-08-09",
   "generatedAt": "2026-08-13",
   "currentGenerationSchemaId": "iris.context_generation.v2",
   "currentGenerationUnitSchemaId": "iris.context_unit.v2",
@@ -67,5 +67,5 @@
       "file": "json-schemas/semantic-context_message-operational-v1.schema.json"
     }
   ],
-  "manifestSha256": "8eb19476150f704a56ae51dffdba57c443f52e862b37b2b6a1e014ecfb41880f"
+  "manifestSha256": "7d9a5197407048c7ec7240239b6b887da017eab4faa6b7f9935bbc30c7c849fe"
 }

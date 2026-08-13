@@ -1,4 +1,5 @@
-// NOT PRODUCTION — Uses pass-taxonomy HardSignals (MIGRATION ONLY per Notion v27). R0 does not wire this.
+// Production harness composition for IrisHost (pure projection path; the
+// m0/m1 ContextRenderer is migration-only and lives in vertical-slice-demo).
 import { createHash } from "node:crypto";
 
 import {
@@ -26,7 +27,6 @@ import {
 import { transformContextMessages } from "./context-adapter.js";
 import type { ContextIngestPort } from "../contracts/context-v27.js";
 import type { ContextRenderer } from "../context/context-renderer.js";
-import type { HardSignals } from "../context/pass-taxonomy.js";
 
 export interface IrisHarnessCallbacks {
   onSystemPrompt?(systemPrompt: string): void;
@@ -301,11 +301,16 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
  * 当前 invocation 的 system projection hash；providerProfileId 是当前 provider
  * profile。空信号（""/undefined）按 pass-taxonomy 语义永不当成变更。
  */
-function hardSignalsFor(options: CreateIrisHarnessOptions): HardSignals {
+function hardSignalsFor(options: CreateIrisHarnessOptions): {
+  modelKey: string;
+  systemHash: string;
+  providerProfileId: string;
+} {
   const { prepared } = options.currentInvocation;
   return {
     modelKey: `${options.model.provider}:${options.model.id}`,
-    systemHash: prepared.systemProjectionHash,
+    // Empty signal (""/undefined) is never treated as a change.
+    systemHash: prepared.systemProjectionHash ?? "",
     providerProfileId: options.providerProfileId,
   };
 }

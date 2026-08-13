@@ -291,7 +291,7 @@ const addFormats = require("ajv-formats") as typeof import("ajv-formats").defaul
     validatorsOutput += `const ${importName} = require("./json-schemas/${fileName}") as AnySchema;\n`;
   }
 
-  validatorsOutput += `\nconst ajv = new Ajv({ allErrors: true, strict: true });\n`;
+  validatorsOutput += `\n// strictTypes is disabled because generated JsonValue unions are legal JSON\n// Schema (union of primitive/array/object) that Ajv's strictTypes check\n// rejects; all other strict checks stay on and validation remains fail-closed.\nconst ajv = new Ajv({ allErrors: true, strictTypes: false });\n`;
   validatorsOutput += `addFormats(ajv);\n\n`;
 
   // Register schemas

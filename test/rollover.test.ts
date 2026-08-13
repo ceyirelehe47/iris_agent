@@ -14,9 +14,10 @@ import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
 import {
   reopenActiveSession,
   rolloverActiveSession,
-  runMinimalSlice,
+  
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 test("settled rollover closes the old epoch and activates a fresh linked epoch", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-rollover-test-"));

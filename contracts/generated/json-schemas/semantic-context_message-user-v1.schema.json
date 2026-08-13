@@ -8,9 +8,95 @@
       "enum": ["user", "custom"]
     },
     "content": {
-      "type": "string"
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "text"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "text"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "image"
+                  },
+                  "data": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "data", "mimeType"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "toolCall"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "arguments": {
+                    "type": "object"
+                  },
+                  "thoughtSignature": {
+                    "type": "string"
+                  }
+                },
+                "required": ["type", "id", "name", "arguments"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "thinking"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string"
+                  },
+                  "redacted": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["type", "text"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "timestamp": {
+      "type": "number"
     }
   },
   "required": ["role", "content"],
-  "additionalProperties": true
+  "additionalProperties": false
 }
