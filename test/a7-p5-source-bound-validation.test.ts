@@ -26,18 +26,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import {
-  type ContextGenerationV2,
-  type ContextUnitV2,
   type ContextMessageUnitV1,
   type JsonValue,
-  CONTEXT_UNIT_V2_SCHEMA_ID,
-  CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
-  CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID,
-  CONTEXT_GENERATION_V2_SCHEMA_ID,
-  CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID,
   CONTEXT_MESSAGE_UNIT_V1_SCHEMA_ID,
   KIND_TO_SEMANTIC_SCHEMA_ID,
-  computeContextGenerationHash,
   computeContextMessageUnitContentHashV1,
 } from "../src/contracts/context-v27.js";
 import { buildContextGenerationV2 } from "../src/context/generation-builder.js";
@@ -99,7 +91,6 @@ function makeValidDurableUnit(
  */
 function buildPre0009DbWithLegacyRow(): {
   dbPath: string;
-  migrationsDir: string;
   legacySourceEventId: string;
   lineageId: string;
 } {
@@ -143,7 +134,7 @@ function buildPre0009DbWithLegacyRow(): {
   } finally {
     db.close();
   }
-  return { dbPath, migrationsDir, legacySourceEventId, lineageId };
+  return { dbPath, legacySourceEventId, lineageId };
 }
 
 test("A7: valid P5 unit passes the real projection path", () => {
@@ -196,9 +187,8 @@ test("A7 #117: mutate semanticContent only → production projection MUST throw 
 });
 
 test("A8 #122: canonical lifecycle enum has EXACTLY the six Notion states", async () => {
-  const { validate_iris_context_message_unit_v1 } = await import(
-    "../contracts/generated/validators.js"
-  );
+  const { validate_iris_context_message_unit_v1 } =
+    await import("../contracts/generated/validators.js");
   // A canonical unit with the six states passes.
   for (const state of [
     "committed",
@@ -222,8 +212,7 @@ test("A8 #122: canonical lifecycle enum has EXACTLY the six Notion states", asyn
 });
 
 test("A8 #122: production migration 0009 is executable on a real pre-0009 DB with legacy rows", () => {
-  const { dbPath, migrationsDir, legacySourceEventId, lineageId } =
-    buildPre0009DbWithLegacyRow();
+  const { dbPath, legacySourceEventId, lineageId } = buildPre0009DbWithLegacyRow();
   try {
     // Phase 1: apply production 0009 via migrateDatabase on the REAL
     // migrations dir (0001–0008 already applied, checksums match).
@@ -239,7 +228,9 @@ test("A8 #122: production migration 0009 is executable on a real pre-0009 DB wit
 
       // The legacy row is now quarantined at the PHYSICAL layer.
       const legacyRow = db
-        .prepare("SELECT legacy_status, content_hash_basis FROM context_units WHERE unit_id = 'legacy-unit-001'")
+        .prepare(
+          "SELECT legacy_status, content_hash_basis FROM context_units WHERE unit_id = 'legacy-unit-001'",
+        )
         .get() as { legacy_status: string; content_hash_basis: string };
       assert.equal(legacyRow.legacy_status, "quarantined_legacy");
       assert.equal(legacyRow.content_hash_basis, "v1");
@@ -248,9 +239,11 @@ test("A8 #122: production migration 0009 is executable on a real pre-0009 DB wit
       // states — inserting legacy_committed_unknown must be REJECTED by SQLite.
       assert.throws(
         () =>
-          db.prepare(
-            "UPDATE context_units SET lifecycle_state = 'legacy_committed_unknown' WHERE unit_id = 'legacy-unit-001'",
-          ).run(),
+          db
+            .prepare(
+              "UPDATE context_units SET lifecycle_state = 'legacy_committed_unknown' WHERE unit_id = 'legacy-unit-001'",
+            )
+            .run(),
         /CHECK/i,
         "SQLite CHECK must reject the legacy sentinel as a lifecycle value",
       );

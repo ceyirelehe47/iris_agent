@@ -10,22 +10,11 @@
   "primitives": {
     "RuntimeEventKind": {
       "type": "enum",
-      "values": [
-        "user",
-        "assistant",
-        "tool_call",
-        "tool_result",
-        "body_event",
-        "operational"
-      ]
+      "values": ["user", "assistant", "tool_call", "tool_result", "body_event", "operational"]
     },
     "HistorianDisposition": {
       "type": "enum",
-      "values": [
-        "include",
-        "reference_only",
-        "exclude"
-      ]
+      "values": ["include", "reference_only", "exclude"]
     },
     "ContextMessageUnitLifecycleState": {
       "type": "enum",
@@ -72,10 +61,7 @@
           }
         }
       },
-      "required": [
-        "schemaId",
-        "runtimeSessionId"
-      ],
+      "required": ["schemaId", "runtimeSessionId"],
       "additionalProperties": false
     },
     "iris.semantic_derivation_refs.v1": {
@@ -106,9 +92,7 @@
           }
         }
       },
-      "required": [
-        "schemaId"
-      ],
+      "required": ["schemaId"],
       "additionalProperties": false
     },
     "iris.context_message_unit.v1": {
@@ -205,12 +189,7 @@
           "minLength": 1
         }
       },
-      "required": [
-        "schemaId",
-        "sourceSchemaId",
-        "sourceId",
-        "sourceHash"
-      ],
+      "required": ["schemaId", "sourceSchemaId", "sourceId", "sourceHash"],
       "additionalProperties": false
     },
     "iris.context_unit_header.v1": {
@@ -235,13 +214,7 @@
           "minLength": 1
         }
       },
-      "required": [
-        "schemaId",
-        "contextUnitId",
-        "source",
-        "semanticSchemaId",
-        "contentHash"
-      ],
+      "required": ["schemaId", "contextUnitId", "source", "semanticSchemaId", "contentHash"],
       "additionalProperties": false
     },
     "iris.context_unit.v2": {
@@ -257,11 +230,7 @@
           "type": "jsonValue"
         }
       },
-      "required": [
-        "schemaId",
-        "header",
-        "semanticContent"
-      ],
+      "required": ["schemaId", "header", "semanticContent"],
       "additionalProperties": false
     },
     "iris.context_generation_header.v1": {
@@ -327,11 +296,7 @@
           }
         }
       },
-      "required": [
-        "schemaId",
-        "header",
-        "units"
-      ],
+      "required": ["schemaId", "header", "units"],
       "additionalProperties": false
     }
   },
@@ -355,10 +320,7 @@
         "properties": {
           "role": {
             "type": "string",
-            "enum": [
-              "user",
-              "custom"
-            ]
+            "enum": ["user", "custom"]
           },
           "content": {
             "oneOf": [
@@ -379,10 +341,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "text"
-                      ],
+                      "required": ["type", "text"],
                       "additionalProperties": false
                     },
                     {
@@ -398,11 +357,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "data",
-                        "mimeType"
-                      ],
+                      "required": ["type", "data", "mimeType"],
                       "additionalProperties": false
                     },
                     {
@@ -426,12 +381,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "id",
-                        "name",
-                        "arguments"
-                      ],
+                      "required": ["type", "id", "name", "arguments"],
                       "additionalProperties": false
                     },
                     {
@@ -450,10 +400,7 @@
                           "type": "boolean"
                         }
                       },
-                      "required": [
-                        "type",
-                        "text"
-                      ],
+                      "required": ["type", "text"],
                       "additionalProperties": false
                     }
                   ]
@@ -465,10 +412,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "role",
-          "content"
-        ],
+        "required": ["role", "content"],
         "additionalProperties": false
       }
     },
@@ -511,10 +455,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "text"
-                      ],
+                      "required": ["type", "text"],
                       "additionalProperties": false
                     },
                     {
@@ -530,11 +471,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "data",
-                        "mimeType"
-                      ],
+                      "required": ["type", "data", "mimeType"],
                       "additionalProperties": false
                     },
                     {
@@ -558,12 +495,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "type",
-                        "id",
-                        "name",
-                        "arguments"
-                      ],
+                      "required": ["type", "id", "name", "arguments"],
                       "additionalProperties": false
                     },
                     {
@@ -582,10 +514,7 @@
                           "type": "boolean"
                         }
                       },
-                      "required": [
-                        "type",
-                        "text"
-                      ],
+                      "required": ["type", "text"],
                       "additionalProperties": false
                     }
                   ]
@@ -623,10 +552,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "type",
-                "message"
-              ],
+              "required": ["type", "message"],
               "additionalProperties": false
             }
           },
@@ -673,36 +599,16 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "input",
-                  "output",
-                  "cacheRead",
-                  "cacheWrite",
-                  "total"
-                ],
+                "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
                 "additionalProperties": false
               }
             },
-            "required": [
-              "input",
-              "output",
-              "cacheRead",
-              "cacheWrite",
-              "totalTokens",
-              "cost"
-            ],
+            "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
             "additionalProperties": false
           },
           "stopReason": {
             "type": "string",
-            "enum": [
-              "pending",
-              "stop",
-              "length",
-              "toolUse",
-              "error",
-              "aborted"
-            ]
+            "enum": ["pending", "stop", "length", "toolUse", "error", "aborted"]
           },
           "errorMessage": {
             "type": "string"
@@ -714,11 +620,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "role",
-          "content",
-          "timestamp"
-        ],
+        "required": ["role", "content", "timestamp"],
         "additionalProperties": false
       }
     },
@@ -756,10 +658,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "text"
-                  ],
+                  "required": ["type", "text"],
                   "additionalProperties": false
                 },
                 {
@@ -775,11 +674,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "data",
-                    "mimeType"
-                  ],
+                  "required": ["type", "data", "mimeType"],
                   "additionalProperties": false
                 },
                 {
@@ -803,12 +698,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "id",
-                    "name",
-                    "arguments"
-                  ],
+                  "required": ["type", "id", "name", "arguments"],
                   "additionalProperties": false
                 },
                 {
@@ -827,10 +717,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "type",
-                    "text"
-                  ],
+                  "required": ["type", "text"],
                   "additionalProperties": false
                 }
               ]
@@ -859,12 +746,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "type",
-                "id",
-                "name",
-                "arguments"
-              ],
+              "required": ["type", "id", "name", "arguments"],
               "additionalProperties": false
             }
           },
@@ -872,10 +754,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "role",
-          "content"
-        ],
+        "required": ["role", "content"],
         "additionalProperties": false
       }
     },
@@ -921,10 +800,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "text"
-                  ],
+                  "required": ["type", "text"],
                   "additionalProperties": false
                 },
                 {
@@ -940,11 +816,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "data",
-                    "mimeType"
-                  ],
+                  "required": ["type", "data", "mimeType"],
                   "additionalProperties": false
                 },
                 {
@@ -957,10 +829,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "type",
-                    "text"
-                  ],
+                  "required": ["type", "text"],
                   "additionalProperties": false
                 }
               ]
@@ -1010,24 +879,11 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "input",
-                  "output",
-                  "cacheRead",
-                  "cacheWrite",
-                  "total"
-                ],
+                "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
                 "additionalProperties": false
               }
             },
-            "required": [
-              "input",
-              "output",
-              "cacheRead",
-              "cacheWrite",
-              "totalTokens",
-              "cost"
-            ],
+            "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
             "additionalProperties": false
           },
           "addedToolNames": {
@@ -1043,14 +899,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "role",
-          "toolCallId",
-          "toolName",
-          "content",
-          "isError",
-          "timestamp"
-        ],
+        "required": ["role", "toolCallId", "toolName", "content", "isError", "timestamp"],
         "additionalProperties": false
       }
     },
@@ -1085,9 +934,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "type"
-        ],
+        "required": ["type"],
         "additionalProperties": false
       }
     },
@@ -1119,9 +966,7 @@
             "type": "number"
           }
         },
-        "required": [
-          "type"
-        ],
+        "required": ["type"],
         "additionalProperties": false
       }
     }

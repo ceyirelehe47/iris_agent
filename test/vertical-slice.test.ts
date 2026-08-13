@@ -25,10 +25,7 @@ import {
   derivePairKey,
   encodeInputFrames,
 } from "../src/runtime/companion.js";
-import {
-  reopenActiveSession,
-  sampleAgentInput,
-} from "../src/runtime/vertical-slice.js";
+import { reopenActiveSession, sampleAgentInput } from "../src/runtime/vertical-slice.js";
 import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 /** R3-P1：记录 enqueueIncremental 调用的 mock manager（不触碰真实 freeze/runner）。 */

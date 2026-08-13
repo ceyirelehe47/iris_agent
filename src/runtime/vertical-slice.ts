@@ -8,8 +8,6 @@ import { RuntimeEventLedger } from "./runtime-event-ledger.js";
 import { ContextStore } from "../context/context-store.js";
 import { ContextIngest } from "../context/context-ingest.js";
 import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
-import { createContextHistoryReadPort } from "../context/history-read-port.js";
-import type { HistorianManager } from "../historian/historian-manager.js";
 
 import { type AgentHarnessTool, type Session, type SessionTreeEntry } from "@iris/pi-agent-core";
 import {
@@ -27,14 +25,9 @@ import { acquireDataRootLock } from "../host/lock.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../host/data-root.js";
 import { nodeSqliteRepoEnv } from "./pi-env.js";
 import { RuntimeEpochStore } from "./epoch-manager.js";
-import { encodeInputFrames } from "./companion.js";
 import { createMockProvider } from "./mock-provider.js";
 import { createOpenCodeGoProvider } from "./opencode-go-provider.js";
-import {
-  createIrisHarness,
-  type HarnessObservers,
-  type IrisHarnessCallbacks,
-} from "./harness-factory.js";
+import { createIrisHarness, type HarnessObservers } from "./harness-factory.js";
 
 export interface VerticalSliceResult {
   epochId: string;

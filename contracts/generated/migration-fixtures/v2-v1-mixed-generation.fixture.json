@@ -1,0 +1,47 @@
+{
+  "schemaId": "iris.context_generation.v2",
+  "header": {
+    "schemaId": "iris.context_generation_header.v1",
+    "contextGenerationId": "fixture-gen-mixed-0001",
+    "contextLineageId": "fixture-lineage-v2",
+    "sourceSnapshotHash": "fixture-source-snapshot-v2",
+    "layerEnds": [1, 1, 1, 1, 1, 1],
+    "contextGenerationHash": "7cb3f9c0c767f0dcf7719e2c3291e4a9dff1fab471c13fd8658a79f9c61ff24d",
+    "createdAt": "2026-08-01T00:00:00Z"
+  },
+  "units": [
+    {
+      "schemaId": "iris.context_unit.v2",
+      "header": {
+        "schemaId": "iris.context_unit_header.v1",
+        "contextUnitId": "fixture-unit-p0-0001",
+        "source": {
+          "schemaId": "iris.context_unit_source_ref.v1",
+          "sourceSchemaId": "iris.system_prompt.v1",
+          "sourceId": "system-prompt-v1",
+          "sourceHash": "89ee1e29cfc6b99e9ff025fbf177b2fa7e93f5ee5cbcdf5f0d92342091f57b41"
+        },
+        "semanticSchemaId": "iris.semantic.context_message.user.v1",
+        "contentHash": "89ee1e29cfc6b99e9ff025fbf177b2fa7e93f5ee5cbcdf5f0d92342091f57b41"
+      },
+      "semanticContent": {
+        "role": "user",
+        "content": "fixture p0 system prompt"
+      }
+    },
+    {
+      "schemaId": "iris.context_unit.v1",
+      "contextUnitId": "fixture-unit-v1-mixed",
+      "contextSeq": 2,
+      "kind": "user",
+      "semanticSchemaId": "iris.semantic.context_message.user.v1",
+      "semanticContent": {
+        "role": "user",
+        "content": "mixed v1 member"
+      },
+      "contentHash": "mixed-v1-hash",
+      "lifecycleState": "committed",
+      "createdAt": "2026-08-01T00:00:00Z"
+    }
+  ]
+}

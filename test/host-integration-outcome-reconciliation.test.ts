@@ -439,9 +439,7 @@ test("D5: confirmed_applied — settle without replay (zero provider dispatch)",
     "confirmed_applied must clear the pending fence (replaced by durable resolution)",
   );
   assert.equal(snapshot.exhausted, false, "confirmed_applied is not a failure state");
-  const resolutionStore = new DurableOutcomeResolutionStore(
-    join(dataRoot, "recovery-state.db"),
-  );
+  const resolutionStore = new DurableOutcomeResolutionStore(join(dataRoot, "recovery-state.db"));
   const resolution = resolutionStore.load(logicalExecutionId);
   assert.ok(resolution !== null, "confirmed_applied must persist a durable resolution");
   assert.equal(resolution?.resolution, "confirmed_applied");

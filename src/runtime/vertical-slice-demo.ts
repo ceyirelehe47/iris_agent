@@ -12,7 +12,7 @@ import { createContextHistoryReadPort } from "../context/history-read-port.js";
 import { RuntimeEventLedger } from "./runtime-event-ledger.js";
 import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
 import { encodeInputFrames } from "./companion.js";
-import { createIrisHarness, type HarnessObservers, type IrisHarnessCallbacks } from "./harness-factory.js";
+import { createIrisHarness } from "./harness-factory.js";
 import type { HistorianManager } from "../historian/historian-manager.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { InvocationSourceBinding } from "../contracts/context.js";
@@ -74,7 +74,7 @@ export async function runMinimalSlice(options: {
   input?: AgentInput;
   now?: string;
   provider?: SliceProviderMode;
-  callbacks?: IrisHarnessCallbacks;
+  callbacks?: import("./harness-factory.js").IrisHarnessCallbacks;
   /** R2-P3：ContextStore 的每 session 软 cap（测试注入极小值以在少量单元内触发
    * cap / fail-closed 路径；缺省 = MAX_UNITS_PER_SESSION，硬 cap = 2× 软 cap）。 */
   maxUnitsPerSession?: number;
@@ -202,4 +202,3 @@ export async function runMinimalSlice(options: {
     await lock.release();
   }
 }
-

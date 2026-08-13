@@ -135,6 +135,8 @@ class FakeHarness {
         this.parkedPrompt = { resolve };
       });
     }
+    // Real harness contract: agent_end then settled (C7 #124 binding).
+    this.emit({ type: "agent_end" });
     this.emit({ type: "settled", nextTurnCount: this.promptCalls });
     return { role: "assistant", content: [{ type: "text", text: "ok" }] };
   }
@@ -143,6 +145,7 @@ class FakeHarness {
     // Pi abort contract: abort → native agent_end/settled.
     this.parkedPrompt?.resolve();
     this.parkedPrompt = null;
+    this.emit({ type: "agent_end" });
     this.emit({ type: "settled", nextTurnCount: this.promptCalls });
     return { ok: true };
   }

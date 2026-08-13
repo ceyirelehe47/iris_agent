@@ -393,6 +393,152 @@ const addFormats = require("ajv-formats") as typeof import("ajv-formats").defaul
     await formatJson(JSON.stringify(manifest, null, 2) + "\n"),
   );
 
+  // --- 5. Generate R0 migration fixtures (#123/R0 exit gate) ---
+  // Notion R0: codegen MUST publish a V1→V2 fixture migration or an explicit
+  // V1 rejection fence, and a generation MUST NOT mix V1 and V2 members.
+  // These fixtures are part of the generated release manifest (freshness-gated):
+  //   - v1-flat-generation.fixture.json   superseded flat V1 layout (must be REJECTED)
+  //   - v1-flat-unit.fixture.json         superseded flat V1 unit (must be REJECTED)
+  //   - v2-generation.fixture.json        current structured V2 generation (must PASS)
+  //   - v2-v1-mixed-generation.fixture.json  mixed V1+V2 members (must be REJECTED)
+  const FIXTURE_DIR = path.join(OUTPUT_DIR, "migration-fixtures");
+  fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+
+  const canonicalJson = (value) => {
+    if (value === null) return "null";
+    if (typeof value === "string") return JSON.stringify(value);
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (Array.isArray(value)) {
+      return `[${value.map(canonicalJson).join(",")}]`;
+    }
+    const obj = value;
+    const keys = Object.keys(obj).sort();
+    const pairs = keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`);
+    return `{${pairs.join(",")}}`;
+  };
+  const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+  const semanticHash = (content) => sha256(canonicalJson(content));
+
+  // A static P0 unit (header hash = semantic content hash, like projectStaticUnit).
+  const p0Unit = {
+    schemaId: "iris.context_unit.v2",
+    header: {
+      schemaId: "iris.context_unit_header.v1",
+      contextUnitId: "fixture-unit-p0-0001",
+      source: {
+        schemaId: "iris.context_unit_source_ref.v1",
+        sourceSchemaId: "iris.system_prompt.v1",
+        sourceId: "system-prompt-v1",
+        sourceHash: semanticHash({ role: "user", content: "fixture p0 system prompt" }),
+      },
+      semanticSchemaId: "iris.semantic.context_message.user.v1",
+      contentHash: semanticHash({ role: "user", content: "fixture p0 system prompt" }),
+    },
+    semanticContent: { role: "user", content: "fixture p0 system prompt" },
+  };
+
+  const v2Generation = {
+    schemaId: "iris.context_generation.v2",
+    header: {
+      schemaId: "iris.context_generation_header.v1",
+      contextGenerationId: "fixture-gen-v2-0001",
+      contextLineageId: "fixture-lineage-v2",
+      sourceSnapshotHash: "fixture-source-snapshot-v2",
+      layerEnds: [1, 1, 1, 1, 1, 1],
+      contextGenerationHash: "",
+      createdAt: "2026-08-01T00:00:00Z",
+    },
+    units: [p0Unit],
+  };
+  // contextGenerationHash: canonical basis covers schema id, lineage, source
+  // snapshot, ordered unit identity/content hashes and layerEnds; excludes
+  // the hash field itself and createdAt (equivalent rebuilds verify equal).
+  const genHashInput = {
+    schemaId: v2Generation.schemaId,
+    contextLineageId: v2Generation.header.contextLineageId,
+    sourceSnapshotHash: v2Generation.header.sourceSnapshotHash,
+    units: v2Generation.units,
+    layerEnds: v2Generation.header.layerEnds,
+  };
+  const h = createHash("sha256");
+  h.update(genHashInput.schemaId, "utf8");
+  h.update("\0");
+  h.update(genHashInput.contextLineageId, "utf8");
+  h.update("\0");
+  h.update(genHashInput.sourceSnapshotHash, "utf8");
+  h.update("\0");
+  for (const unit of genHashInput.units) {
+    h.update(unit.header.contextUnitId, "utf8");
+    h.update("\0");
+    h.update(unit.header.semanticSchemaId, "utf8");
+    h.update("\0");
+    h.update(unit.header.contentHash, "utf8");
+    h.update("\0");
+    h.update(unit.header.source.sourceId, "utf8");
+    h.update("\0");
+    h.update(unit.header.source.sourceHash, "utf8");
+    h.update("\0");
+  }
+  h.update(genHashInput.layerEnds.join(","), "utf8");
+  v2Generation.header.contextGenerationHash = h.digest("hex");
+
+  // Superseded flat V1 layouts — current contract is V2; these MUST be
+  // rejected by the V2 validator (explicit V1 rejection fence).
+  const v1FlatGeneration = {
+    schemaId: "iris.context_generation.v1",
+    contextGenerationId: "fixture-gen-v1-0001",
+    contextLineageId: "fixture-lineage-v1",
+    sourceSnapshotHash: "fixture-source-snapshot-v1",
+    // Flat V1 layout: per-layer arrays, no header/layerEnds/units.
+    layers: { p0: [], p1: [], p2: [], p3: [], p4: [], p5: [] },
+    contextGenerationHash: "v1-generation-hash",
+    createdAt: "2026-08-01T00:00:00Z",
+  };
+  const v1FlatUnit = {
+    schemaId: "iris.context_unit.v1",
+    contextUnitId: "fixture-unit-v1-0001",
+    contextSeq: 1,
+    kind: "user",
+    semanticSchemaId: "iris.semantic.context_message.user.v1",
+    semanticContent: { role: "user", content: "v1 flat unit" },
+    contentHash: "v1-content-hash",
+    lifecycleState: "committed",
+    createdAt: "2026-08-01T00:00:00Z",
+  };
+
+  // Forbidden: a V2 generation MUST NOT mix flat V1 members into units[].
+  const v2V1MixedGeneration = {
+    ...v2Generation,
+    header: { ...v2Generation.header, contextGenerationId: "fixture-gen-mixed-0001" },
+    units: [
+      p0Unit,
+      {
+        schemaId: "iris.context_unit.v1",
+        contextUnitId: "fixture-unit-v1-mixed",
+        contextSeq: 2,
+        kind: "user",
+        semanticSchemaId: "iris.semantic.context_message.user.v1",
+        semanticContent: { role: "user", content: "mixed v1 member" },
+        contentHash: "mixed-v1-hash",
+        lifecycleState: "committed",
+        createdAt: "2026-08-01T00:00:00Z",
+      },
+    ],
+  };
+
+  const fixtures = {
+    "v1-flat-generation.fixture.json": v1FlatGeneration,
+    "v1-flat-unit.fixture.json": v1FlatUnit,
+    "v2-generation.fixture.json": v2Generation,
+    "v2-v1-mixed-generation.fixture.json": v2V1MixedGeneration,
+  };
+  for (const [fileName, fixture] of Object.entries(fixtures)) {
+    fs.writeFileSync(
+      path.join(FIXTURE_DIR, fileName),
+      await formatJson(JSON.stringify(fixture, null, 2) + "\n"),
+    );
+  }
+
   // --- Summary ---
   console.log("Codegen complete:");
   console.log(`  Schemas: ${jsonSchemaFiles.length} + ${semanticSchemaFiles.length} semantic`);

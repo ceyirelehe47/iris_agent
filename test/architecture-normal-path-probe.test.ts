@@ -194,10 +194,7 @@ test("Round 7 #123: key legacy modules are unreachable from production", () => {
     "src/runtime/vertical-slice-demo.ts",
   ]) {
     const abs = path.join(REPO_ROOT, rel);
-    assert.ok(
-      !reachable.has(abs),
-      `${rel} must not be reachable from production roots (#123)`,
-    );
+    assert.ok(!reachable.has(abs), `${rel} must not be reachable from production roots (#123)`);
   }
 });
 
