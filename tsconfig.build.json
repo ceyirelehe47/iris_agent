@@ -5,8 +5,5 @@
     "declaration": true,
     "sourceMap": true
   },
-  "include": [
-    "src/**/*.ts",
-    "contracts/generated/**/*.ts"
-  ]
+  "include": ["src/**/*.ts", "contracts/generated/**/*.ts"]
 }
