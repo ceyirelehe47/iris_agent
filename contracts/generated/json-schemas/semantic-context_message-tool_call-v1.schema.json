@@ -30,23 +30,15 @@
               },
               "arguments": {}
             },
-            "required": [
-              "name"
-            ],
+            "required": ["name"],
             "additionalProperties": true
           }
         },
-        "required": [
-          "id",
-          "type",
-          "function"
-        ],
+        "required": ["id", "type", "function"],
         "additionalProperties": true
       }
     }
   },
-  "required": [
-    "role"
-  ],
+  "required": ["role"],
   "additionalProperties": true
 }

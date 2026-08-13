@@ -12,8 +12,6 @@
       "minLength": 1
     }
   },
-  "required": [
-    "role"
-  ],
+  "required": ["role"],
   "additionalProperties": true
 }

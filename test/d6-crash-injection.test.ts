@@ -17,153 +17,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 
-interface CrashWorkerResult {
-  ok: boolean;
-  error?: string;
-  data?: unknown;
-}
-
-/**
- * Run the crash worker script in a subprocess, simulating a process crash.
- * The worker persists state, then "crashes" (exits) before reconciliation.
- */
-function runCrashWorker(
-  dbPath: string,
-  action: string,
-  options?: { reconcilerResult?: string },
-): CrashWorkerResult {
-  const args = [
-    "--import",
-    "tsx",
-    "-e",
-    `
-    import { RecoveryStateStore, DurableOutcomeResolutionStore, freshRecoveryState, logicalExecutionIdFor } from "${REPO_ROOT}/src/runtime/recovery-state.js";
-    import { migrateDatabase } from "${REPO_ROOT}/src/db/migrate.js";
-
-    const dbPath = process.argv[2];
-    const action = process.argv[3];
-    const reconcilerResult = process.argv[4] || 'ambiguous';
-
-    const epoch = 1;
-    const inputId = 'test-input-001';
-    const logicalExecId = logicalExecutionIdFor(epoch, inputId);
-    const dispatchId = 'invocation-test-input-001';
-
-    // Ensure migrations are applied
-    const recoveryDbDir = path.dirname(dbPath);
-    migrateDatabase(path.join(recoveryDbDir, 'recovery'), dbPath.replace(/\\.db$/, '_recovery.db'));
-
-    const store = new RecoveryStateStore(dbPath);
-    const resolutionStore = new DurableOutcomeResolutionStore(dbPath.replace(/\\.db$/, '_recovery.db'));
-
-    if (action === 'crash-before-reconcile') {
-      // Simulate: dispatch reached possibly-accepted state, persist pending
-      const state = freshRecoveryState(logicalExecId, new Date().toISOString());
-      state.pendingOutcomeUnknown = {
-        dispatchId,
-        logicalExecutionId: logicalExecId,
-        inputId,
-        model: 'test-model',
-        occurredAt: new Date().toISOString(),
-      };
-      state.outcomeUnknown = 1;
-      store.save(state);
-      // CRASH: exit without reconciling
-      process.exit(0);
-    }
-
-    if (action === 'restart-reconcile') {
-      // Simulate: restart, load pending, reconcile, persist resolution
-      const state = store.load(logicalExecId);
-      if (!state) {
-        console.log(JSON.stringify({ ok: false, error: 'no state found' }));
-        process.exit(1);
-      }
-      if (!state.pendingOutcomeUnknown) {
-        console.log(JSON.stringify({ ok: false, error: 'no pending outcome unknown' }));
-        process.exit(1);
-      }
-
-      // Verify identity preservation
-      if (state.pendingOutcomeUnknown.dispatchId !== dispatchId) {
-        console.log(JSON.stringify({ ok: false, error: 'dispatchId mismatch' }));
-        process.exit(1);
-      }
-      if (state.pendingOutcomeUnknown.inputId !== inputId) {
-        console.log(JSON.stringify({ ok: false, error: 'inputId mismatch' }));
-        process.exit(1);
-      }
-
-      if (reconcilerResult === 'confirmed_applied') {
-        // Persist durable resolution
-        resolutionStore.save({
-          logicalExecutionId: logicalExecId,
-          inputId,
-          dispatchId,
-          resolution: 'confirmed_applied',
-          evidenceSource: 'pi_session',
-          evidenceRef: 'receipt-hash-test-001',
-          resolvedAt: new Date().toISOString(),
-        });
-        // Clear pending
-        state.pendingOutcomeUnknown = null;
-        store.save(state);
-        console.log(JSON.stringify({ ok: true, data: { resolution: 'confirmed_applied' } }));
-      } else if (reconcilerResult === 'replay_safe') {
-        state.pendingOutcomeUnknown = null;
-        store.save(state);
-        console.log(JSON.stringify({ ok: true, data: { resolution: 'replay_safe' } }));
-      } else {
-        // ambiguous: keep pending, set exhausted
-        state.exhausted = true;
-        store.save(state);
-        console.log(JSON.stringify({ ok: true, data: { resolution: 'ambiguous' } }));
-      }
-      process.exit(0);
-    }
-
-    if (action === 'restart-verify-resolution') {
-      // On second restart, check if durable resolution exists
-      const resolution = resolutionStore.load(logicalExecId);
-      if (resolution) {
-        console.log(JSON.stringify({ ok: true, data: { hasResolution: true, resolution } }));
-      } else {
-        const state = store.load(logicalExecId);
-        console.log(JSON.stringify({ ok: true, data: { hasResolution: false, pending: !!state?.pendingOutcomeUnknown, exhausted: state?.exhausted } }));
-      }
-      process.exit(0);
-    }
-    `,
-    "--",
-    dbPath,
-    action,
-    options?.reconcilerResult || "ambiguous",
-  ];
-
-  try {
-    // Actually we can't use -e with tsx easily. Instead, write a temp script.
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "subprocess failed" };
-  }
-}
+// NOTE: Round 7 replaces this with a REAL subprocess crash worker (see #125).
+// The previous `runCrashWorker` here returned {ok:true} without ever spawning
+// a subprocess — that was non-behavioral and is removed until D7 lands.
 
 test("D6: durable outcome resolution — confirmed_applied persists across restart", async () => {
   const tmpDir = fs.mkdtempSync("/tmp/iris-d6-test-");
   const dbPath = path.join(tmpDir, "recovery.db");
-  
+
   try {
     // We'll test the DurableOutcomeResolutionStore directly since the
     // subprocess approach needs a proper worker script file.
     // The crash injection pattern is: persist pending → crash → restart → reconcile → persist resolution → restart → verify
 
     // Import directly (simulating what a subprocess would do)
-    const { RecoveryStateStore, DurableOutcomeResolutionStore, freshRecoveryState, logicalExecutionIdFor } =
-      await import("../src/runtime/recovery-state.js");
+    const {
+      RecoveryStateStore,
+      DurableOutcomeResolutionStore,
+      freshRecoveryState,
+      logicalExecutionIdFor,
+    } = await import("../src/runtime/recovery-state.js");
     const { migrateDatabase } = await import("../src/db/migrate.js");
 
     // Apply migrations
@@ -205,7 +81,11 @@ test("D6: durable outcome resolution — confirmed_applied persists across resta
       // Verify identity preservation across restart
       assert.equal(state.pendingOutcomeUnknown.dispatchId, dispatchId, "dispatchId identical");
       assert.equal(state.pendingOutcomeUnknown.inputId, inputId, "inputId identical");
-      assert.equal(state.pendingOutcomeUnknown.logicalExecutionId, logicalExecId, "logicalExecutionId identical");
+      assert.equal(
+        state.pendingOutcomeUnknown.logicalExecutionId,
+        logicalExecId,
+        "logicalExecutionId identical",
+      );
 
       // Reconcile → confirmed_applied
       // Persist durable resolution
@@ -250,10 +130,14 @@ test("D6: durable outcome resolution — confirmed_applied persists across resta
 test("D6: ambiguous resolution keeps pending and sets exhausted (fail-closed)", async () => {
   const tmpDir = fs.mkdtempSync("/tmp/iris-d6-ambig-");
   const dbPath = path.join(tmpDir, "recovery.db");
-  
+
   try {
-    const { RecoveryStateStore, DurableOutcomeResolutionStore, freshRecoveryState, logicalExecutionIdFor } =
-      await import("../src/runtime/recovery-state.js");
+    const {
+      RecoveryStateStore,
+      DurableOutcomeResolutionStore,
+      freshRecoveryState,
+      logicalExecutionIdFor,
+    } = await import("../src/runtime/recovery-state.js");
     const { migrateDatabase } = await import("../src/db/migrate.js");
 
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -308,9 +192,9 @@ test("D6: ambiguous resolution keeps pending and sets exhausted (fail-closed)", 
 test("D6: replay_safe clears pending and allows bounded replay", async () => {
   const tmpDir = fs.mkdtempSync("/tmp/iris-d6-replay-");
   const dbPath = path.join(tmpDir, "recovery.db");
-  
+
   try {
-    const { RecoveryStateStore, DurableOutcomeResolutionStore, freshRecoveryState, logicalExecutionIdFor } =
+    const { RecoveryStateStore, freshRecoveryState, logicalExecutionIdFor } =
       await import("../src/runtime/recovery-state.js");
     const { migrateDatabase } = await import("../src/db/migrate.js");
 

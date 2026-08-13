@@ -23,11 +23,6 @@
       "minLength": 1
     }
   },
-  "required": [
-    "schemaId",
-    "sourceSchemaId",
-    "sourceId",
-    "sourceHash"
-  ],
+  "required": ["schemaId", "sourceSchemaId", "sourceId", "sourceHash"],
   "additionalProperties": false
 }

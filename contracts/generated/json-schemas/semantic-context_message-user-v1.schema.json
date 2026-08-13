@@ -5,18 +5,12 @@
   "properties": {
     "role": {
       "type": "string",
-      "enum": [
-        "user",
-        "custom"
-      ]
+      "enum": ["user", "custom"]
     },
     "content": {
       "type": "string"
     }
   },
-  "required": [
-    "role",
-    "content"
-  ],
+  "required": ["role", "content"],
   "additionalProperties": true
 }

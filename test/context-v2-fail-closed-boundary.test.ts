@@ -90,11 +90,17 @@ test("B1b: user.v1 validates proper role+content objects", () => {
   // user.v1 requires {role, content} — a valid payload passes.
   const unit = makeValidUnit("u1", { role: "user", content: "test content" });
   const unitResult = validateUnitV2Strict(unit);
-  assert.ok(unitResult.valid, `valid user.v1 payload must pass unit validation: ${unitResult.reason}`);
+  assert.ok(
+    unitResult.valid,
+    `valid user.v1 payload must pass unit validation: ${unitResult.reason}`,
+  );
 
   const gen = makeValidGeneration([unit]);
   const genResult = validateGenerationV2Strict(gen);
-  assert.ok(genResult.valid, `valid user.v1 payload must pass generation validation: ${genResult.reason}`);
+  assert.ok(
+    genResult.valid,
+    `valid user.v1 payload must pass generation validation: ${genResult.reason}`,
+  );
 });
 
 test("B2: schemaId tag alone does NOT establish validity", () => {

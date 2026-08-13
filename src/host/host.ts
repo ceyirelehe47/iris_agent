@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { Session } from "@iris/pi-agent-core";
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";

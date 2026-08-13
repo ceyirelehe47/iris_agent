@@ -21,10 +21,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";

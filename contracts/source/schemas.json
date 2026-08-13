@@ -76,9 +76,18 @@
         "createdAt": { "type": "string", "minLength": 1 }
       },
       "required": [
-        "schemaId", "contextUnitId", "contextLineageId", "contextSeq",
-        "runtimeEventId", "kind", "semanticSchemaId", "semanticContent",
-        "historianDisposition", "contentHash", "lifecycleState", "createdAt"
+        "schemaId",
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "kind",
+        "semanticSchemaId",
+        "semanticContent",
+        "historianDisposition",
+        "contentHash",
+        "lifecycleState",
+        "createdAt"
       ],
       "additionalProperties": false
     },
@@ -133,8 +142,13 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": [
-        "schemaId", "contextGenerationId", "contextLineageId", "sourceSnapshotHash",
-        "layerEnds", "contextGenerationHash", "createdAt"
+        "schemaId",
+        "contextGenerationId",
+        "contextLineageId",
+        "sourceSnapshotHash",
+        "layerEnds",
+        "contextGenerationHash",
+        "createdAt"
       ],
       "additionalProperties": false
     },
@@ -155,9 +169,17 @@
   "semanticSchemas": {
     "iris.semantic.context_message.user.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "runtimeEventId",
-        "semanticSchemaId", "contentHash", "lifecycleState", "historianDisposition",
-        "layer", "pLevel", "sourceKind"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
@@ -171,9 +193,17 @@
     },
     "iris.semantic.context_message.assistant.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "runtimeEventId",
-        "semanticSchemaId", "contentHash", "lifecycleState", "historianDisposition",
-        "layer", "pLevel", "sourceKind"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
@@ -187,8 +217,13 @@
     },
     "iris.semantic.context_message.tool_call.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "semanticSchemaId",
+        "contentHash",
+        "layer",
+        "pLevel"
       ],
       "schema": {
         "type": "object",
@@ -223,8 +258,13 @@
     },
     "iris.semantic.context_message.tool_result.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "semanticSchemaId",
+        "contentHash",
+        "layer",
+        "pLevel"
       ],
       "schema": {
         "type": "object",
@@ -239,8 +279,13 @@
     },
     "iris.semantic.context_message.body_event.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "semanticSchemaId",
+        "contentHash",
+        "layer",
+        "pLevel"
       ],
       "schema": {
         "type": "object",
@@ -254,8 +299,13 @@
     },
     "iris.semantic.context_message.operational.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "semanticSchemaId",
+        "contentHash",
+        "layer",
+        "pLevel"
       ],
       "schema": {
         "type": "object",

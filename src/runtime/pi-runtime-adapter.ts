@@ -284,7 +284,9 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
     await Promise.race([
       receipt,
       new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error(`native settlement timeout for ${invocationId} after ${timeoutMs}ms`)), timeoutMs);
+        setTimeout(() => {
+          reject(new Error(`native settlement timeout for ${invocationId} after ${timeoutMs}ms`));
+        }, timeoutMs);
       }),
     ]);
   }

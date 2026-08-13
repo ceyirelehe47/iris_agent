@@ -87,9 +87,7 @@ test("Round 6: pass-taxonomy is not imported by production runtime", () => {
     const relPath = path.relative(REPO_ROOT, file);
     if (relPath.includes("pass-taxonomy")) continue;
     if (code.includes("pass-taxonomy")) {
-      assert.fail(
-        `${relPath} imports pass-taxonomy — prohibited per current Notion.`,
-      );
+      assert.fail(`${relPath} imports pass-taxonomy — prohibited per current Notion.`);
     }
   }
 });
@@ -100,9 +98,7 @@ test("Round 6: LKG modules not imported by production runtime", () => {
     const relPath = path.relative(REPO_ROOT, file);
     if (relPath.includes("lkg")) continue;
     if (code.includes("/lkg") || code.includes('"./lkg')) {
-      assert.fail(
-        `${relPath} imports LKG — prohibited per current Notion.`,
-      );
+      assert.fail(`${relPath} imports LKG — prohibited per current Notion.`);
     }
   }
 });
@@ -113,7 +109,7 @@ test("Round 6: no handwritten duplicate ContextMessageUnitV1 interface", () => {
     if (relPath === "src/contracts/context-v27.ts") continue;
     if (relPath.includes("generated/")) continue;
     assert.ok(
-      !code.match(/export\s+interface\s+ContextMessageUnitV1\b/),
+      !/export\s+interface\s+ContextMessageUnitV1\b/.exec(code),
       `${relPath} defines handwritten ContextMessageUnitV1 — only generated/types.ts may define this.`,
     );
   }
@@ -132,6 +128,12 @@ test("Round 6: no semantic escape hatch in production", () => {
 test("Round 6: generated contract artifacts exist", () => {
   const genDir = path.join(REPO_ROOT, "contracts", "generated");
   assert.ok(fs.existsSync(path.join(genDir, "types.ts")), "generated/types.ts must exist");
-  assert.ok(fs.existsSync(path.join(genDir, "validators.ts")), "generated/validators.ts must exist");
-  assert.ok(fs.existsSync(path.join(genDir, "registry.json")), "generated/registry.json must exist");
+  assert.ok(
+    fs.existsSync(path.join(genDir, "validators.ts")),
+    "generated/validators.ts must exist",
+  );
+  assert.ok(
+    fs.existsSync(path.join(genDir, "registry.json")),
+    "generated/registry.json must exist",
+  );
 });

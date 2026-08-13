@@ -13,20 +13,30 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type RuntimeEventKind = "user" | "assistant" | "tool_call" | "tool_result" | "body_event" | "operational";
+export type RuntimeEventKind =
+  "user" | "assistant" | "tool_call" | "tool_result" | "body_event" | "operational";
 
 export type HistorianDisposition = "include" | "reference_only" | "exclude";
 
-export type ContextMessageUnitLifecycleState = "committed" | "historian_eligible" | "historian_claimed" | "compartmentalized_pending_bust" | "represented_in_p3" | "retired" | "legacy_committed_unknown";
+export type ContextMessageUnitLifecycleState =
+  | "committed"
+  | "historian_eligible"
+  | "historian_claimed"
+  | "compartmentalized_pending_bust"
+  | "represented_in_p3"
+  | "retired"
+  | "legacy_committed_unknown";
 
 // --- Schema ID constants ---
 export const IRIS_RAW_ARCHIVE_REF_V1_SCHEMA_ID = "iris.raw_archive_ref.v1" as const;
-export const IRIS_SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID = "iris.semantic_derivation_refs.v1" as const;
+export const IRIS_SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID =
+  "iris.semantic_derivation_refs.v1" as const;
 export const IRIS_CONTEXT_MESSAGE_UNIT_V1_SCHEMA_ID = "iris.context_message_unit.v1" as const;
 export const IRIS_CONTEXT_UNIT_SOURCE_REF_V1_SCHEMA_ID = "iris.context_unit_source_ref.v1" as const;
 export const IRIS_CONTEXT_UNIT_HEADER_V1_SCHEMA_ID = "iris.context_unit_header.v1" as const;
 export const IRIS_CONTEXT_UNIT_V2_SCHEMA_ID = "iris.context_unit.v2" as const;
-export const IRIS_CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID = "iris.context_generation_header.v1" as const;
+export const IRIS_CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID =
+  "iris.context_generation_header.v1" as const;
 export const IRIS_CONTEXT_GENERATION_V2_SCHEMA_ID = "iris.context_generation.v2" as const;
 
 // --- Semantic schema IDs ---
@@ -122,4 +132,3 @@ export interface ContextGenerationV2 {
   readonly header: ContextGenerationHeaderV1;
   readonly units: readonly ContextUnitV2[];
 }
-

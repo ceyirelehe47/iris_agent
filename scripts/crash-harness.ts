@@ -18,10 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";

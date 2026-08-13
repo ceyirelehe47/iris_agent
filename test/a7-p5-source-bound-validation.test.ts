@@ -23,7 +23,6 @@ import {
   CONTEXT_GENERATION_HEADER_V1_SCHEMA_ID,
   CONTEXT_MESSAGE_UNIT_V1_SCHEMA_ID,
   KIND_TO_SEMANTIC_SCHEMA_ID,
-  computeSemanticContentHash,
   computeContextGenerationHash,
   computeContextMessageUnitContentHashV1,
   validateGenerationV2Strict,

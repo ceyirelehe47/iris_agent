@@ -17,11 +17,7 @@ import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
 import { createContextHistoryReadPort } from "../context/history-read-port.js";
 import type { HistorianManager } from "../historian/historian-manager.js";
 
-import {
-  type AgentHarnessTool,
-  type Session,
-  type SessionTreeEntry,
-} from "@iris/pi-agent-core";
+import { type AgentHarnessTool, type Session, type SessionTreeEntry } from "@iris/pi-agent-core";
 import {
   createNodeSqliteFactory,
   SqliteSessionRepository,

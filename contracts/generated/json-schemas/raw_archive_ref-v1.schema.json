@@ -33,9 +33,6 @@
       }
     }
   },
-  "required": [
-    "schemaId",
-    "runtimeSessionId"
-  ],
+  "required": ["schemaId", "runtimeSessionId"],
   "additionalProperties": false
 }
