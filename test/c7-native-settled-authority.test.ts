@@ -413,6 +413,32 @@ test("C7 case 4: a late settled broadcast cannot resolve invocation B's receipt"
 });
 
 // ---------------------------------------------------------------------------
+// Case 7: abort with NO receipt (run already ended) must throw
+// ---------------------------------------------------------------------------
+
+test("C7 case 7: abort after the run ended (receipt null) must throw — no authorization without a bound receipt", async () => {
+  const liveness = freshLiveness();
+  const { adapter, input } = await buildStack({ liveness });
+  // Run A to completion: the adapter's settlement receipt is consumed and
+  // cleared in prompt()'s finally — abort afterwards has NO receipt to wait
+  // on, so it MUST NOT succeed (the Round-6 `receipt === null → return`
+  // path is gone).
+  const events: string[] = [];
+  for await (const event of adapter.prompt(input)) {
+    events.push(event.type);
+    if (event.type === "settled") {
+      break;
+    }
+  }
+  assert.ok(events.includes("settled"), "A must settle natively");
+  await assert.rejects(
+    adapter.abort("invocation-input-0001"),
+    /no native settlement proof/,
+    "abort without an exact native settled receipt must throw (fail closed)",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Case 5: abort → exact invocation native settled → fallback exactly once
 // ---------------------------------------------------------------------------
 

@@ -35,7 +35,16 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot } from "../src/host/data-root.js";
-import { DurableOutcomeResolutionStore } from "../src/runtime/recovery-state.js";
+import {
+  DurableOutcomeResolutionStore,
+  defaultFallbackConfig,
+  freshRecoveryState,
+  RecoveryStateStore,
+} from "../src/runtime/recovery-state.js";
+import { RecoverySupervisor } from "../src/runtime/recovery-supervisor.js";
+import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
+import type { AgentRuntimeEvent, AgentRuntimePort } from "../src/contracts/ports.js";
+import type { AgentRuntimePhase } from "../src/contracts/runtime-ports.js";
 
 const WORKER = join(import.meta.dirname, "..", "scripts", "d7-recovery-worker.ts");
 
@@ -192,8 +201,92 @@ test("D7: crash → restart (replay_safe) authorizes exactly one replay, then se
 });
 
 // ---------------------------------------------------------------------------
-// ambiguous: zero replay, repeated restarts still zero replay
+// Durable resolution read guard: even when a pending record is (incorrectly)
+// still present on restart, a durable confirmed_applied resolution MUST
+// short-circuit dispatch and reconciliation (zero replay, zero re-query).
 // ---------------------------------------------------------------------------
+
+test("D7: durable confirmed_applied resolution short-circuits dispatch even with a stale pending record", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "iris-d7-guard-"));
+  const config = defaultAgentConfig();
+  const input = sampleAgentInput();
+  const logicalExecutionId = "logical-exec-1:input-0001";
+  const resolutionStore = new DurableOutcomeResolutionStore(join(dir, "recovery-state.db"));
+  // The store shares the recovery DB, which is migrated by RecoveryStateStore
+  // (production order: recoveryStore first, then resolutionStore).
+  const migrator = new RecoveryStateStore(join(dir, "recovery-state.db"));
+  migrator.close();
+  try {
+    resolutionStore.save({
+      logicalExecutionId,
+      inputId: input.inputId,
+      dispatchId: "invocation-input-0001",
+      resolution: "confirmed_applied",
+      evidenceSource: "outcome_reconciler",
+      evidenceRef: "reconciled:invocation-input-0001",
+      resolvedAt: new Date().toISOString(),
+    });
+
+    // Production supervisor + REAL SQLite resolution store. A stale pending
+    // record is injected as the initialState (double-fault window: pending
+    // persisted AND resolution written). The runtime stub only OBSERVES —
+    // the durable resolution must short-circuit before any dispatch.
+    let dispatchCalls = 0;
+    const runtime: AgentRuntimePort = {
+      async *prompt(): AsyncIterable<AgentRuntimeEvent> {
+        dispatchCalls += 1;
+        yield { type: "settled", invocationId: "invocation-input-0001", nextTurnCount: 0 };
+      },
+      async abort(): Promise<void> {
+        return undefined;
+      },
+      getPhase(): AgentRuntimePhase {
+        return "idle";
+      },
+    };
+    const reconcilerCalls: string[] = [];
+    const supervisor = new RecoverySupervisor({
+      runtime,
+      config: {
+        ...defaultFallbackConfig(["mock-iris/mock-deepseek-v4-flash"]),
+        fallbackNoProgressTimeoutMs: 1000,
+        abortSettlementTimeoutMs: 500,
+      },
+      resolutionStore,
+      reconcileOutcomeUnknown: async (signal) => {
+        reconcilerCalls.push(signal.dispatchId ?? "unknown");
+        return "ambiguous";
+      },
+    });
+    const stale = freshRecoveryState(logicalExecutionId, new Date().toISOString());
+    stale.pendingOutcomeUnknown = {
+      dispatchId: "invocation-input-0001",
+      logicalExecutionId,
+      inputId: input.inputId,
+      model: "mock-iris/mock-deepseek-v4-flash",
+      occurredAt: new Date().toISOString(),
+    };
+    const events: string[] = [];
+    for await (const event of supervisor.prompt(input, {
+      initialState: stale,
+      logicalExecutionId,
+    })) {
+      events.push(event.type);
+    }
+    assert.equal(
+      reconcilerCalls.length,
+      0,
+      "durable confirmed_applied must be read BEFORE any reconciliation — zero re-query",
+    );
+    assert.equal(
+      dispatchCalls,
+      0,
+      "durable confirmed_applied → zero replay (no provider dispatch)",
+    );
+  } finally {
+    resolutionStore.close();
+  }
+});
 
 test("D7: crash → restart (ambiguous) → zero replay; second restart still zero replay", async () => {
   const ctx = makeCtx();
