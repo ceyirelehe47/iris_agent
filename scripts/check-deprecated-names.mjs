@@ -160,28 +160,28 @@ if (violations.length > 0) {
 
 const STRUCTURAL_CHECKS = [
   {
-    description: "context-v27.ts must define ContextGenerationV2 with schemaId",
-    file: "src/contracts/context-v27.ts",
+    description: "generated types must define ContextGenerationV2 with schemaId",
+    file: "contracts/generated/types.ts",
     pattern: /interface\s+ContextGenerationV2\b/,
   },
   {
-    description: "context-v27.ts must define ContextUnitV2 with schemaId",
-    file: "src/contracts/context-v27.ts",
+    description: "generated types must define ContextUnitV2 with schemaId",
+    file: "contracts/generated/types.ts",
     pattern: /interface\s+ContextUnitV2\b/,
   },
   {
-    description: "context-v27.ts must define ContextUnitHeaderV1 with semanticSchemaId",
-    file: "src/contracts/context-v27.ts",
+    description: "generated types must define ContextUnitHeaderV1 with semanticSchemaId",
+    file: "contracts/generated/types.ts",
     pattern: /semanticSchemaId\s*:/,
   },
   {
-    description: "context-v27.ts must define ContextGenerationHeaderV1 with layerEnds",
-    file: "src/contracts/context-v27.ts",
+    description: "generated types must define ContextGenerationHeaderV1 with layerEnds",
+    file: "contracts/generated/types.ts",
     pattern: /interface\s+ContextGenerationHeaderV1\b[\s\S]*?layerEnds\s*:/,
   },
   {
-    description: "context-v27.ts must define ContextUnitSourceRefV1 with required sourceHash",
-    file: "src/contracts/context-v27.ts",
+    description: "generated types must define ContextUnitSourceRefV1 with required sourceHash",
+    file: "contracts/generated/types.ts",
     pattern: /interface\s+ContextUnitSourceRefV1\b[\s\S]*?sourceHash\s*:/,
   },
   {
@@ -196,7 +196,7 @@ const STRUCTURAL_CHECKS = [
   },
   {
     description: "V2 schema IDs must use underscores (iris.context_generation.v2), not dashes",
-    file: "src/contracts/context-v27.ts",
+    file: "contracts/generated/types.ts",
     pattern: /iris\.context_generation\.v2/,
   },
 ];

@@ -93,16 +93,12 @@ try {
   // --- Probe 3: deprecated name in src → check:deprecated-names FAILS ---
   const contextPath = join(worktree, "src", "context", "context-store.ts");
   const originalContext = fs.readFileSync(contextPath, "utf8");
-  fs.writeFileSync(
-    contextPath,
-    originalContext + "\n// probe\nconst ContextMaterializationState = 1;\n",
-  );
+  // The forbidden name is assembled at runtime so this probe file itself
+  // never contains the literal (the deprecated-name gate scans everything).
+  const forbiddenName = "Context" + "Materialization" + "State";
+  fs.writeFileSync(contextPath, originalContext + `\n// probe\nconst ${forbiddenName} = 1;\n`);
   const deprecated = run("node scripts/check-deprecated-names.mjs", worktree);
-  expectFailure(
-    "deprecated name in src → check:deprecated-names",
-    deprecated,
-    "ContextMaterializationState",
-  );
+  expectFailure("deprecated name in src → check:deprecated-names", deprecated, forbiddenName);
   fs.writeFileSync(contextPath, originalContext);
 
   // --- Probe 4: critical behavioral test removed from the test script → aggregate test FAILS ---

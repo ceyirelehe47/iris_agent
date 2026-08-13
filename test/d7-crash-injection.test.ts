@@ -208,7 +208,6 @@ test("D7: crash → restart (replay_safe) authorizes exactly one replay, then se
 
 test("D7: durable confirmed_applied resolution short-circuits dispatch even with a stale pending record", async () => {
   const dir = mkdtempSync(join(tmpdir(), "iris-d7-guard-"));
-  const config = defaultAgentConfig();
   const input = sampleAgentInput();
   const logicalExecutionId = "logical-exec-1:input-0001";
   const resolutionStore = new DurableOutcomeResolutionStore(join(dir, "recovery-state.db"));
