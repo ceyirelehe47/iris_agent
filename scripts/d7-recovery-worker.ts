@@ -95,8 +95,8 @@ async function main(): Promise<void> {
         outcomeReconciler: reconciler,
       });
       host.onEvent((e) => {
-      append(eventFilePath, `event:${e.type}`);
-    });
+        append(eventFilePath, `event:${e.type}`);
+      });
       const pump = host.run();
       // Let the production recovery path run to completion (startup
       // reconciliation + any authorized replay) before shutdown.

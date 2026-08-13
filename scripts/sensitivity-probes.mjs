@@ -120,6 +120,51 @@ try {
   pkg.scripts.test = originalTest;
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 
+  // --- Probe 5: disable projectP5Unit's authoritative hash validation → A7 tamper tests FAIL ---
+  const builderPath = join(worktree, "src", "context", "generation-builder.ts");
+  const originalBuilder = fs.readFileSync(builderPath, "utf8");
+  fs.writeFileSync(
+    builderPath,
+    originalBuilder.replace(
+      "if (recomputedHash !== cmu.contentHash) {",
+      "if (false && recomputedHash !== cmu.contentHash) {",
+    ),
+  );
+  const a7Tamper = run("npx tsx --test test/a7-p5-source-bound-validation.test.ts", worktree);
+  expectFailure("disabling projectP5Unit hash validation → A7 tamper tests", a7Tamper);
+  fs.writeFileSync(builderPath, originalBuilder);
+
+  // --- Probe 6: restore the Round-6 `receipt === null → return` abort success
+  // path → C7 native-settled authority tests FAIL ---
+  const adapterPath = join(worktree, "src", "runtime", "pi-runtime-adapter.ts");
+  const originalAdapter = fs.readFileSync(adapterPath, "utf8");
+  fs.writeFileSync(
+    adapterPath,
+    originalAdapter.replace(
+      "if (receipt === null) {\n      throw new Error(",
+      "if (receipt === null) {\n      // SENSITIVITY PROBE: broken abort-success path\n      return;\n      throw new Error(",
+    ),
+  );
+  const c7 = run("npx tsx --test test/c7-native-settled-authority.test.ts", worktree);
+  // The broken path (receipt null → return) means case 1's abort no longer
+  // fails closed → the test must fail.
+  expectFailure("restoring receipt-null abort success → C7 authority tests", c7);
+  fs.writeFileSync(adapterPath, originalAdapter);
+
+  // --- Probe 7: disable the durable resolution read at restart → D7 zero-re-query tests FAIL ---
+  const supervisorPath = join(worktree, "src", "runtime", "recovery-supervisor.ts");
+  const originalSupervisor = fs.readFileSync(supervisorPath, "utf8");
+  fs.writeFileSync(
+    supervisorPath,
+    originalSupervisor.replace(
+      "const durableResolution = this.resolutionStore?.load(logicalExecutionId);",
+      "const durableResolution = undefined; // SENSITIVITY PROBE: resolution read disabled",
+    ),
+  );
+  const d7 = run("npx tsx --test test/d7-crash-injection.test.ts", worktree);
+  expectFailure("disabling durable resolution read → D7 restart tests", d7);
+  fs.writeFileSync(supervisorPath, originalSupervisor);
+
   console.log(
     process.exitCode === 1
       ? "SENSITIVITY PROBES: FAILED"
