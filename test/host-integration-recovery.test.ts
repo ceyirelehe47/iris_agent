@@ -13,7 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { resolveFallbackModel } from "../src/runtime/runtime-coordinator.js";
 import { RecoveryStateStore, type RecoveryStateSnapshot } from "../src/runtime/recovery-state.js";
 import type { PendingOutcomeUnknown } from "../src/runtime/recovery-state.js";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@iris/pi-ai";
 
 // ---------------------------------------------------------------------------
 // Helper: create a Model with provider+id

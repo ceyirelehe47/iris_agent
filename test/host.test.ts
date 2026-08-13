@@ -471,7 +471,7 @@ test("IrisHost: A5 — active Epoch with missing Session is not-ready/corrupt", 
   );
   // The lock was released by the failed startup (re-openable after repair).
   const { SqliteSessionRepository, createNodeSqliteFactory } =
-    await import("@earendil-works/pi-storage-sqlite-node");
+    await import("@iris/pi-storage-sqlite-node");
   const { nodeSqliteRepoEnv } = await import("../src/runtime/pi-env.js");
   const repo = new SqliteSessionRepository({
     env: nodeSqliteRepoEnv(dataRoot),

@@ -1,6 +1,7 @@
+// MIGRATION ONLY — Not part of current production Context path per Notion v27.
 import { createHash } from "node:crypto";
 
-import type { CustomMessage } from "@earendil-works/pi-agent-core";
+import type { CustomMessage } from "@iris/pi-agent-core";
 
 import {
   M0_EMPTY_BODY,

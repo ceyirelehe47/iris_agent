@@ -1,3 +1,4 @@
+// NOT PRODUCTION — SQLite persistence layer stores legacy m0Body/m1Body columns. Migration per Notion v27 pending.
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -6,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { migrateDatabase } from "../db/migrate.js";
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 import {
   KIND_TO_SEMANTIC_SCHEMA_ID,
   SEMANTIC_DERIVATION_REFS_V1_SCHEMA_ID,
@@ -381,6 +382,10 @@ const CANONICAL_LIFECYCLE_STATES: readonly ContextMessageUnitLifecycleState[] = 
   "compartmentalized_pending_bust",
   "represented_in_p3",
   "retired",
+  // A7 (#117): legacy fence state — rows whose true lifecycle is unknown.
+  // These rows are NOT treated as canonical committed; they are fenced
+  // from P5 selection and must be explicitly migrated before use.
+  "legacy_committed_unknown",
 ];
 
 function parseLifecycleState(raw: string): ContextMessageUnitLifecycleState {
@@ -401,7 +406,7 @@ function parseLifecycleState(raw: string): ContextMessageUnitLifecycleState {
 // iris_agent#113: legacy fence — this key name is prohibited in new contracts
 // but must be read for backward-compatible SQLite deserialization
 const LEGACY_SOURCE_CONTEXT_MESSAGE_UNIT_IDS_KEY = "sourceContextUnitIds";
-export const LATEST_MIGRATION_VERSION = "0008_lifecycle_state";
+export const LATEST_MIGRATION_VERSION = "0009_legacy_fence";
 
 /**
  * R2-P3：每 session 的 context_units 软 cap（语义 ledger 有界化的第一级）。

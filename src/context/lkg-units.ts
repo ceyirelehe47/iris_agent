@@ -1,4 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+// MIGRATION ONLY — Not part of current production Context path per Notion v27.
+import type { AgentMessage } from "@iris/pi-agent-core";
 
 import type { ContextStore } from "./context-store.js";
 

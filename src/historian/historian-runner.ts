@@ -13,7 +13,7 @@ import type {
   HistorianSessionState,
   SequencedSessionEntry,
 } from "../contracts/historian.js";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 import type { ContextHistoryReadPort } from "../context/history-read-port.js";
 import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
 import type { HistorianStore } from "./historian-store.js";

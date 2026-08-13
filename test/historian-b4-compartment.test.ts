@@ -18,7 +18,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { buildCompartment } from "../src/historian/historian-compartment.js";
 import { buildAnalysisView } from "../src/historian/historian-analysis.js";

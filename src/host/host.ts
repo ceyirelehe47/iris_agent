@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import type { Session } from "@earendil-works/pi-agent-core";
+import type { Session } from "@iris/pi-agent-core";
 import {
   createNodeSqliteFactory,
   SqliteSessionRepository,
-} from "@earendil-works/pi-storage-sqlite-node";
+} from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
@@ -55,7 +55,7 @@ import {
   resolveFallbackModel,
   type ModelOverridePort,
 } from "../runtime/runtime-coordinator.js";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@iris/pi-ai";
 import {
   RecoverySupervisor,
   type RecoveryEscalationEvent,

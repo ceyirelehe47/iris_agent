@@ -32,6 +32,7 @@ import {
   validateGenerationV2Strict,
   computeContextGenerationHash,
   computeSemanticContentHash,
+  computeContextMessageUnitContentHashV1,
 } from "../contracts/context-v27.js";
 
 /**
@@ -209,6 +210,28 @@ function projectP5Unit(cmu: ContextMessageUnitV1): ContextUnitV2 {
   // JsonValue payload plane — projected 1:1, no re-serialization.
   const semanticContent = cmu.semanticContent;
 
+  // A7 (#117): source-bound P5 validation — recompute the durable contentHash
+  // from the actual semanticContent + kind + disposition + derivationRefs +
+  // semanticSchemaId and verify it matches the durable unit's stored
+  // contentHash. This detects semantic tampering at the projection boundary:
+  // if semanticContent was mutated (e.g. by DB corruption or concurrent
+  // modification) but contentHash was not updated, the recomputation will
+  // differ and the projection fails closed.
+  const recomputedHash = computeContextMessageUnitContentHashV1({
+    semanticSchemaId: cmu.semanticSchemaId,
+    kind: cmu.kind,
+    historianDisposition: cmu.historianDisposition,
+    derivationRefs: cmu.derivationRefs ?? { schemaId: "iris.semantic_derivation_refs.v1" },
+    semanticContent,
+  });
+  if (recomputedHash !== cmu.contentHash) {
+    throw new Error(
+      `projectP5Unit: durable contentHash mismatch for unit ${cmu.contextUnitId} ` +
+        `(stored ${cmu.contentHash}, recomputed ${recomputedHash}) — ` +
+        `semanticContent was tampered or corrupted (fail closed)`,
+    );
+  }
+
   const header: ContextUnitHeaderV1 = {
     schemaId: CONTEXT_UNIT_HEADER_V1_SCHEMA_ID,
     contextUnitId: cmu.contextUnitId,
@@ -238,7 +261,13 @@ export function unitLayer(
   generation: ContextGenerationV2,
   index: number,
 ): 0 | 1 | 2 | 3 | 4 | 5 | null {
-  const [e0, e1, e2, e3, e4, e5] = generation.header.layerEnds;
+  const ends = generation.header.layerEnds;
+  const e0 = ends[0] ?? -1;
+  const e1 = ends[1] ?? -1;
+  const e2 = ends[2] ?? -1;
+  const e3 = ends[3] ?? -1;
+  const e4 = ends[4] ?? -1;
+  const e5 = ends[5] ?? -1;
   if (index < 0 || index >= e5) return null;
   if (index < e0) return 0;
   if (index < e1) return 1;

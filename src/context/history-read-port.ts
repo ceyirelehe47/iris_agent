@@ -26,7 +26,7 @@
  *    映射（与 SQL 实现语义一致，可单测）。
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 
 import type {
   ContextMessageUnitV1,

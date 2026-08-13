@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.context_unit_source_ref.v1",
+  "title": "ContextUnitSourceRefV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.context_unit_source_ref.v1"
+    },
+    "sourceSchemaId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceRevision": {
+      "type": "string"
+    },
+    "sourceHash": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schemaId",
+    "sourceSchemaId",
+    "sourceId",
+    "sourceHash"
+  ],
+  "additionalProperties": false
+}

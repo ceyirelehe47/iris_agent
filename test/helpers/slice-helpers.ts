@@ -1,8 +1,8 @@
-import type { Session } from "@earendil-works/pi-agent-core";
+import type { Session } from "@iris/pi-agent-core";
 import {
   createNodeSqliteFactory,
   SqliteSessionRepository,
-} from "@earendil-works/pi-storage-sqlite-node";
+} from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../../src/config/schema.js";
 import { resolveDataRootPaths } from "../../src/host/data-root.js";

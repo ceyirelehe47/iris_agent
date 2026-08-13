@@ -1,4 +1,4 @@
-import type { AgentMessage, CustomMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, CustomMessage } from "@iris/pi-agent-core";
 
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contracts/context.js";
 import {

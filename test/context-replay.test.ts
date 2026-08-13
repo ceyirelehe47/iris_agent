@@ -2,7 +2,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { projectLogicalUnits, type ProjectedLogicalUnits } from "../src/context/projection.js";
 import {

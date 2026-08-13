@@ -1,4 +1,4 @@
-import type { AgentMessage, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, SessionTreeEntry } from "@iris/pi-agent-core";
 
 /**
  * Identity-preserving projection of a raw Pi Session entry that carries a

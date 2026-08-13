@@ -1,0 +1,166 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.context_message_unit.v1",
+  "title": "ContextMessageUnitV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.context_message_unit.v1"
+    },
+    "contextUnitId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contextLineageId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contextSeq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "runtimeEventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "invocationId": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "user",
+        "assistant",
+        "tool_call",
+        "tool_result",
+        "body_event",
+        "operational"
+      ]
+    },
+    "semanticSchemaId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semanticContent": {
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "null",
+        "object",
+        "array"
+      ]
+    },
+    "historianDisposition": {
+      "enum": [
+        "include",
+        "reference_only",
+        "exclude"
+      ]
+    },
+    "derivationRefs": {
+      "type": "object",
+      "properties": {
+        "schemaId": {
+          "const": "iris.semantic_derivation_refs.v1"
+        },
+        "memoryRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compartmentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workSnapshotVersion": {
+          "type": "integer"
+        },
+        "sourceContextMessageUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schemaId"
+      ],
+      "additionalProperties": false
+    },
+    "rawArchiveRef": {
+      "type": "object",
+      "properties": {
+        "schemaId": {
+          "const": "iris.raw_archive_ref.v1"
+        },
+        "runtimeSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startEntrySeq": {
+          "type": "integer"
+        },
+        "endEntrySeq": {
+          "type": "integer"
+        },
+        "entryIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceHash": {
+          "type": "string"
+        },
+        "blobRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "schemaId",
+        "runtimeSessionId"
+      ],
+      "additionalProperties": false
+    },
+    "contentHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycleState": {
+      "enum": [
+        "committed",
+        "historian_eligible",
+        "historian_claimed",
+        "compartmentalized_pending_bust",
+        "represented_in_p3",
+        "retired",
+        "legacy_committed_unknown"
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schemaId",
+    "contextUnitId",
+    "contextLineageId",
+    "contextSeq",
+    "runtimeEventId",
+    "kind",
+    "semanticSchemaId",
+    "semanticContent",
+    "historianDisposition",
+    "contentHash",
+    "lifecycleState",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}

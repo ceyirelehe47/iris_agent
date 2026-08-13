@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AgentMessage, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { findInputPairsByProjection } from "../runtime/context-adapter.js";
 import {

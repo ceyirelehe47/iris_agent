@@ -1,4 +1,4 @@
-import type { AgentHarness } from "@earendil-works/pi-agent-core";
+import type { AgentHarness } from "@iris/pi-agent-core";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
@@ -15,14 +15,14 @@ import { createIrisHarness, type InvocationBinding } from "../runtime/harness-fa
 import { PiRuntimeAdapter } from "../runtime/pi-runtime-adapter.js";
 import { ActiveRuntimeRegistry, activeRuntimeHandle } from "../runtime/active-runtime-registry.js";
 import { RuntimeCoordinator, type ModelOverridePort } from "../runtime/runtime-coordinator.js";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@iris/pi-ai";
 import { RuntimeEpochStore } from "../runtime/epoch-manager.js";
 import type { RuntimeSessionEpoch } from "../contracts/runtime.js";
 import { initializeDataRoot, resolveDataRootPaths } from "./data-root.js";
 import { HOST_INSTANCE_EPOCH } from "./host.js";
 import { acquireDataRootLock, type DataRootLockHandle } from "./lock.js";
-import { SqliteSessionRepository } from "@earendil-works/pi-storage-sqlite-node";
-import { createNodeSqliteFactory } from "@earendil-works/pi-storage-sqlite-node";
+import { SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory } from "@iris/pi-storage-sqlite-node";
 import { nodeSqliteRepoEnv } from "../runtime/pi-env.js";
 
 /**

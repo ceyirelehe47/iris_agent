@@ -1,0 +1,71 @@
+{
+  "registryId": "iris.agent-domain-contracts.v1",
+  "status": "R0_codegen_authoritative",
+  "lockedAt": "2026-08-13",
+  "generatedAt": "2026-08-13",
+  "currentGenerationSchemaId": "iris.context_generation.v2",
+  "currentGenerationUnitSchemaId": "iris.context_unit.v2",
+  "currentGenerationHeaderSchemaId": "iris.context_generation_header.v1",
+  "currentGenerationUnitHeaderSchemaId": "iris.context_unit_header.v1",
+  "schemas": [
+    {
+      "schemaId": "iris.raw_archive_ref.v1",
+      "file": "json-schemas/raw_archive_ref-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic_derivation_refs.v1",
+      "file": "json-schemas/semantic_derivation_refs-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.context_message_unit.v1",
+      "file": "json-schemas/context_message_unit-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.context_unit_source_ref.v1",
+      "file": "json-schemas/context_unit_source_ref-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.context_unit_header.v1",
+      "file": "json-schemas/context_unit_header-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.context_unit.v2",
+      "file": "json-schemas/context_unit-v2.schema.json"
+    },
+    {
+      "schemaId": "iris.context_generation_header.v1",
+      "file": "json-schemas/context_generation_header-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.context_generation.v2",
+      "file": "json-schemas/context_generation-v2.schema.json"
+    }
+  ],
+  "semanticSchemas": [
+    {
+      "schemaId": "iris.semantic.context_message.user.v1",
+      "file": "json-schemas/semantic-context_message-user-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic.context_message.assistant.v1",
+      "file": "json-schemas/semantic-context_message-assistant-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic.context_message.tool_call.v1",
+      "file": "json-schemas/semantic-context_message-tool_call-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic.context_message.tool_result.v1",
+      "file": "json-schemas/semantic-context_message-tool_result-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic.context_message.body_event.v1",
+      "file": "json-schemas/semantic-context_message-body_event-v1.schema.json"
+    },
+    {
+      "schemaId": "iris.semantic.context_message.operational.v1",
+      "file": "json-schemas/semantic-context_message-operational-v1.schema.json"
+    }
+  ],
+  "manifestSha256": "8eb19476150f704a56ae51dffdba57c443f52e862b37b2b6a1e014ecfb41880f"
+}

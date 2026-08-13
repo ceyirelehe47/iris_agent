@@ -379,3 +379,122 @@ export function freshRecoveryState(logicalExecutionId: string, now: string): Rec
 export function logicalExecutionIdFor(instanceEpoch: number, inputId: string): string {
   return `logical-exec-${instanceEpoch}:${inputId}`;
 }
+
+// ---------------------------------------------------------------------------
+// D6 (#118): Durable outcome resolution — terminal state after reconciliation.
+// ---------------------------------------------------------------------------
+
+/**
+ * D6 (#118): A durable, restart-stable resolution for a previously
+ * outcome_unknown logical execution. After reconciliation determines the
+ * outcome, this record persists the decision so that:
+ *
+ * - On restart, the supervisor reads the resolution and does NOT re-query
+ *   external subsystems or re-dispatch.
+ * - The evidence source and reference prove WHY the resolution was made.
+ * - The identity (logicalExecutionId + inputId + dispatchId) is preserved
+ *   for audit and prevents duplicate execution.
+ *
+ * This replaces the Round-5 behavior where confirmed_applied just cleared
+ * pendingOutcomeUnknown and every restart re-ran the reconciler forever.
+ */
+export interface DurableOutcomeResolution {
+  logicalExecutionId: string;
+  inputId: string;
+  dispatchId: string;
+  /** The reconciliation result. */
+  resolution: "confirmed_applied" | "replay_safe" | "ambiguous";
+  /** The subsystem that provided the evidence (e.g. 'pi_session', 'memory_publication'). */
+  evidenceSource: string;
+  /** A hash/ref/identity pointing to the durable proof. */
+  evidenceRef: string;
+  /** ISO-8601 timestamp of when the resolution was recorded. */
+  resolvedAt: string;
+}
+
+/**
+ * D6 (#118): Store for durable outcome resolutions. Lives in the recovery
+ * SQLite database alongside recovery_state. One resolution per logical
+ * execution id.
+ */
+export class DurableOutcomeResolutionStore {
+  private readonly db: DatabaseSync;
+
+  constructor(dbPath: string) {
+    this.db = new DatabaseSync(dbPath);
+  }
+
+  /** Persist a resolution. Overwrites if one already exists for this logical execution. */
+  save(resolution: DurableOutcomeResolution): void {
+    this.db
+      .prepare(
+        `INSERT INTO durable_outcome_resolution (
+           logical_execution_id, input_id, dispatch_id, resolution,
+           evidence_source, evidence_ref, resolved_at, resolved_state_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(logical_execution_id) DO UPDATE SET
+           input_id = excluded.input_id,
+           dispatch_id = excluded.dispatch_id,
+           resolution = excluded.resolution,
+           evidence_source = excluded.evidence_source,
+           evidence_ref = excluded.evidence_ref,
+           resolved_at = excluded.resolved_at,
+           resolved_state_json = excluded.resolved_state_json`,
+      )
+      .run(
+        resolution.logicalExecutionId,
+        resolution.inputId,
+        resolution.dispatchId,
+        resolution.resolution,
+        resolution.evidenceSource,
+        resolution.evidenceRef,
+        resolution.resolvedAt,
+        JSON.stringify({ savedAt: resolution.resolvedAt }),
+      );
+  }
+
+  /** Load a resolution by logical execution id. Returns null if not found. */
+  load(logicalExecutionId: string): DurableOutcomeResolution | null {
+    const row = this.db
+      .prepare(
+        `SELECT logical_execution_id, input_id, dispatch_id, resolution,
+                evidence_source, evidence_ref, resolved_at
+         FROM durable_outcome_resolution
+         WHERE logical_execution_id = ?`,
+      )
+      .get(logicalExecutionId) as
+      | {
+          logical_execution_id: string;
+          input_id: string;
+          dispatch_id: string;
+          resolution: string;
+          evidence_source: string;
+          evidence_ref: string;
+          resolved_at: string;
+        }
+      | undefined;
+
+    if (row === undefined) return null;
+
+    return {
+      logicalExecutionId: row.logical_execution_id,
+      inputId: row.input_id,
+      dispatchId: row.dispatch_id,
+      resolution: row.resolution as DurableOutcomeResolution["resolution"],
+      evidenceSource: row.evidence_source,
+      evidenceRef: row.evidence_ref,
+      resolvedAt: row.resolved_at,
+    };
+  }
+
+  /** Delete a resolution (e.g. after full successful recovery). */
+  delete(logicalExecutionId: string): void {
+    this.db
+      .prepare("DELETE FROM durable_outcome_resolution WHERE logical_execution_id = ?")
+      .run(logicalExecutionId);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+}

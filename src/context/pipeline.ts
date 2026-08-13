@@ -1,6 +1,7 @@
+// MIGRATION ONLY — Not part of current production Context path per Notion v27.
 import { createHash } from "node:crypto";
 
-import type { AgentMessage, SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, SessionTreeEntry } from "@iris/pi-agent-core";
 
 import type { ContextStore, ContextLineage } from "./context-store.js";
 import { projectLogicalUnits, type ProjectedLogicalUnits } from "./projection.js";

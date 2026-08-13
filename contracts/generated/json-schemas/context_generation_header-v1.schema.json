@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.context_generation_header.v1",
+  "title": "ContextGenerationHeaderV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.context_generation_header.v1"
+    },
+    "contextGenerationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contextLineageId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceSnapshotHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layerEnds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "contextGenerationHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "schemaId",
+    "contextGenerationId",
+    "contextLineageId",
+    "sourceSnapshotHash",
+    "layerEnds",
+    "contextGenerationHash",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}

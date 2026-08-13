@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@iris/pi-agent-core";
 
 export const IRIS_INPUT_META_CUSTOM_TYPE = "iris_input_meta";
 export const IRIS_INPUT_META_CONTENT = "<iris-input-meta/>";

@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { canonicalJson } from "../src/contracts/tool.js";
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import type { ContextHistoryReadPort } from "../src/context/history-read-port.js";
 import { historianBatchHash } from "../src/contracts/historian.js";

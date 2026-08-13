@@ -4,8 +4,8 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
-import type { TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
+import type { TextContent, ThinkingContent, ToolCall } from "@iris/pi-ai";
 
 import {
   ALPHA,

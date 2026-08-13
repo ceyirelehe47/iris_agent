@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.raw_archive_ref.v1",
+  "title": "RawArchiveRefV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.raw_archive_ref.v1"
+    },
+    "runtimeSessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "startEntrySeq": {
+      "type": "integer"
+    },
+    "endEntrySeq": {
+      "type": "integer"
+    },
+    "entryIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sourceHash": {
+      "type": "string"
+    },
+    "blobRefs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schemaId",
+    "runtimeSessionId"
+  ],
+  "additionalProperties": false
+}

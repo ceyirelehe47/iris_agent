@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeMessageContentHash } from "@earendil-works/pi-agent-core";
+import { computeMessageContentHash } from "@iris/pi-agent-core";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";

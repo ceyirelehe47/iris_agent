@@ -14,7 +14,7 @@
  * 生产 HistorianManager/Runner 构造不接受本端口（类型层面无法接入），
  * 只有显式 recovery/audit 路径（以及测试 fixture）可以使用它。
  */
-import type { SessionTreeEntry } from "@earendil-works/pi-agent-core";
+import type { SessionTreeEntry } from "@iris/pi-agent-core";
 
 import { stableHash } from "../contracts/historian.js";
 import type {

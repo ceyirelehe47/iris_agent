@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "iris.context_unit_header.v1",
+  "title": "ContextUnitHeaderV1",
+  "type": "object",
+  "properties": {
+    "schemaId": {
+      "const": "iris.context_unit_header.v1"
+    },
+    "contextUnitId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "schemaId": {
+          "const": "iris.context_unit_source_ref.v1"
+        },
+        "sourceSchemaId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceRevision": {
+          "type": "string"
+        },
+        "sourceHash": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schemaId",
+        "sourceSchemaId",
+        "sourceId",
+        "sourceHash"
+      ],
+      "additionalProperties": false
+    },
+    "semanticSchemaId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contentHash": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schemaId",
+    "contextUnitId",
+    "source",
+    "semanticSchemaId",
+    "contentHash"
+  ],
+  "additionalProperties": false
+}

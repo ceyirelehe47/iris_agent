@@ -3,7 +3,7 @@ import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
 import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@iris/pi-ai";
 
 /**
  * iris_agent#89: Model resolution port for production fallback dispatch.

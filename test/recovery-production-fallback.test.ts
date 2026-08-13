@@ -7,7 +7,7 @@
  */
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model } from "@iris/pi-ai";
 
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../src/contracts/ports.js";
 import type { AgentInput } from "../src/contracts/origin.js";

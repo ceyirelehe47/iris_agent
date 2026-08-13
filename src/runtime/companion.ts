@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { CustomMessage } from "@earendil-works/pi-agent-core";
+import type { CustomMessage } from "@iris/pi-agent-core";
 
 import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contracts/context.js";
 import type { AgentInput, OriginEnvelope, ProvenancedContentBlock } from "../contracts/origin.js";
