@@ -23,7 +23,14 @@ const REPO_ROOT = join(import.meta.dirname, "..");
 
 function run(cmd, cwd, opts = {}) {
   try {
-    const out = execSync(cmd, { cwd, stdio: "pipe", encoding: "utf8", timeout: 120000, ...opts });
+    const out = execSync(cmd, {
+      cwd,
+      stdio: "pipe",
+      encoding: "utf8",
+      timeout: 120000,
+      maxBuffer: 64 * 1024 * 1024,
+      ...opts,
+    });
     return { ok: true, out };
   } catch (error) {
     return {
@@ -110,7 +117,10 @@ try {
     "test/__missing__a7.test.ts",
   );
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-  const tests = run("npm test 2>&1 | tail -8", worktree);
+  // NOTE: no shell pipeline here — `npm test | tail` would mask the exit
+  // code (the pipe's exit status is tail's), so the failure must be
+  // observed directly from npm's own exit code.
+  const tests = run("npm test", worktree);
   // npm test runs every listed file; a missing file makes the runner fail.
   expectFailure("removing a critical behavioral test from npm test", tests);
   pkg.scripts.test = originalTest;
