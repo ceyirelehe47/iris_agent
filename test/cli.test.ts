@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const repoRoot = join(import.meta.dirname, "..");
-const distBin = join(repoRoot, "dist", "bin.js");
+const distBin = join(repoRoot, "dist", "src", "bin.js");
 
 interface CliRunOutput {
   status: string;
@@ -80,7 +80,7 @@ function runCli(args: string[]): { stdout: string; stderr: string; exitCode: num
 }
 
 test("iris bin is built and executable", () => {
-  assert.ok(existsSync(distBin), "dist/bin.js must exist (run npm run build first)");
+  assert.ok(existsSync(distBin), "dist/src/bin.js must exist (run npm run build first)");
 });
 
 test("iris run executes a real subprocess vertical slice to settled", () => {
