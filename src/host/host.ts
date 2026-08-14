@@ -7,7 +7,7 @@ import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-stora
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
 import type { AgentInput, ExternalizedPayloadRef } from "../contracts/origin.js";
-import type { AgentRuntimeEvent } from "../contracts/ports.js";
+import type { AgentRuntimeEvent } from "../contracts/runtime-ports.js";
 import type { RuntimeSessionEpoch } from "../contracts/runtime.js";
 import { initializeDataRoot, resolveDataRootPaths } from "./data-root.js";
 import { acquireDataRootLock, type DataRootLockHandle } from "./lock.js";
@@ -23,7 +23,7 @@ import { nodeSqliteRepoEnv } from "../runtime/pi-env.js";
 import {
   composeProvider,
   openOrCreateSession,
-  prepareContextSources,
+  prepareInvocation,
   makeReadOnlyTestTool,
 } from "../runtime/vertical-slice.js";
 import { findInputPairsByProjection } from "../runtime/context-adapter.js";
@@ -64,6 +64,12 @@ import {
   logicalExecutionIdFor,
   RecoveryStateStore,
 } from "../runtime/recovery-state.js";
+import {
+  assembleIrisContext,
+  type CurrentContextSource,
+  type IrisContextAssembly,
+} from "../runtime/iris-context.js";
+import { IrisContextBridge } from "../runtime/iris-bridge.js";
 
 export interface IrisHostOptions {
   dataRoot: string;
@@ -183,6 +189,10 @@ export class IrisHost {
   private readonly supervisor: RecoverySupervisor;
   /** SQLite-backed durable recovery state (one row per logical execution). */
   private readonly recoveryStore: RecoveryStateStore;
+  /** @iris/context 装配（ContextService + Historian；Identity scope）。 */
+  private readonly irisContext: IrisContextAssembly;
+  /** P0–P2 contributor 的权威 source holder（随 invocation 更新）。 */
+  private readonly contextSourceHolder: { current: CurrentContextSource };
   private readonly providerMode: "mock" | "live";
   private readonly mockProviderError: Error | undefined;
 
@@ -215,6 +225,8 @@ export class IrisHost {
     currentEpoch: RuntimeSessionEpoch;
     instanceEpoch: number;
     settledTokenBox: { value: { epochId: string; invocationId: string } | null };
+    irisContext: IrisContextAssembly;
+    contextSourceHolder: { current: CurrentContextSource };
     mockProviderError?: Error;
   }) {
     this.dataRoot = options.dataRoot;
@@ -231,6 +243,8 @@ export class IrisHost {
     this.recoveryStore = options.recoveryStore;
     this.currentEpoch = options.currentEpoch;
     this.instanceEpoch = options.instanceEpoch;
+    this.irisContext = options.irisContext;
+    this.contextSourceHolder = options.contextSourceHolder;
   }
 
   getReady(): boolean {
@@ -663,19 +677,17 @@ export class IrisHost {
         throw new Error("fault-injected: new Capsule construction failure");
       }
 
-      // Construct a fresh Harness + fresh Context lineage for the new Session.
+      // Construct a fresh Harness over the SAME @iris/context assembly (the
+      // identity-level Context lineage survives rollover — no new lineage).
       const { models, model, providerProfileId } = await composeProvider(this.providerMode);
-      const binding: InvocationBinding = {
-        input: emptyPlaceholderInput(),
-        prepared: prepareContextSources(
-          emptyPlaceholderInput(),
-          pending.runtimeSessionId,
-          pending.epochId,
-          this.config,
-          now,
-        ),
-        invocationId: `invocation-${pending.runtimeSessionId}`,
-      };
+      const binding: InvocationBinding = prepareInvocation(
+        emptyPlaceholderInput(),
+        pending.runtimeSessionId,
+        pending.epochId,
+        this.instanceEpoch,
+        this.config,
+        now,
+      );
       const { harness } = createIrisHarness({
         session: newSession,
         // review-pass-7 #2 (subagent-review fix): the companion's pairKey
@@ -689,7 +701,16 @@ export class IrisHost {
         currentInvocation: binding,
         now,
         providerProfileId,
+        irisContext: this.irisContext.contextService,
       });
+      const rolloverBridge = new IrisContextBridge({
+        runtimeSessionId: pending.runtimeSessionId,
+        instanceEpoch: this.instanceEpoch,
+        contextService: this.irisContext.contextService,
+        getInput: () => binding.input,
+        now: () => new Date().toISOString(),
+      });
+      rolloverBridge.attach(harness);
       const adapter = new PiRuntimeAdapter({
         harness,
         session: newSession,
@@ -785,6 +806,14 @@ export class IrisHost {
         throw new Error(`rollover CAS lost race for epoch ${active.epochId}`);
       }
       this.currentEpoch = nextEpoch;
+      // Rollover rotates ONLY the Pi Session/Harness archive segment. The
+      // identity-level Context lineage survives; rebind it to the new Session
+      // (no new lineage, no reset, no copy).
+      const lineage = this.irisContext.lineageId;
+      const store = this.irisContext.contextService.getStore();
+      if (store.getLineageByLineageId(lineage) !== undefined) {
+        store.bindCurrentSession(lineage, nextEpoch.runtimeSessionId);
+      }
       this.emit({
         type: "rollover_completed",
         epochId: nextEpoch.epochId,
@@ -884,6 +913,13 @@ export class IrisHost {
       firstError ??= error;
     }
     try {
+      // @iris/context assembly：unload 只摘进程内注册（services/listeners/
+      // contributor），绝不删除 durable context.db / historian.db 行。
+      await this.irisContext.close();
+    } catch (error) {
+      firstError ??= error;
+    }
+    try {
       this.epochStore.close();
     } catch (error) {
       firstError ??= error;
@@ -911,6 +947,7 @@ export class IrisHost {
     let epochStore: RuntimeEpochStore | undefined;
     let ingress: InputAcceptanceLedger | undefined;
     let recoveryStore: RecoveryStateStore | undefined;
+    let irisAssembly: IrisContextAssembly | undefined;
     /** review-pass-2 #4: the Session opened before Capsule construction, so a
      * failed startup can dispose it (it is not yet owned by an adapter). */
     let openedRepo: SqliteSessionRepository | undefined;
@@ -982,17 +1019,37 @@ export class IrisHost {
         options.mockProviderError,
       );
 
-      const binding: InvocationBinding = {
-        input: emptyPlaceholderInput(),
-        prepared: prepareContextSources(
-          emptyPlaceholderInput(),
-          epoch.runtimeSessionId,
-          epoch.epochId,
-          config,
-          new Date().toISOString(),
-        ),
-        invocationId: `invocation-${epoch.runtimeSessionId}`,
+      const now = new Date().toISOString();
+      const binding: InvocationBinding = prepareInvocation(
+        emptyPlaceholderInput(),
+        epoch.runtimeSessionId,
+        epoch.epochId,
+        instanceEpoch,
+        config,
+        now,
+      );
+      // P0–P2 contributor 的权威 source holder；Host 每次 invocation 更新。
+      const contextSourceHolder: { current: CurrentContextSource } = {
+        current: {
+          canonicalSystemPrompt: binding.canonicalSystemPrompt,
+          personaSnapshotId: "persona-default-v1",
+          providerProfileId,
+          toolDeclarations: ["test_read_tool"],
+        },
       };
+      irisAssembly = await assembleIrisContext({
+        dataRoot: paths.dataRoot,
+        runtimeSessionId: epoch.runtimeSessionId,
+        providerProfileId,
+        canonicalSystemPrompt: binding.canonicalSystemPrompt,
+        systemProjectionHash: createHash("sha256")
+          .update(binding.canonicalSystemPrompt)
+          .digest("hex"),
+        preparedAt: binding.preparedAt,
+        withHistorian: true,
+        now: () => new Date().toISOString(),
+        getCurrentSource: () => contextSourceHolder.current,
+      });
       const { harness } = createIrisHarness({
         session,
         // review-pass-7 #2 (subagent-review fix): bind the Host's STABLE
@@ -1002,9 +1059,18 @@ export class IrisHost {
         model,
         tools: [makeReadOnlyTestTool()],
         currentInvocation: binding,
-        now: new Date().toISOString(),
+        now,
         providerProfileId,
+        irisContext: irisAssembly.contextService,
       });
+      const bridge = new IrisContextBridge({
+        runtimeSessionId: epoch.runtimeSessionId,
+        instanceEpoch,
+        contextService: irisAssembly.contextService,
+        getInput: () => binding.input,
+        now: () => new Date().toISOString(),
+      });
+      bridge.attach(harness);
       const adapter = new PiRuntimeAdapter({ harness, session, binding, repo: readyRepo });
       const registry = new ActiveRuntimeRegistry();
       registry.install(activeRuntimeHandle(epoch, adapter, binding));
@@ -1055,7 +1121,14 @@ export class IrisHost {
         activeRuntime: registry,
         modelOverride,
         prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-          prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
+          prepareInvocation(
+            input,
+            runtimeSessionId,
+            epochId,
+            instanceEpoch,
+            config,
+            new Date().toISOString(),
+          ),
         maxQueuedInputs: config.host.input_queue_max ?? 20,
         // A3: consume the ONE-TIME native-settled authorization. Every
         // invocation that observes Pi native settled on the active Epoch
@@ -1074,6 +1147,7 @@ export class IrisHost {
 
       const readyEpochStore = epochStore;
       const readyIngress = ingress;
+      const readyIrisAssembly = irisAssembly;
       // iris_agent#99: the RecoverySupervisor owns the production dispatch
       // path — it wraps the Coordinator and enforces bounded retry, provider
       // fallback, watchdog and outcome_unknown reconciliation with DURABLE
@@ -1245,6 +1319,8 @@ export class IrisHost {
         currentEpoch: epoch,
         instanceEpoch,
         settledTokenBox,
+        irisContext: readyIrisAssembly,
+        contextSourceHolder,
         ...(options.mockProviderError === undefined
           ? {}
           : { mockProviderError: options.mockProviderError }),
@@ -1261,6 +1337,11 @@ export class IrisHost {
         } catch (cleanupError) {
           firstError ??= cleanupError;
         }
+      }
+      try {
+        await irisAssembly?.close();
+      } catch (cleanupError) {
+        firstError ??= cleanupError;
       }
       try {
         ingress?.close();

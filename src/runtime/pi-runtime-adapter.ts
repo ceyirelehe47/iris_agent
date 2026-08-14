@@ -1,7 +1,7 @@
 import type { AgentHarness, Session } from "@iris/pi-agent-core";
 import type { AssistantMessage } from "@iris/pi-ai";
 
-import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
+import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/runtime-ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { InvocationBinding } from "./harness-factory.js";

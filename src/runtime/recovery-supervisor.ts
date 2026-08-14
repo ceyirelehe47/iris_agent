@@ -1,4 +1,4 @@
-import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
+import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/runtime-ports.js";
 import type { AgentInput } from "../contracts/origin.js";
 
 import {

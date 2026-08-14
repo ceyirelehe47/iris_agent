@@ -295,10 +295,19 @@ test("IrisHost: M2 — a failed invocation flips not-ready and recover() resumes
   }
 });
 
-test("IrisHost: C1 — shutdown during an active turn still commits the input", async () => {
+test("IrisHost: C1 — shutdown during an active turn never loses the input (recoverable, promoted on restart)", async () => {
   // The worst crash-window: shutdown while an invocation is mid-turn. The
-  // input must reach session_committed (the turn finishes, the ledger is only
-  // closed after the pump exits) — no accepted-but-uncommitted leftover.
+  // input must never be lost or left ambiguous: either the turn completed
+  // before the shutdown abort took effect (session_committed), or the input
+  // stays `accepted` with its Pi pair DURABLY in the Session — which the
+  // ingress recovery promotes to session_committed on the next startup
+  // without re-prompting (dedupe-safe).
+  //
+  // 适配说明（consume-iris-context）：首个 provider 边界的 contextController
+  // 在 BUST pending 时先完成 canonical full rebuild（@iris/context），因此
+  // 紧贴 turn_start 的 shutdown 可能落在重建窗口内、中断该 turn。被中断的
+  // 输入保持 accepted（可恢复），由重启 recovery 幂等提升 —— 这是 crash-
+  // window 的正确语义，而不是丢失输入。
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-host-c1-"));
   const config = defaultAgentConfig();
   const host = await IrisHost.open({ dataRoot, config, provider: "mock" });
@@ -321,15 +330,78 @@ test("IrisHost: C1 — shutdown during an active turn still commits the input", 
   const { InputAcceptanceLedger } = await import("../src/host/ingress.js");
   const paths = resolveDataRootPaths(dataRoot, config);
   const reopened = new InputAcceptanceLedger(paths.ingressDb, paths.blobsIngress, 20, 1);
+  let runtimeSessionId: string | undefined;
   try {
     const record = reopened.getRecord("c1-0001", 1);
-    assert.equal(
-      record?.state,
-      "session_committed",
-      "C1: input must be committed, not left accepted",
+    assert.ok(record !== undefined, "C1: input must be durably recorded after shutdown");
+    if (record.state === "session_committed") {
+      // Turn completed before the abort took effect — committed directly.
+      return;
+    }
+    // Interrupted mid-turn: must stay in the recoverable `accepted` state
+    // (never ambiguous / dropped), with the pair durably in the Session.
+    assert.equal(record.state, "accepted", "C1: interrupted input must remain recoverable");
+    // The accepted record has not been committed yet, so the session id comes
+    // from the durable epoch registry (the active Session is unchanged).
+    const epochStore = new RuntimeEpochStore(
+      paths.epochRegistryDb,
+      config.runtime_sessions.session_id_prefix,
+      config.runtime_sessions.timezone,
     );
+    try {
+      runtimeSessionId = epochStore.getActive()?.runtimeSessionId;
+    } finally {
+      epochStore.close();
+    }
+    assert.ok(runtimeSessionId !== undefined, "C1: active session must be resolvable");
   } finally {
     reopened.close();
+  }
+
+  // The Pi pair (user + iris_input_meta companion) must be durably in the
+  // Session — restart recovery promotes the input from this pair, never
+  // re-prompting and never losing it.
+  assert.ok(runtimeSessionId !== undefined);
+  const sessionHandle = await openOrCreateSession(dataRoot, config, runtimeSessionId);
+  try {
+    const entries = await sessionHandle.session.getEntries();
+    const roles = entries.map((entry) => {
+      if (entry.type === "custom_message") {
+        return "custom";
+      }
+      return (entry as { message?: { role?: string } }).message?.role ?? "?";
+    });
+    assert.ok(
+      roles.includes("user") && roles.includes("custom"),
+      "C1: user + companion pair must be durably in the session",
+    );
+  } finally {
+    await sessionHandle.repo[Symbol.asyncDispose]();
+  }
+
+  // Restart recovery promotes the interrupted input to session_committed
+  // (dedupe-safe, no re-prompt).
+  const restarted = await IrisHost.open({ dataRoot, config, provider: "mock" });
+  const restartEvents: string[] = [];
+  const restartUnsub = restarted.onEvent((event) => restartEvents.push(event.type));
+  try {
+    const restartPump = restarted.run();
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    await restarted.shutdown();
+    await restartPump;
+  } finally {
+    restartUnsub();
+    await restarted.shutdown().catch(() => undefined);
+  }
+  const reopened2 = new InputAcceptanceLedger(paths.ingressDb, paths.blobsIngress, 20, 1);
+  try {
+    assert.equal(
+      reopened2.getRecord("c1-0001", 1)?.state,
+      "session_committed",
+      "C1: restart recovery must promote the interrupted input without re-prompting",
+    );
+  } finally {
+    reopened2.close();
   }
 });
 

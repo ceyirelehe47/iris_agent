@@ -1,5 +1,7 @@
-// Production harness composition for IrisHost (pure projection path; the
-// m0/m1 ContextRenderer is migration-only and lives in vertical-slice-demo).
+// Production harness composition for IrisHost (pure projection path). The
+// provider-visible Context comes ONLY from @iris/context's validated
+// ContextGenerationV2 via the Provider Renderer; the m0/m1 ContextRenderer is
+// gone (Notion 01 Context Assembly｜Provider Wire Terminology Override).
 import { createHash } from "node:crypto";
 
 import {
@@ -14,9 +16,9 @@ import {
   type ToolCallEvent,
   type ToolResultEvent,
 } from "@iris/pi-agent-core";
+import type { ContextService } from "@iris/context";
 import type { Model, Models, ToolCall } from "@iris/pi-ai";
 
-import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { computeToolExecutionKey, canonicalJson } from "../contracts/tool.js";
 import {
@@ -25,8 +27,7 @@ import {
   encodeInputFrames,
 } from "./companion.js";
 import { transformContextMessages } from "./context-adapter.js";
-import type { ContextIngestPort } from "../contracts/context-v27.js";
-import type { ContextRenderer } from "../context/context-renderer.js";
+import { renderGenerationForProvider } from "./context-render.js";
 
 export interface IrisHarnessCallbacks {
   onSystemPrompt?(systemPrompt: string): void;
@@ -55,20 +56,22 @@ export interface HarnessObservers {
 }
 
 /**
- * Per-invocation binding. The harness is stateful (it owns the Pi Session and
- * the transcript), so it is created once per runtime Session; each prompt()
- * invocation updates this binding so companion pairing and the context hook
- * reflect the CURRENT input, not the first one.
- *
- * Feature B (goal.txt §5): `prepared` is the minimal Pi-runtime binding
- * (InvocationSourceBinding) — session binding + epoch + canonical system
- * prompt identity. It carries NO Context assembly state; m0/m1 materialization
- * is owned by ContextRenderer + persistRender (context_lineages).
+ * Per-invocation binding（简化版）。Pi seam 需要的只有 input / invocationId /
+ * runtimeSessionId / epochId / instanceEpoch / canonicalSystemPrompt /
+ * providerProfileId —— 不再携带任何 v27 废止的 PreparedInvocationSources /
+ * ContextSourceSnapshot 语义（removed legacy assembly contract；Notion v27
+ * Legacy Assembly Contract Cleanup）。
+ * Context 组装状态完全由 @iris/context 持有。
  */
 export interface InvocationBinding {
   input: AgentInput;
-  prepared: InvocationSourceBinding;
   invocationId: string;
+  runtimeSessionId: string;
+  epochId: string;
+  instanceEpoch: number;
+  canonicalSystemPrompt: string;
+  providerProfileId: string;
+  preparedAt: string;
 }
 
 export interface CreateIrisHarnessOptions {
@@ -82,12 +85,12 @@ export interface CreateIrisHarnessOptions {
   now: string;
   providerProfileId: string;
   callbacks?: IrisHarnessCallbacks | undefined;
-  /** R2-P0：ContextMessageUnit 语义源（替代 session.getEntries 投影）。 */
-  contextIngest?: ContextIngestPort;
-  /** R2-P1：Provider Renderer（m0/m1/p5Tail 投影 + persistRender）。提供时
-   * contextController 走 m0/m1 状态机；缺省时回退到纯 unit payload 投影
-   * （reopenActiveSession 等非 prompt 路径保持原行为）。 */
-  contextRenderer?: ContextRenderer;
+  /**
+   * @iris/context ContextService（已 open + createLineage + contributor 注册）。
+   * contextController 只在安全 provider 边界渲染已验证 generation；
+   * generation 缺失/失效 → fail closed（不 dispatch）。
+   */
+  irisContext: ContextService;
 }
 
 export function createIrisHarness(options: CreateIrisHarnessOptions): {
@@ -123,76 +126,49 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
     settledNextTurnCount: undefined,
   };
 
-  const systemPromptResolver = (): string => {
-    const { prepared } = options.currentInvocation;
-    observers.systemPromptValues.push(prepared.canonicalSystemPrompt);
-    options.callbacks?.onSystemPrompt?.(prepared.canonicalSystemPrompt);
-    return prepared.canonicalSystemPrompt;
-  };
-
   const harness = new AgentHarness({
     session: options.session,
     models: options.models,
     model: options.model,
     tools: options.tools,
     thinkingLevel: "off",
-    // R2-P0（Roadmap v13）：Iris 正常 Provider path 从 ContextMessageUnit
-    // 语义 ledger 投影（contextIngest.listUnits），不再调用 Session
-    // buildContext 也不再依赖 session.getEntries 投影。companion 折叠已在
-    // ingest 完成；当前 turn 的 live pair 由 context hook 处理。
+    // Provider Context Controller（PI-015）：只把当前已验证 P0–P5 generation
+    // 渲染为 provider-native wire。generation 缺失/失效 → fail closed（不
+    // dispatch）。BUST pending 时在安全边界先完成 canonical full rebuild。
     contextController: async () => {
-      const runtimeSessionId = options.currentInvocation.prepared.runtimeSessionId;
-      const units = options.contextIngest?.listUnits(runtimeSessionId) ?? [];
-      if (options.contextRenderer === undefined) {
-        return {
-          systemPrompt: systemPromptResolver(),
-          // Feature A (#110): the canonical semanticContent IS the
-          // AgentMessage-shaped payload plane.
-          messages: units.map((unit) => unit.semanticContent as unknown as AgentMessage),
-        };
+      const irisContext = options.irisContext;
+      await irisContext.runBustIfPending();
+      const generation = irisContext.getCurrentGeneration();
+      if (generation === null) {
+        throw new Error(
+          "IRIS_CONTEXT_TRANSFORM_UNAVAILABLE: no validated ContextGenerationV2 at provider boundary",
+        );
       }
-      // R2-P1：Provider Renderer 渲染 [m0, m1, ...p5Tail]。
-      // liveDelta 恒为 []：控制器运行在当前 turn 消息被 append 之前（fork
-      // agent-harness createTurnState 先于 executeTurn 的 prompts 合并），
-      // steer user + companion 由 runAgentLoop prompts 追加、context hook 折叠。
-      // 渲染是纯投影：物化写入由 vertical-slice 在 prompt 完成后调用
-      // persistRender 提交（本模块保持纯）。
-      const { messages } = options.contextRenderer.renderForProviderCall({
-        runtimeSessionId,
-        units,
-        liveDelta: [],
-        hardSignals: hardSignalsFor(options),
-      });
+      const rendered = renderGenerationForProvider(generation);
+      observers.systemPromptValues.push(rendered.systemPrompt);
+      options.callbacks?.onSystemPrompt?.(rendered.systemPrompt);
       return {
-        systemPrompt: systemPromptResolver(),
-        messages,
+        systemPrompt: rendered.systemPrompt,
+        messages: rendered.messages,
       };
     },
   });
 
   harness.on("before_agent_start", async (event: BeforeAgentStartEvent) => {
-    options.callbacks?.onSystemPrompt?.(event.systemPrompt);
-    const { input, prepared, invocationId } = options.currentInvocation;
-    void prepared;
-    void invocationId;
+    void event;
+    const { input, instanceEpoch } = options.currentInvocation;
     const layoutHash = computeContentLayoutHash(input, encodeInputFrames(input.blocks));
-    const companion = createInputMetaCompanion(
-      input,
-      layoutHash,
-      options.now,
-      options.instanceEpoch,
-    );
+    const companion = createInputMetaCompanion(input, layoutHash, options.now, instanceEpoch);
     return { messages: [companion] };
   });
 
   harness.on("context", async (event: ContextEvent) => {
     observers.contextPasses += 1;
     options.callbacks?.onContext?.(event.messages);
-    const { input, prepared, invocationId } = options.currentInvocation;
-    void input;
+    const { invocationId, runtimeSessionId } = options.currentInvocation;
     const result = transformContextMessages({
       invocationId,
-      runtimeSessionId: prepared.runtimeSessionId,
+      runtimeSessionId,
       messages: event.messages,
       model: { provider: options.model.provider, modelId: options.model.id },
       providerProfileId: options.providerProfileId,
@@ -237,8 +213,8 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
     }
 
     const toolExecutionKey = computeToolExecutionKey({
-      instanceEpoch: options.instanceEpoch,
-      runtimeSessionId: options.currentInvocation.prepared.runtimeSessionId,
+      instanceEpoch: options.currentInvocation.instanceEpoch,
+      runtimeSessionId: options.currentInvocation.runtimeSessionId,
       assistantEntryId,
       toolCallOrdinal,
       toolCallId: event.toolCallId,
@@ -288,29 +264,9 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
     if (event.type === "settled") {
       observers.settled = true;
       observers.settledNextTurnCount = event.nextTurnCount;
-      options.callbacks?.onSettled?.(event);
+      options.callbacks?.onSettled?.(event as SettledEvent);
     }
   });
 
   return { harness, observers };
-}
-
-/**
- * R2-P1：当前 invocation 的 HARD 信号（provider-side cache 身份）。modelKey
- * 与 HARD 物化时写入的 cachedM0ModelKey 同构（provider:id）；systemHash 来自
- * 当前 invocation 的 system projection hash；providerProfileId 是当前 provider
- * profile。空信号（""/undefined）按 pass-taxonomy 语义永不当成变更。
- */
-function hardSignalsFor(options: CreateIrisHarnessOptions): {
-  modelKey: string;
-  systemHash: string;
-  providerProfileId: string;
-} {
-  const { prepared } = options.currentInvocation;
-  return {
-    modelKey: `${options.model.provider}:${options.model.id}`,
-    // Empty signal (""/undefined) is never treated as a change.
-    systemHash: prepared.systemProjectionHash ?? "",
-    providerProfileId: options.providerProfileId,
-  };
 }

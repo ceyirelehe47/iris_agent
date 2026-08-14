@@ -15,6 +15,9 @@
  *  - after_tool_result_commit  : slice finished (tool result committed)
  *  - after_creating_epoch      : rollover began (creating Epoch + new Pi
  *                                Session row exist) but CAS not yet done
+ *
+ * consume-iris-context 适配：IRIS_INPUT_META_* 常量保留在
+ * src/runtime/companion.ts（不再有 src/contracts/context.ts）。
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -30,7 +33,7 @@ import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
 import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
 import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
 import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
-import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";
+import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/runtime/companion.js";
 
 const boundaryIndex = process.argv.indexOf("--boundary");
 const boundary = boundaryIndex >= 0 ? process.argv[boundaryIndex + 1] : "before_any_write";

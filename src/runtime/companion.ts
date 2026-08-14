@@ -2,10 +2,16 @@ import { createHash } from "node:crypto";
 
 import type { CustomMessage } from "@iris/pi-agent-core";
 
-import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../contracts/context.js";
 import type { AgentInput, OriginEnvelope, ProvenancedContentBlock } from "../contracts/origin.js";
 import { originHash } from "../contracts/origin.js";
 import type { IrisBlockLayoutV1 } from "../contracts/tool.js";
+
+/**
+ * iris_input_meta companion 的 Pi 传输层常量（transport-level；Context 语义
+ * 契约已迁至 @iris/context，这里只保留 Pi wire 识别常量）。
+ */
+export const IRIS_INPUT_META_CUSTOM_TYPE = "iris_input_meta";
+export const IRIS_INPUT_META_CONTENT = "<iris-input-meta/>";
 
 export const INPUT_FRAME_HEADER = "IRIS_INPUT_V1";
 const FRAME_HEADER_PATTERN = /^(inline_text|external_ref):(\d+)$/;
@@ -193,6 +199,40 @@ export function inputPairKey(input: AgentInput): string {
 export function computeUserContentHash(input: AgentInput): string {
   const wire = encodeInputFrames(input.blocks);
   return createHash("sha256").update(wire).digest("hex");
+}
+
+/**
+ * 解码用户消息的 frame wire 为纯文本（每 block 一行；用于中性 user 语义
+ * payload 与 companion contentHash 验证 basis）。非 frame 内容按原样返回。
+ */
+export function decodeUserText(userMessage: {
+  content: string | readonly { type: string; text?: string }[];
+}): string {
+  let raw: string;
+  if (typeof userMessage.content === "string") {
+    raw = userMessage.content;
+  } else {
+    raw = userMessage.content
+      .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+      .join("\n");
+  }
+  try {
+    const frames = decodeInputFrames(raw);
+    return frames.map((frame) => frame.payload).join("\n");
+  } catch {
+    return raw;
+  }
+}
+
+/** 解码用户消息为中性 text parts（每 block 一个 text part；非 frame → 原样）。 */
+export function decodeUserContentParts(userMessage: {
+  content: string | readonly { type: string; text?: string }[];
+}): Array<{ type: "text"; text: string }> {
+  const decoded = decodeUserText(userMessage);
+  if (decoded === "") {
+    return [];
+  }
+  return [{ type: "text", text: decoded }];
 }
 
 export function createInputMetaCompanion(

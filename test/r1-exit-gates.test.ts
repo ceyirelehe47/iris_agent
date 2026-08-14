@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,37 +11,37 @@ import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.
 import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
 import { encodeInputFrames } from "../src/runtime/companion.js";
 import { createIrisHarness } from "../src/runtime/harness-factory.js";
+import { assembleIrisContext } from "../src/runtime/iris-context.js";
+import { IrisContextBridge } from "../src/runtime/iris-bridge.js";
 import {
   closeSessionStorage,
   composeProvider,
   makeReadOnlyTestTool,
   openOrCreateSession,
-  prepareContextSources,
+  prepareInvocation,
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
 import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
-import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
-import { attachRuntimeEventSeam } from "../src/runtime/runtime-event-seam.js";
 
 /**
- * R1 Exit Gate 契约测试（Roadmap v13 R1）：
+ * R1 Exit Gate 契约测试（Roadmap v13 R1）。consume-iris-context 适配：
+ * Context 语义经 @iris/context ContextService（ingestRuntimeEvent →
+ * ContextMessageUnitV1）提交，本地 runtime-event-ledger / seam 已废止。
+ *
  *  Gate 1: Iris 正常 Provider path 不从 Session.buildContext() 构造 Context；
- *  Gate 3: user/tool/assistant/crash-window 顺序与 exactly-once attribution 可执行验证；
- *  Gate 4: 不生成 synthetic assistant/ToolResult repair。
- * Gate 2（默认 Pi native path 兼容）由 fork 的 runtime-seams 测试覆盖。
+ *  Gate 3: user/assistant/tool_result 顺序与 exactly-once attribution 可执行
+ *    验证（canonical ContextMessageUnitV1：contextSeq 严格单调、runtimeEventId
+ *    唯一、首个单元是 user）；
+ *  Gate 4: 不生成 synthetic assistant/ToolResult repair（unit kinds 只来自
+ *    真实 RuntimeEvent kinds，且每个单元都能映射到已提交事件）。
+ *  Gate 2（默认 Pi native path 兼容）由 fork 的 runtime-seams 测试覆盖。
  */
 
-const ALLOWED_LEDGER_TYPES = new Set([
-  "message_finalized",
-  "turn_committed",
-  "tool_execution_committed",
-  "agent_settled",
-]);
+const NOW = "2026-08-05T00:00:00.000Z";
 
 test("r1 gate1: Iris provider path never calls Session.buildContext (spy throws)", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-r1-gate1-"));
   const config = defaultAgentConfig();
-  const now = "2026-08-05T00:00:00.000Z";
   try {
     initializeDataRoot(dataRoot, config);
     const paths = resolveDataRootPaths(dataRoot, config);
@@ -49,7 +50,7 @@ test("r1 gate1: Iris provider path never calls Session.buildContext (spy throws)
       config.runtime_sessions.session_id_prefix,
       config.runtime_sessions.timezone,
     );
-    const epoch = epochStore.ensureActive(now);
+    const epoch = epochStore.ensureActive(NOW);
     const { repo, session } = await openOrCreateSession(dataRoot, config, epoch.runtimeSessionId);
 
     // Gate 1 spy: any buildContext() call on the Iris path must fail the slice.
@@ -59,51 +60,73 @@ test("r1 gate1: Iris provider path never calls Session.buildContext (spy throws)
 
     const { models, model, providerProfileId } = await composeProvider("mock");
     const input = sampleAgentInput();
-    const prepared = prepareContextSources(
+    const binding = prepareInvocation(
       input,
       epoch.runtimeSessionId,
       epoch.epochId,
+      epoch.ordinalWithinDate,
       config,
-      now,
+      NOW,
     );
-    const currentInvocation = {
-      input,
-      prepared,
-      invocationId: `invocation-${input.inputId}`,
-    };
-    const { harness } = createIrisHarness({
-      session,
-      instanceEpoch: epoch.ordinalWithinDate,
-      models,
-      model,
-      tools: [makeReadOnlyTestTool()],
-      currentInvocation,
-      now,
-      providerProfileId,
-    });
-    const ledger = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-    attachRuntimeEventSeam(harness, {
-      ledger,
+    const assembly = await assembleIrisContext({
+      dataRoot: paths.dataRoot,
       runtimeSessionId: epoch.runtimeSessionId,
-      piSessionId: epoch.runtimeSessionId,
+      providerProfileId,
+      canonicalSystemPrompt: binding.canonicalSystemPrompt,
+      systemProjectionHash: createHash("sha256")
+        .update(binding.canonicalSystemPrompt)
+        .digest("hex"),
+      preparedAt: binding.preparedAt,
+      withHistorian: true,
+      now: () => NOW,
+      getCurrentSource: () => ({
+        canonicalSystemPrompt: binding.canonicalSystemPrompt,
+        personaSnapshotId: "persona-default-v1",
+        providerProfileId,
+        toolDeclarations: ["test_read_tool"],
+      }),
     });
+    try {
+      const { harness } = createIrisHarness({
+        session,
+        instanceEpoch: epoch.ordinalWithinDate,
+        models,
+        model,
+        tools: [makeReadOnlyTestTool()],
+        currentInvocation: binding,
+        now: NOW,
+        providerProfileId,
+        irisContext: assembly.contextService,
+      });
+      const bridge = new IrisContextBridge({
+        runtimeSessionId: epoch.runtimeSessionId,
+        instanceEpoch: epoch.ordinalWithinDate,
+        contextService: assembly.contextService,
+        getInput: () => binding.input,
+        now: () => NOW,
+      });
+      bridge.attach(harness);
 
-    // Prompt succeeds WITHOUT ever touching buildContext (controller path).
-    const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
-    assert.ok(
-      typeof assistantMessage.content === "string" || Array.isArray(assistantMessage.content),
-    );
-    const events = ledger.listBySession(epoch.runtimeSessionId);
-    assert.ok(events.length > 0, "ledger must record seam events");
-    ledger.close();
-    await closeSessionStorage(repo);
-    epochStore.close();
+      // Prompt succeeds WITHOUT ever touching buildContext (controller path).
+      const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
+      assert.ok(
+        typeof assistantMessage.content === "string" || Array.isArray(assistantMessage.content),
+      );
+      // canonical units were committed via the bridge (not via buildContext).
+      const units = assembly.contextService.listUnits(epoch.runtimeSessionId);
+      assert.ok(units.length >= 2, "bridge must commit canonical user/assistant units");
+      bridge.close();
+    } finally {
+      await assembly.close();
+      await closeSessionStorage(repo);
+      epochStore.close();
+    }
   } finally {
-    // 不清理（避免 Windows 文件锁干扰；OS tmpdir 管理）。
+    // OS tmpdir 管理（不清理，避免 Windows 文件锁干扰）。
   }
 });
 
-test("r1 gate3: mock slice ledger records the canonical user/tool/assistant ordering exactly-once", async () => {
+test("r1 gate3: mock slice commits canonical units in order, exactly-once", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-r1-gate3-"));
   try {
     const result = await runMinimalSlice({
@@ -112,51 +135,44 @@ test("r1 gate3: mock slice ledger records the canonical user/tool/assistant orde
       input: sampleAgentInput(),
       provider: "mock",
     });
-    const events = result.ledgerEvents;
-    assert.ok(events.length >= 4, `expected >=4 ledger events, got ${events.length}`);
+    const units = result.contextUnits;
+    assert.ok(units.length >= 2, `expected >=2 canonical units, got ${units.length}`);
 
-    // 事件类型必须全部来自 seam 映射（Gate 4：无 synthetic 事件）。
-    for (const event of events) {
-      assert.ok(ALLOWED_LEDGER_TYPES.has(event.type), `unexpected ledger event type ${event.type}`);
+    // exactly-once: runtimeEventId / contextUnitId unique.
+    const eventIds = new Set(units.map((unit) => unit.runtimeEventId));
+    assert.equal(eventIds.size, units.length, "runtimeEventId must be unique per unit");
+    const unitIds = new Set(units.map((unit) => unit.contextUnitId));
+    assert.equal(unitIds.size, units.length, "contextUnitId must be unique per unit");
+
+    // 顺序：contextSeq 严格单调；首个单元是 user；每个单元映射到真实事件。
+    for (let index = 1; index < units.length; index += 1) {
+      const prev = units[index - 1];
+      const curr = units[index];
+      assert.ok(
+        prev !== undefined && curr !== undefined && curr.contextSeq > prev.contextSeq,
+        "contextSeq must be strictly increasing",
+      );
+    }
+    const first = units[0];
+    assert.equal(first?.kind, "user", "first canonical unit must be the user request");
+
+    // Gate 4：不生成 synthetic 单元 —— kinds 只来自真实 RuntimeEvent。
+    for (const unit of units) {
+      assert.ok(
+        unit.kind === "user" || unit.kind === "assistant" || unit.kind === "tool_result",
+        `unexpected synthetic unit kind ${unit.kind}`,
+      );
     }
 
-    // exactly-once: idempotency keys unique.
-    const keys = new Set(events.map((event) => event.idempotencyKey));
-    assert.equal(keys.size, events.length, "idempotency keys must be unique");
-
-    // 顺序：首个事件是 user 的 message_finalized；settled 是最后一个。
-    const first = events[0];
-    assert.equal(first?.type, "message_finalized");
-    const last = events[events.length - 1];
-    assert.equal(last?.type, "agent_settled");
-
-    // message_finalized 携带完整 attribution。
-    for (const event of events) {
-      if (event.type === "message_finalized") {
-        assert.ok(typeof event.entryId === "string" && event.entryId.length > 0);
-        assert.equal(event.contentHash?.length, 64);
-        assert.equal(event.disposition, "include");
-      }
-    }
-
-    // tool 循环：tool_execution_committed 存在于 assistant toolCall 之后。
-    const toolIdx = events.findIndex((event) => event.type === "tool_execution_committed");
-    if (toolIdx >= 0) {
-      const toolEvent = events[toolIdx];
-      assert.equal(toolEvent?.toolCallId, "tool-call-1");
-      assert.equal(toolEvent?.toolName, "test_read_tool");
-      // 其后必须还有 message_finalized（final assistant）与 turn_committed。
-      const after = events.slice(toolIdx);
-      assert.ok(after.some((event) => event.type === "message_finalized"));
-      assert.ok(after.some((event) => event.type === "turn_committed"));
-    }
+    // 最近一次 provider 边界必须已发布 generation（Gate 1 的 controller 路径）。
+    assert.match(result.generationSummary, /^layers=\[/, "generation must be published");
   } finally {
     // OS tmpdir 管理。
   }
 });
 
-test("r1 gate3: ledger persists across reopen (crash-window recovery basis)", async () => {
-  const dataRoot = mkdtempSync(join(tmpdir(), "iris-r1-gate3-reopen-"));
+test("r1 gate4: no synthetic repair — every unit maps to a committed event entry", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "iris-r1-gate4-"));
   try {
     const result = await runMinimalSlice({
       dataRoot,
@@ -164,172 +180,30 @@ test("r1 gate3: ledger persists across reopen (crash-window recovery basis)", as
       input: sampleAgentInput(),
       provider: "mock",
     });
-    const paths = resolveDataRootPaths(dataRoot, defaultAgentConfig());
-    const reopened = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-    const persisted = reopened.listBySession(result.runtimeSessionId);
-    assert.equal(persisted.length, result.ledgerEvents.length);
-    reopened.close();
-  } finally {
-    // OS tmpdir 管理。
-  }
-});
+    const units = result.contextUnits;
 
-// --- iris_agent#40: every supported append path reaches the ledger ----------
+    // 每个单元必须有一个已提交事件的稳定 eventId（re-<hash> 派生）；
+    // 无 synthetic 单元（无凭空生成的 assistant/toolResult）。
+    for (const unit of units) {
+      assert.match(
+        unit.runtimeEventId,
+        /^re-[0-9a-f]{24}$/,
+        `unit runtimeEventId must be a derived stable event id, got ${unit.runtimeEventId}`,
+      );
+      assert.equal(unit.historianDisposition, "include");
+      assert.equal(unit.lifecycleState, "committed");
+    }
 
-test("r40: direct harness.appendMessage produces exactly one ledger message_finalized", async () => {
-  const dataRoot = mkdtempSync(join(tmpdir(), "iris-r40-direct-"));
-  try {
-    const config = defaultAgentConfig();
-    const now = "2026-08-05T00:00:00.000Z";
-    initializeDataRoot(dataRoot, config);
-    const paths = resolveDataRootPaths(dataRoot, config);
-    const epochStore = new RuntimeEpochStore(
-      paths.epochRegistryDb,
-      config.runtime_sessions.session_id_prefix,
-      config.runtime_sessions.timezone,
-    );
-    const epoch = epochStore.ensureActive(now);
-    const { repo, session } = await openOrCreateSession(dataRoot, config, epoch.runtimeSessionId);
-    const { models, model, providerProfileId } = await composeProvider("mock");
-    const prepared = prepareContextSources(
-      sampleAgentInput(),
-      epoch.runtimeSessionId,
-      epoch.epochId,
-      config,
-      now,
-    );
-    const { harness } = createIrisHarness({
-      session,
-      instanceEpoch: epoch.ordinalWithinDate,
-      models,
-      model,
-      tools: [makeReadOnlyTestTool()],
-      currentInvocation: {
-        input: sampleAgentInput(),
-        prepared,
-        invocationId: `invocation-direct`,
-      },
-      now,
-      providerProfileId,
-    });
-    const ledger = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-    attachRuntimeEventSeam(harness, {
-      ledger,
-      runtimeSessionId: epoch.runtimeSessionId,
-      piSessionId: epoch.runtimeSessionId,
-    });
-
-    // Direct append outside the agent loop must still produce a receipt event.
-    await harness.appendMessage({
-      role: "user",
-      content: [{ type: "text", text: "direct append" }],
-      timestamp: Date.now(),
-    });
-
-    const events = ledger.listBySession(epoch.runtimeSessionId);
-    const finalized = events.filter((event) => event.type === "message_finalized");
-    assert.equal(finalized.length, 1, "direct append must yield exactly one message_finalized");
-    const firstFinalized = finalized[0];
-    assert.ok(firstFinalized !== undefined);
-    assert.ok(typeof firstFinalized.entryId === "string" && firstFinalized.entryId.length > 0);
-    assert.equal(firstFinalized.contentHash?.length, 64);
-    ledger.close();
-    await closeSessionStorage(repo);
-    epochStore.close();
-  } finally {
-    // OS tmpdir 管理。
-  }
-});
-
-test("r40: pending-writes flush appends are committed to the ledger exactly once", async () => {
-  const dataRoot = mkdtempSync(join(tmpdir(), "iris-r40-flush-"));
-  try {
-    const config = defaultAgentConfig();
-    const now = "2026-08-05T00:00:00.000Z";
-    initializeDataRoot(dataRoot, config);
-    const paths = resolveDataRootPaths(dataRoot, config);
-    const epochStore = new RuntimeEpochStore(
-      paths.epochRegistryDb,
-      config.runtime_sessions.session_id_prefix,
-      config.runtime_sessions.timezone,
-    );
-    const epoch = epochStore.ensureActive(now);
-    const { repo, session } = await openOrCreateSession(dataRoot, config, epoch.runtimeSessionId);
-    const { models, model, providerProfileId } = await composeProvider("mock");
-    const prepared = prepareContextSources(
-      sampleAgentInput(),
-      epoch.runtimeSessionId,
-      epoch.epochId,
-      config,
-      now,
-    );
-    const { harness } = createIrisHarness({
-      session,
-      instanceEpoch: epoch.ordinalWithinDate,
-      models,
-      model,
-      tools: [makeReadOnlyTestTool()],
-      currentInvocation: {
-        input: sampleAgentInput(),
-        prepared,
-        invocationId: `invocation-flush`,
-      },
-      now,
-      providerProfileId,
-    });
-    const ledger = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-    attachRuntimeEventSeam(harness, {
-      ledger,
-      runtimeSessionId: epoch.runtimeSessionId,
-      piSessionId: epoch.runtimeSessionId,
-    });
-
-    // While a prompt is in flight, appends are queued and flushed later; both
-    // queued messages must appear in the ledger with distinct entries.
-    const promptPromise = harness.prompt("hello");
-    await harness.appendMessage({
-      role: "user",
-      content: [{ type: "text", text: "queued-1" }],
-      timestamp: Date.now(),
-    });
-    await harness.appendMessage({
-      role: "user",
-      content: [{ type: "text", text: "queued-2" }],
-      timestamp: Date.now(),
-    });
-    await promptPromise;
-
-    const events = ledger.listBySession(epoch.runtimeSessionId);
-    const finalized = events.filter((event) => event.type === "message_finalized");
-    // prompt user + assistant + two queued messages
-    assert.ok(finalized.length >= 4, `expected >=4 message_finalized, got ${finalized.length}`);
-    const entryIds = new Set(finalized.map((event) => event.entryId));
-    assert.equal(
-      entryIds.size,
-      finalized.length,
-      "each appended message must have a distinct entryId",
-    );
-    // Ordering: the two queued appends appear after the prompt's assistant reply.
-    const texts = finalized.map((event) => {
-      try {
-        return (
-          (JSON.parse(event.payload ?? "{}") as { content?: Array<{ text?: string }> }).content?.[0]
-            ?.text ?? ""
-        );
-      } catch {
-        return "";
-      }
-    });
-    const queuedIdx = [texts.indexOf("queued-1"), texts.indexOf("queued-2")];
-    assert.ok(queuedIdx[0] !== undefined && queuedIdx[0] > 0, "queued messages must be present");
-    assert.ok(queuedIdx[1] !== undefined && queuedIdx[1] > 0, "queued messages must be present");
-    assert.ok(
-      queuedIdx[0] !== undefined && queuedIdx[1] !== undefined && queuedIdx[1] > queuedIdx[0],
-      "queued messages must keep commit order",
-    );
-    ledger.close();
-    await closeSessionStorage(repo);
-    epochStore.close();
+    // tool 循环：存在 tool_result 单元时，其后必须还有 assistant 单元
+    // （final turn）—— 即没有把 tool_result 当成最终回复。
+    const toolIndex = units.findIndex((unit) => unit.kind === "tool_result");
+    if (toolIndex >= 0) {
+      const after = units.slice(toolIndex);
+      assert.ok(
+        after.some((unit) => unit.kind === "assistant"),
+        "a committed tool_result must be followed by a final assistant unit",
+      );
+    }
   } finally {
     // OS tmpdir 管理。
   }

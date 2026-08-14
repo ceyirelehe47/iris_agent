@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import type { AgentMessage } from "@iris/pi-agent-core";
 
-import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/contracts/context.js";
+import { IRIS_INPUT_META_CONTENT, IRIS_INPUT_META_CUSTOM_TYPE } from "../src/runtime/companion.js";
 import type { AgentInput, OriginEnvelope } from "../src/contracts/origin.js";
 import { directUserRequest } from "../src/contracts/origin.js";
 import {

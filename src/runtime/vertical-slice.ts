@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Type, type AssistantMessage } from "@iris/pi-ai";
-
-import type { ContextMessageUnitV1 } from "../contracts/context-v27.js";
-import type { RuntimeEvent } from "../contracts/runtime-events.js";
-import { RuntimeEventLedger } from "./runtime-event-ledger.js";
-import { ContextStore } from "../context/context-store.js";
-import { ContextIngest } from "../context/context-ingest.js";
-import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
+import type { ContextMessageUnitV1 } from "@iris/context/contracts";
 
 import { type AgentHarnessTool, type Session, type SessionTreeEntry } from "@iris/pi-agent-core";
 import {
@@ -18,7 +12,6 @@ import {
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
-import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentInput } from "../contracts/origin.js";
 import { directUserRequest } from "../contracts/origin.js";
 import { acquireDataRootLock } from "../host/lock.js";
@@ -27,7 +20,14 @@ import { nodeSqliteRepoEnv } from "./pi-env.js";
 import { RuntimeEpochStore } from "./epoch-manager.js";
 import { createMockProvider } from "./mock-provider.js";
 import { createOpenCodeGoProvider } from "./opencode-go-provider.js";
-import { createIrisHarness, type HarnessObservers } from "./harness-factory.js";
+import {
+  createIrisHarness,
+  type HarnessObservers,
+  type InvocationBinding,
+} from "./harness-factory.js";
+import { assembleIrisContext, deriveIrisLineageId } from "./iris-context.js";
+import { IrisContextBridge } from "./iris-bridge.js";
+import { HistoricalSessionRecoveryIngest } from "./recovery-ingest.js";
 
 export interface VerticalSliceResult {
   epochId: string;
@@ -35,15 +35,10 @@ export interface VerticalSliceResult {
   observers: HarnessObservers;
   assistantMessage: AssistantMessage;
   entries: SessionTreeEntry[];
-  /** R1-P1e：runtime-event ledger exactly-once 提交的不可变事件流。 */
-  ledgerEvents: RuntimeEvent[];
-  /** R2-P0：ContextMessageUnitV1 语义单元（ingest 折叠后）。 */
+  /** @iris/context 已提交的 ContextMessageUnitV1（会话视图）。 */
   contextUnits: ContextMessageUnitV1[];
-  /** R2-P1：prompt 完成后 persistRender 提交的 m0/m1 字节与 context_seq
-   * watermark（测试断言 golden parity 用；未发生 provider render 时为空串/0）。 */
-  m0Body: string;
-  m1Body: string;
-  representedThroughContextSeq: number;
+  /** 最近一次 provider 边界的 generation 分层摘要（测试/诊断）。 */
+  generationSummary: string;
   dataRoot: string;
 }
 
@@ -86,22 +81,21 @@ export async function closeSessionStorage(repo: {
 }
 
 /**
- * Feature B (goal.txt §5): prepare the MINIMAL Pi-runtime binding for one
- * invocation. Returns an InvocationSourceBinding — session binding + epoch +
- * source identity + canonical system prompt — and NOTHING else. Context
- * assembly state (m0/m1 materialization) is never carried on the binding;
- * it is owned by ContextRenderer + persistRender (context_lineages). The
- * v12-era `materializationIdentity: "mock-m0m1-v1"` marker was removed.
+ * 为一次 invocation 准备最小 Pi-runtime binding（InvocationBinding）。
+ * 只含 input / invocationId / runtimeSessionId / epochId / instanceEpoch /
+ * canonicalSystemPrompt / providerProfileId —— 不再携带 v27 废止的
+ * ContextSourceSnapshot/PreparedInvocationSources 语义（removed legacy
+ * assembly contract）；Context 组装状态
+ * 完全由 @iris/context 持有（Notion v27 Legacy Assembly Contract Cleanup）。
  */
-export function prepareContextSources(
+export function prepareInvocation(
   input: AgentInput,
   runtimeSessionId: string,
   epochId: string,
+  instanceEpoch: number,
   config: AgentConfigV3,
   now: string,
-): InvocationSourceBinding {
-  const personaSnapshotId = "persona-default-v1";
-  const declarationVersion = "decl-v1";
+): InvocationBinding {
   const providerProfileId = config.model.main_agent.active_profile;
   const canonicalSystemPrompt =
     `IRIS SYSTEM PROMPT V1\n` +
@@ -112,14 +106,13 @@ export function prepareContextSources(
     `providerProfileId: ${providerProfileId}\n` +
     `binding: immutable-for-invocation\n`;
   return {
-    contextSourceSnapshotId: `snapshot-${createHash("sha256").update(canonicalSystemPrompt).digest("hex").slice(0, 12)}`,
+    input,
+    invocationId: `invocation-${input.inputId}`,
     runtimeSessionId,
     epochId,
-    personaSnapshotId,
-    declarationVersion,
-    providerProfileId,
+    instanceEpoch,
     canonicalSystemPrompt,
-    systemProjectionHash: createHash("sha256").update(canonicalSystemPrompt).digest("hex"),
+    providerProfileId,
     preparedAt: new Date(now).toISOString(),
   };
 }
@@ -140,18 +133,6 @@ export function sampleAgentInput(): AgentInput {
   };
 }
 
-/**
- * R2-P1 (iris_agent#9)：确保 identity 存在 context lineage（幂等锚点）。
- * lineage 是 identity-level：一个 data root 恰好一条，跨多个 bounded Pi
- * Runtime Session 持久。首次创建时绑定当前 session；rollover 的新 session
- * 只重新绑定（bindCurrentSession），绝不创建新 lineage、绝不继承重置 m0。
- *
- * Feature B：identity 全部取自 invocation 的 Pi-runtime binding
- * （InvocationSourceBinding）——不再接受 v12-era 的 mock 物化身份。
- * materialization_id 是 lineage 的物化方案标签：真实 m0/m1 物化由
- * ContextRenderer.persistRender 提交（materializeM0/M1ByContextSeq），
- * 绑定侧从不携带物化状态。
- */
 export async function openOrCreateSession(
   dataRoot: string,
   config: AgentConfigV3,
@@ -172,7 +153,7 @@ export async function openOrCreateSession(
 }
 
 export interface ReconcileHistoricalSessionResult {
-  /** Pi receipts replayed into the RuntimeEvent ledger. */
+  /** Pi receipts replayed into the Context ingest. */
   replayed: number;
   /** The durable identity lineage resolved for the historical session. */
   lineageId: string;
@@ -182,22 +163,20 @@ export interface ReconcileHistoricalSessionResult {
 }
 
 /**
- * iris_agent#52 Recovery Reconciler：rollover 后把旧 Runtime Session 的
- * 未提交 crash 窗口（Pi durable append + pending receipt，Iris 未 commit）
- * 恢复到其 durable identity lineage。
+ * Recovery Reconciler：rollover 后把旧 Runtime Session 的未提交 crash 窗口
+ * （Pi durable append + pending receipt，Iris 未 commit）恢复到其 durable
+ * identity lineage。
  *
  * 流程：
  *  1. 读取 Session 的 pending receipts（Pi 恢复证据）；
- *  2. 用 verify 过的 receipt 经 ContextStore.resolveLineageForRecovery 解析
- *     lineage（binding ledger 存在性 + checksum 完整性，fail closed）；
- *  3. 以该 lineage 构造 recovery-mode ContextIngest（按 lineage 直查，绝不把
- *     旧 Session 重新变回 current）；
- *  4. harness.recoverPendingCommitReceipts() 重放事件 → seam → RuntimeEvent
- *     ledger → Context ingest（contextSeq 在 lineage 内全局连续）。
+ *  2. 用 verify 过的 receipt 经 @iris/context 的 resolveLineageForRecovery
+ *     解析 lineage（binding ledger 存在性 + checksum 完整性，fail closed）；
+ *  3. harness.recoverPendingCommitReceipts() 重放事件 → IrisContextBridge →
+ *     recovery ingest（按 lineage 直查，绝不把旧 Session 重新变回 current）；
+ *  4. ensureUnitsUpTo 幂等补建；acknowledgeSessionReconciled 标记对账完成。
  *
  * 旧 Session 的 raw archive attribution（runtimeSessionId）保留在事件与
- * unit 上；identity lineage 与 Runtime Session id 是两个不同的概念，本
- * reconciler 不混用。
+ * unit 上；identity lineage 与 Runtime Session id 是两个不同的概念。
  */
 export async function reconcileHistoricalSession(options: {
   dataRoot: string;
@@ -223,29 +202,35 @@ export async function reconcileHistoricalSession(options: {
     );
     try {
       const pending = await session.readPendingCommitReceipts();
-      if (pending.length === 0) {
-        // iris_agent#63: no pending receipt window → the Session needs no
-        // further recovery resolution; mark the binding reconciled so it
-        // becomes eligible for bounded-ledger reclaim.
-        const emptyStore = ContextStore.open(paths.contextDb, {
-          lineageId: deriveLineageId(paths.dataRoot),
-        });
-        try {
-          emptyStore.acknowledgeSessionReconciled(options.runtimeSessionId);
-        } finally {
-          emptyStore.close();
-        }
-        return {
-          replayed: 0,
-          lineageId: "",
-          units: [],
-          runtimeSessionId: options.runtimeSessionId,
-        };
-      }
-      const contextStore = ContextStore.open(paths.contextDb, {
-        lineageId: deriveLineageId(paths.dataRoot),
+      const lineageId = deriveIrisLineageId(paths.dataRoot);
+      const assembly = await assembleIrisContext({
+        dataRoot: paths.dataRoot,
+        runtimeSessionId: options.runtimeSessionId,
+        providerProfileId: config.model.main_agent.active_profile,
+        canonicalSystemPrompt: "",
+        systemProjectionHash: "",
+        preparedAt: new Date(now).toISOString(),
+        withHistorian: false,
+        now: () => now,
+        getCurrentSource: () => ({
+          canonicalSystemPrompt: "",
+          personaSnapshotId: "persona-default-v1",
+          providerProfileId: config.model.main_agent.active_profile,
+          toolDeclarations: [],
+        }),
       });
       try {
+        if (pending.length === 0) {
+          // 无 pending receipt 窗口 → Session 无需进一步恢复；标记 binding
+          // 对账完成（幂等），使其可被 bounded-ledger reclaim 回收。
+          assembly.contextService.getStore().acknowledgeSessionReconciled(options.runtimeSessionId);
+          return {
+            replayed: 0,
+            lineageId: "",
+            units: [],
+            runtimeSessionId: options.runtimeSessionId,
+          };
+        }
         // 解析必须是"已验证的绑定"：binding ledger 行 + checksum + receipt
         // 身份。任一步失败 → throw（fail closed），不 ingest 任何事件。
         const firstPending = pending[0];
@@ -254,62 +239,62 @@ export async function reconcileHistoricalSession(options: {
             `reconcileHistoricalSession: pending receipts vanished between read and resolve`,
           );
         }
-        const lineageId = contextStore.resolveLineageForRecovery(
+        const recoveryIngest = new HistoricalSessionRecoveryIngest(
+          assembly.contextService,
+          lineageId,
+        );
+        const resolvedLineage = recoveryIngest.resolveLineageForRecovery(
           options.runtimeSessionId,
           firstPending,
         );
-        const ledger = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-        try {
-          const recoveryIngest = new ContextIngest(ledger, contextStore, lineageId, true);
-          const { models, model, providerProfileId } = await composeProvider("mock");
-          const currentInvocation = {
-            input: sampleAgentInput(),
-            prepared: prepareContextSources(
-              sampleAgentInput(),
-              options.runtimeSessionId,
-              "recovery",
-              config,
-              now,
-            ),
-            invocationId: `reconcile-${options.runtimeSessionId}`,
-          };
-          const { harness } = createIrisHarness({
-            session,
-            instanceEpoch: 1,
-            models,
-            model,
-            tools: [makeReadOnlyTestTool()],
-            currentInvocation,
-            now,
-            providerProfileId,
-          });
-          attachRuntimeEventSeam(harness, {
-            ledger,
-            runtimeSessionId: options.runtimeSessionId,
-            piSessionId: options.runtimeSessionId,
-            contextIngest: recoveryIngest,
-          });
-          const replayed = await harness.recoverPendingCommitReceipts();
-          // ensureUnitsUpTo is idempotent (hasUnitForEvent skips built units);
-          // in recovery mode it returns the LINEAGE view (session resolution
-          // would fail closed for a historical session).
-          const units = recoveryIngest.ensureUnitsUpTo(options.runtimeSessionId);
-          // iris_agent#63: the pending receipt window is now fully consumed —
-          // mark the binding reconciled (authoritative evidence) so the
-          // bounded-ledger reclaim may prune it once outside the retain
-          // window. Idempotent; a crash before this point leaves the binding
-          // unacknowledged and therefore never pruned.
-          contextStore.acknowledgeSessionReconciled(options.runtimeSessionId);
-          return { replayed, lineageId, units, runtimeSessionId: options.runtimeSessionId };
-        } finally {
-          ledger.close();
-          epochStore.close();
-        }
+        const { models, model, providerProfileId } = await composeProvider("mock");
+        const binding = prepareInvocation(
+          sampleAgentInput(),
+          options.runtimeSessionId,
+          "recovery",
+          1,
+          config,
+          now,
+        );
+        const { harness } = createIrisHarness({
+          session,
+          instanceEpoch: 1,
+          models,
+          model,
+          tools: [makeReadOnlyTestTool()],
+          currentInvocation: binding,
+          now,
+          providerProfileId,
+          // 恢复路径：contextController 使用当前 generation 渲染；若无
+          // generation 则 fail-closed —— 恢复重放不依赖 provider dispatch。
+          irisContext: assembly.contextService,
+        });
+        const bridge = new IrisContextBridge({
+          runtimeSessionId: options.runtimeSessionId,
+          instanceEpoch: 1,
+          contextService: assembly.contextService,
+          getInput: () => binding.input,
+          now: () => now,
+        });
+        bridge.attach(harness);
+        const replayed = await harness.recoverPendingCommitReceipts();
+        // ensureUnitsUpTo 幂等（hasUnitForEvent 跳过已建单元）；恢复模式返回
+        // LINEAGE 视图（历史 Session 不按 session 解析）。
+        const units = recoveryIngest.ensureUnitsUpTo();
+        // 对账完成（权威证据）——binding 可被 bounded-ledger reclaim 回收。
+        recoveryIngest.acknowledgeSessionReconciled(options.runtimeSessionId);
+        return {
+          replayed,
+          lineageId: resolvedLineage,
+          units,
+          runtimeSessionId: options.runtimeSessionId,
+        };
       } finally {
-        contextStore.close();
+        await assembly.close();
       }
     } finally {
       await closeSessionStorage(repo);
+      epochStore.close();
     }
   } finally {
     await lock.release();
@@ -332,14 +317,9 @@ export function makeReadOnlyTestTool(): AgentHarnessTool<undefined> {
   };
 }
 
-/**
- * R2 (iris_agent#9)：从 data root 派生 identity-level lineage id。
- * 一个 Iris identity/data root 恰好一条 durable Context lineage；任何
- * Runtime Session(含 rollover 后的新 session)都锚定到同一 lineage。
- * 稳定、可复现：仅依赖 data root 规范化路径。
- */
+/** 从 dataRoot 派生稳定 identity-level lineage id（兼容导出）。 */
 export function deriveLineageId(dataRoot: string): string {
-  return `identity-${createHash("sha256").update(resolve(dataRoot)).digest("hex").slice(0, 16)}`;
+  return deriveIrisLineageId(resolve(dataRoot));
 }
 
 export async function reopenActiveSession(options: {
@@ -372,10 +352,11 @@ export async function reopenActiveSession(options: {
       config,
       epoch.runtimeSessionId,
     );
-    const prepared = prepareContextSources(
+    const binding = prepareInvocation(
       input,
       epoch.runtimeSessionId,
       epoch.epochId,
+      epoch.ordinalWithinDate,
       config,
       now,
     );
@@ -383,30 +364,48 @@ export async function reopenActiveSession(options: {
     const { models, model, providerProfileId } = await composeProvider(providerMode, (messages) => {
       providerContextSnapshots.push(JSON.stringify(messages));
     });
-    const currentInvocation = {
-      input,
-      prepared,
-      invocationId: `restart-${input.inputId}`,
-    };
-    const { observers } = createIrisHarness({
-      session,
-      instanceEpoch: epoch.ordinalWithinDate,
-      models,
-      model,
-      tools: [makeReadOnlyTestTool()],
-      currentInvocation,
-      now,
-      providerProfileId,
-    });
-    observers.providerContextSnapshots = providerContextSnapshots;
-    const entries = await session.getEntries();
-    await closeSessionStorage(repo);
-    epochStore.close();
-    return {
+    const assembly = await assembleIrisContext({
+      dataRoot: paths.dataRoot,
       runtimeSessionId: epoch.runtimeSessionId,
-      observers,
-      entries,
-    };
+      providerProfileId,
+      canonicalSystemPrompt: binding.canonicalSystemPrompt,
+      systemProjectionHash: createHash("sha256")
+        .update(binding.canonicalSystemPrompt)
+        .digest("hex"),
+      preparedAt: binding.preparedAt,
+      withHistorian: false,
+      now: () => now,
+      getCurrentSource: () => ({
+        canonicalSystemPrompt: binding.canonicalSystemPrompt,
+        personaSnapshotId: "persona-default-v1",
+        providerProfileId,
+        toolDeclarations: ["test_read_tool"],
+      }),
+    });
+    try {
+      const { observers } = createIrisHarness({
+        session,
+        instanceEpoch: epoch.ordinalWithinDate,
+        models,
+        model,
+        tools: [makeReadOnlyTestTool()],
+        currentInvocation: binding,
+        now,
+        providerProfileId,
+        irisContext: assembly.contextService,
+      });
+      observers.providerContextSnapshots = providerContextSnapshots;
+      const entries = await session.getEntries();
+      return {
+        runtimeSessionId: epoch.runtimeSessionId,
+        observers,
+        entries,
+      };
+    } finally {
+      await assembly.close();
+      await closeSessionStorage(repo);
+      epochStore.close();
+    }
   } finally {
     await lock.release();
   }
@@ -439,12 +438,6 @@ export async function rolloverActiveSession(options: {
   dataRoot: string;
   config?: AgentConfigV3;
   now?: string;
-  /**
-   * Settled authorization (review blocker #3): the epoch id that reached Pi
-   * settled. rollover refuses to switch unless the currently active epoch is
-   * exactly this one — an arbitrary caller cannot start a rollover while an
-   * invocation is still active on a different epoch.
-   */
   settledEpochId: string;
 }): Promise<RolloverResult> {
   const config = options.config ?? defaultAgentConfig();
@@ -459,9 +452,6 @@ export async function rolloverActiveSession(options: {
       config.runtime_sessions.timezone,
     );
     const previous = epochStore.ensureActive(now);
-    // Settled-only guard: the caller must prove the epoch that settled is the
-    // one currently active. Without this, any caller could roll over while an
-    // invocation is still running.
     if (previous.epochId !== options.settledEpochId) {
       epochStore.close();
       throw new Error(
@@ -470,8 +460,7 @@ export async function rolloverActiveSession(options: {
     }
     const pending = epochStore.beginRollover(now);
 
-    // Create the new Pi Session (actually materializes a row; a test asserting
-    // "fresh empty session" must find a real session, not a missing one).
+    // Create the new Pi Session (actually materializes a row).
     const newSessionHandle = await openOrCreateSession(
       options.dataRoot,
       config,
@@ -489,20 +478,33 @@ export async function rolloverActiveSession(options: {
 
     const next = epochStore.activateRollover(now);
 
-    // R2 (iris_agent#9): rollover rotates ONLY the Pi Session/Harness archive
-    // segment. The identity-level Context lineage (m0/m1/watermarks/replay
-    // state) survives; we just rebind it to the new session. No new lineage,
-    // no reset, no copy. Missing context.db (fresh data root) is fine — the
-    // lineage will be created on the next slice run.
-    const contextStore = ContextStore.open(paths.contextDb, {
-      lineageId: deriveLineageId(options.dataRoot),
+    // Rollover rotates ONLY the Pi Session/Harness archive segment. The
+    // identity-level Context lineage survives; we just rebind it to the new
+    // session. No new lineage, no reset, no copy. Missing context.db (fresh
+    // data root) is fine — the lineage will be created on the next slice run.
+    const lineageId = deriveIrisLineageId(paths.dataRoot);
+    const assembly = await assembleIrisContext({
+      dataRoot: paths.dataRoot,
+      runtimeSessionId: next.runtimeSessionId,
+      providerProfileId: config.model.main_agent.active_profile,
+      canonicalSystemPrompt: "",
+      systemProjectionHash: "",
+      preparedAt: new Date(now).toISOString(),
+      withHistorian: false,
+      now: () => now,
+      getCurrentSource: () => ({
+        canonicalSystemPrompt: "",
+        personaSnapshotId: "persona-default-v1",
+        providerProfileId: config.model.main_agent.active_profile,
+        toolDeclarations: [],
+      }),
     });
     try {
-      if (contextStore.getLineageByLineageId(contextStore.lineageId) !== undefined) {
-        contextStore.bindCurrentSession(contextStore.lineageId, next.runtimeSessionId);
+      if (assembly.contextService.getStore().getLineageByLineageId(lineageId) !== undefined) {
+        assembly.contextService.getStore().bindCurrentSession(lineageId, next.runtimeSessionId);
       }
     } finally {
-      contextStore.close();
+      await assembly.close();
     }
 
     const entries = await sessionEntriesFor(options.dataRoot, config, next.runtimeSessionId);

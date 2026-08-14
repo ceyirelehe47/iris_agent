@@ -4,12 +4,17 @@
  * deprecated-symbol rule, a critical behavioral test, or a production-path
  * prohibition makes aggregate CI fail.
  *
- * Each probe runs on a TEMPORARY git worktree of the current HEAD so the
- * working tree is never touched:
- *   1. tamper generated artifact → check:codegen-freshness FAILS
- *   2. prohibited symbol in production-reachable file → architecture probe FAILS
+ * Each probe runs on a TEMPORARY git worktree so the working tree is never
+ * touched. consume-iris-context 适配：probes 覆盖当前架构的门禁 —— 工作树
+ * 的 src/test/scripts/contracts/package.json 会 overlay 进 worktree，因此
+ * 被验证的是「当前」门禁（而非 HEAD 的旧 Context/Historian 架构）：
+ *   1. drift generated source → check:codegen-freshness FAILS（恢复后通过）
+ *   2. reintroduce src/context/ → check-duplicate-implementation FAILS
  *   3. deprecated name in src → check:deprecated-names FAILS
- *   4. delete a critical behavioral test from the test list → aggregate test FAILS
+ *   4. remove a critical behavioral test from npm test → aggregate test FAILS
+ *   5. disable Provider Renderer fail-closed → context-render tests FAIL
+ *   6. remove native settled-resolution call → c6 native-settled proof FAIL
+ *   7. disable durable recovery-state load → d6 crash-injection tests FAIL
  *
  * Exit 0 = every probe observed its gate failing (gates have teeth).
  */
@@ -66,6 +71,29 @@ try {
   // Install deps in the worktree (node_modules symlink keeps it fast).
   run(`ln -s ${REPO_ROOT}/node_modules ${worktree}/node_modules`, worktree);
 
+  // consume-iris-context: overlay the CURRENT working-tree state so the
+  // probes exercise the CURRENT gates (the HEAD worktree alone would test the
+  // deleted Context/Historian architecture). The overlay mirrors deletions
+  // too (src/context, src/historian, old contracts/migrations are absent).
+  for (const dir of ["src", "test", "scripts", "contracts", "fixtures"]) {
+    fs.rmSync(join(worktree, dir), { recursive: true, force: true });
+    if (fs.existsSync(join(REPO_ROOT, dir))) {
+      fs.cpSync(join(REPO_ROOT, dir), join(worktree, dir), { recursive: true, force: true });
+    }
+  }
+  for (const file of [
+    "package.json",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "eslint.config.mjs",
+    "prettier.config.mjs",
+  ]) {
+    fs.copyFileSync(join(REPO_ROOT, file), join(worktree, file));
+  }
+  // The overlay changed the worktree's working tree; stage it so codegen's
+  // freshness diff compares against the CURRENT artifacts (not HEAD's).
+  run("git add -A", worktree);
+
   // --- Probe 1: drift the source schema → codegen freshness FAILS ---
   // (Tampering with a GENERATED file is covered up by codegen itself; the
   // real sensitivity is SOURCE drift: a changed source schema produces
@@ -83,93 +111,114 @@ try {
   if (!freshnessRestored.ok) {
     console.error("PROBE FAILED: freshness gate did not recover after restore");
     process.exitCode = 1;
+  } else {
+    console.log("PROBE OK: freshness gate recovers after restore");
   }
 
-  // --- Probe 2: prohibited symbol in a production-reachable file → architecture probe FAILS ---
-  const hostPath = join(worktree, "src", "host", "host.ts");
-  const originalHost = fs.readFileSync(hostPath, "utf8");
-  fs.writeFileSync(hostPath, originalHost + "\nconst PreparedInvocationSources = 1;\n");
-  const arch = run("npx tsx --test test/architecture-normal-path-probe.test.ts", worktree);
+  // --- Probe 2: reintroduce a duplicate Context engine → fence FAILS ---
+  const contextDir = join(worktree, "src", "context");
+  fs.mkdirSync(contextDir, { recursive: true });
+  fs.writeFileSync(join(contextDir, "context-store.ts"), "// sensitivity probe\n");
+  const fence = run("node scripts/check-duplicate-implementation.mjs", worktree);
   expectFailure(
-    "prohibited symbol in production-reachable file → architecture probe",
-    arch,
-    "PreparedInvocationSources",
+    "reintroducing src/context/ → check-duplicate-implementation",
+    fence,
+    "duplicate implementation directory exists",
   );
-  fs.writeFileSync(hostPath, originalHost);
+  fs.rmSync(contextDir, { recursive: true, force: true });
 
   // --- Probe 3: deprecated name in src → check:deprecated-names FAILS ---
-  const contextPath = join(worktree, "src", "context", "context-store.ts");
-  const originalContext = fs.readFileSync(contextPath, "utf8");
+  const adapterPath = join(worktree, "src", "runtime", "pi-runtime-adapter.ts");
+  const originalAdapter = fs.readFileSync(adapterPath, "utf8");
   // The forbidden name is assembled at runtime so this probe file itself
   // never contains the literal (the deprecated-name gate scans everything).
-  const forbiddenName = "Context" + "Materialization" + "State";
-  fs.writeFileSync(contextPath, originalContext + `\n// probe\nconst ${forbiddenName} = 1;\n`);
+  const forbiddenName = "Context" + "Source" + "Snapshot";
+  fs.writeFileSync(adapterPath, originalAdapter + `\nconst ${forbiddenName} = 1;\n`);
   const deprecated = run("node scripts/check-deprecated-names.mjs", worktree);
   expectFailure("deprecated name in src → check:deprecated-names", deprecated, forbiddenName);
-  fs.writeFileSync(contextPath, originalContext);
+  fs.writeFileSync(adapterPath, originalAdapter);
 
-  // --- Probe 4: critical behavioral test removed from the test script → aggregate test FAILS ---
+  // --- Probe 4: a critical behavioral test is load-bearing for CI ---
+  // Two-sided proof: (a) a production regression the test would catch DOES
+  // fail the test while it is listed; (b) after removing the test from the
+  // test script, the SAME regression sails through `npm test` — proving the
+  // list entry is what gives the gate its teeth.
+  const bridgePath = join(worktree, "src", "runtime", "iris-bridge.ts");
+  const originalBridge = fs.readFileSync(bridgePath, "utf8");
+  // Regression: the bridge stops wiring companionOf → the user unit pairing
+  // never merges (only test/iris-bridge.test.ts asserts this).
+  const regression = originalBridge.replace(
+    "...(this.pendingUser !== null ? { companionOf: this.pendingUser.eventId } : {}),",
+    "// SENSITIVITY PROBE: companion pairing wiring removed",
+  );
+  fs.writeFileSync(bridgePath, regression);
+  const caught = run("npx tsx --test test/iris-bridge.test.ts", worktree);
+  expectFailure(
+    "iris-bridge catches the companion-pairing regression",
+    caught,
+    "companion pairing must verify",
+  );
+  fs.writeFileSync(bridgePath, originalBridge);
+
   const pkgPath = join(worktree, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
   const originalTest = pkg.scripts.test;
-  pkg.scripts.test = originalTest.replace(
-    "test/a7-p5-source-bound-validation.test.ts",
-    "test/__missing__a7.test.ts",
-  );
+  pkg.scripts.test = originalTest.replace("test/iris-bridge.test.ts", "");
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-  // NOTE: no shell pipeline here — `npm test | tail` would mask the exit
-  // code (the pipe's exit status is tail's), so the failure must be
-  // observed directly from npm's own exit code.
-  const tests = run("npm test", worktree);
-  // npm test runs every listed file; a missing file makes the runner fail.
-  expectFailure("removing a critical behavioral test from npm test", tests);
+  fs.rmSync(join(worktree, "test", "iris-bridge.test.ts"), { force: true });
+  // Same regression, critical test removed from the list → npm test must PASS
+  // (the regression escapes: the removed entry was load-bearing).
+  fs.writeFileSync(bridgePath, regression);
+  const escaped = run("npm test", worktree, { timeout: 300000 });
+  if (!escaped.ok) {
+    console.error("PROBE FAILED: npm test still caught the regression after the test was removed");
+    process.exitCode = 1;
+  } else {
+    console.log("PROBE OK: removing the critical test from npm test lets the regression through");
+  }
+  fs.writeFileSync(bridgePath, originalBridge);
   pkg.scripts.test = originalTest;
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
 
-  // --- Probe 5: disable projectP5Unit's authoritative hash validation → A7 tamper tests FAIL ---
-  const builderPath = join(worktree, "src", "context", "generation-builder.ts");
-  const originalBuilder = fs.readFileSync(builderPath, "utf8");
+  // --- Probe 5: disable Provider Renderer fail-closed → context-render tests FAIL ---
+  const renderPath = join(worktree, "src", "runtime", "context-render.ts");
+  const originalRender = fs.readFileSync(renderPath, "utf8");
   fs.writeFileSync(
-    builderPath,
-    originalBuilder.replace(
-      "if (recomputedHash !== cmu.contentHash) {",
-      "if (false && recomputedHash !== cmu.contentHash) {",
+    renderPath,
+    originalRender.replace(
+      /throw new Error\(\s*`provider render: P5 unit \$\{unit\.header\.contextUnitId\} has unknown role \$\{JSON\.stringify\(role\)\} \(fail closed\)`,\s*\);/,
+      'return { role: "user", content: [], timestamp: 0 } as unknown as AgentMessage; // SENSITIVITY PROBE: fail-closed disabled',
     ),
   );
-  const a7Tamper = run("npx tsx --test test/a7-p5-source-bound-validation.test.ts", worktree);
-  expectFailure("disabling projectP5Unit hash validation → A7 tamper tests", a7Tamper);
-  fs.writeFileSync(builderPath, originalBuilder);
+  const renderTests = run("npx tsx --test test/context-render.test.ts", worktree);
+  expectFailure("disabling Provider Renderer fail-closed → context-render tests", renderTests);
+  fs.writeFileSync(renderPath, originalRender);
 
-  // --- Probe 6: restore the Round-6 `receipt === null → return` abort success
-  // path → C7 native-settled authority tests FAIL ---
-  const adapterPath = join(worktree, "src", "runtime", "pi-runtime-adapter.ts");
-  const originalAdapter = fs.readFileSync(adapterPath, "utf8");
+  // --- Probe 6: remove the native settled-resolution call → C6 native-settled proof FAILS ---
   fs.writeFileSync(
     adapterPath,
     originalAdapter.replace(
-      "if (receipt === null) {\n      throw new Error(",
-      "if (receipt === null) {\n      // SENSITIVITY PROBE: broken abort-success path\n      return;\n      throw new Error(",
+      "this.settlementResolve?.();",
+      "// SENSITIVITY PROBE: settled-resolution call removed",
     ),
   );
-  const c7 = run("npx tsx --test test/c7-native-settled-authority.test.ts", worktree);
-  // The broken path (receipt null → return) means case 1's abort no longer
-  // fails closed → the test must fail.
-  expectFailure("restoring receipt-null abort success → C7 authority tests", c7);
+  const c6 = run("npx tsx --test test/c6-native-settled-proof.test.ts", worktree);
+  expectFailure("removing settled-resolution call → C6 native-settled proof", c6);
   fs.writeFileSync(adapterPath, originalAdapter);
 
-  // --- Probe 7: disable the durable resolution read at restart → D7 zero-re-query tests FAIL ---
-  const supervisorPath = join(worktree, "src", "runtime", "recovery-supervisor.ts");
-  const originalSupervisor = fs.readFileSync(supervisorPath, "utf8");
+  // --- Probe 7: disable the durable recovery-state load → D6 crash-injection tests FAIL ---
+  const recoveryStatePath = join(worktree, "src", "runtime", "recovery-state.ts");
+  const originalRecoveryState = fs.readFileSync(recoveryStatePath, "utf8");
   fs.writeFileSync(
-    supervisorPath,
-    originalSupervisor.replace(
-      "const durableResolution = this.resolutionStore?.load(logicalExecutionId);",
-      "const durableResolution = undefined; // SENSITIVITY PROBE: resolution read disabled",
+    recoveryStatePath,
+    originalRecoveryState.replace(
+      "return row === undefined ? undefined : rowToSnapshot(row);",
+      "return undefined; // SENSITIVITY PROBE: durable recovery-state load disabled",
     ),
   );
-  const d7 = run("npx tsx --test test/d7-crash-injection.test.ts", worktree);
-  expectFailure("disabling durable resolution read → D7 restart tests", d7);
-  fs.writeFileSync(supervisorPath, originalSupervisor);
+  const d6 = run("npx tsx --test test/d6-crash-injection.test.ts", worktree);
+  expectFailure("disabling durable recovery-state load → D6 crash-injection tests", d6);
+  fs.writeFileSync(recoveryStatePath, originalRecoveryState);
 
   console.log(
     process.exitCode === 1

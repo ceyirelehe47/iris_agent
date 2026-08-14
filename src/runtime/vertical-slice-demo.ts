@@ -1,21 +1,10 @@
-// NOT PRODUCTION — Test/dev vertical slice. Imports context-renderer
-// (MIGRATION ONLY per Notion v27). NOT imported by any production root; the
-// architecture gate proves this file is unreachable from src/host + src/bin.
-import {
-  CONTEXT_CARRIER_SCHEMA_VERSION,
-  CONTEXT_SERIALIZER_VERSION,
-  ContextRenderer,
-} from "../context/context-renderer.js";
-import { ContextStore } from "../context/context-store.js";
-import { ContextIngest } from "../context/context-ingest.js";
-import { createContextHistoryReadPort } from "../context/history-read-port.js";
-import { RuntimeEventLedger } from "./runtime-event-ledger.js";
-import { attachRuntimeEventSeam } from "./runtime-event-seam.js";
-import { encodeInputFrames } from "./companion.js";
-import { createIrisHarness } from "./harness-factory.js";
-import type { HistorianManager } from "../historian/historian-manager.js";
+// TEST/DEV vertical slice —— 消费 @iris/context 的 ContextService（Cordis）。
+// 与 Host 相同的装配根（assembleIrisContext）；Pi 事件经 IrisContextBridge →
+// ContextService.ingestRuntimeEvent；contextController 从 generation 渲染。
+// 本文件不是生产根（生产根是 src/host + src/bin）。
+import { createHash } from "node:crypto";
+
 import type { AgentInput } from "../contracts/origin.js";
-import type { InvocationSourceBinding } from "../contracts/context.js";
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
 import { acquireDataRootLock } from "../host/lock.js";
@@ -24,49 +13,17 @@ import { RuntimeEpochStore } from "./epoch-manager.js";
 import {
   closeSessionStorage,
   composeProvider,
-  deriveLineageId,
   makeReadOnlyTestTool,
   openOrCreateSession,
-  prepareContextSources,
+  prepareInvocation,
   sampleAgentInput,
   type SliceProviderMode,
   type VerticalSliceResult,
 } from "./vertical-slice.js";
-
-function ensureLineage(
-  contextStore: ContextStore,
-  runtimeSessionId: string,
-  epochId: string,
-  prepared: InvocationSourceBinding,
-  providerProfileId: string,
-): void {
-  const lineageId = contextStore.lineageId;
-  const existing = contextStore.getLineageByLineageId(lineageId);
-  if (existing !== undefined) {
-    if (existing.currentRuntimeSessionId !== runtimeSessionId) {
-      contextStore.bindCurrentSession(lineageId, runtimeSessionId);
-    }
-    return;
-  }
-  contextStore.createLineage({
-    lineageId,
-    runtimeSessionId,
-    contextSourceSnapshotId: prepared.contextSourceSnapshotId,
-    epochId,
-    personaSnapshotId: prepared.personaSnapshotId,
-    declarationVersion: prepared.declarationVersion,
-    providerProfileId,
-    canonicalSystemPrompt: prepared.canonicalSystemPrompt,
-    systemProjectionHash: prepared.systemProjectionHash,
-    preparedAt: prepared.preparedAt,
-    // Feature B: the v12-era `materializationIdentity: "mock-m0m1-v1"`
-    // marker is gone. The lineage's materialization scheme is the reviewed
-    // R2-P1 ContextRenderer (persistRender), never a binding-side mock.
-    materializationId: "context-renderer-v1",
-    contextSerializerVersion: CONTEXT_SERIALIZER_VERSION,
-    carrierSchemaVersion: CONTEXT_CARRIER_SCHEMA_VERSION,
-  });
-}
+import { assembleIrisContext } from "./iris-context.js";
+import { IrisContextBridge } from "./iris-bridge.js";
+import { createIrisHarness, type IrisHarnessCallbacks } from "./harness-factory.js";
+import { encodeInputFrames } from "./companion.js";
 
 export async function runMinimalSlice(options: {
   dataRoot: string;
@@ -74,16 +31,7 @@ export async function runMinimalSlice(options: {
   input?: AgentInput;
   now?: string;
   provider?: SliceProviderMode;
-  callbacks?: import("./harness-factory.js").IrisHarnessCallbacks;
-  /** R2-P3：ContextStore 的每 session 软 cap（测试注入极小值以在少量单元内触发
-   * cap / fail-closed 路径；缺省 = MAX_UNITS_PER_SESSION，硬 cap = 2× 软 cap）。 */
-  maxUnitsPerSession?: number;
-  /** R3-P1：可选的 HistorianManager（Host 集成前为 opt-in，完整接线在 R3-P4）。
-   * 提供时，HARD fold 提交后经 ContextHistoryReadPort 读取 lineage 物化边界并
-   * 触发 HistorianManager.enqueueIncremental（m0-clamp：只有已进入 m0/m1 的
-   * compartment 才可被 raw 替换）。缺省 = 不接线，本 slice 行为与 R2 完全一致
-   * （byte-identical）。 */
-  historianManager?: HistorianManager;
+  callbacks?: IrisHarnessCallbacks;
 }): Promise<VerticalSliceResult> {
   const config = options.config ?? defaultAgentConfig();
   const input = options.input ?? sampleAgentInput();
@@ -104,10 +52,11 @@ export async function runMinimalSlice(options: {
       config,
       epoch.runtimeSessionId,
     );
-    const prepared = prepareContextSources(
+    const binding = prepareInvocation(
       input,
       epoch.runtimeSessionId,
       epoch.epochId,
+      epoch.ordinalWithinDate,
       config,
       now,
     );
@@ -115,89 +64,70 @@ export async function runMinimalSlice(options: {
     const { models, model, providerProfileId } = await composeProvider(providerMode, (messages) => {
       providerContextSnapshots.push(JSON.stringify(messages));
     });
-    const currentInvocation = {
-      input,
-      prepared,
-      invocationId: `invocation-${input.inputId}`,
-    };
-    // R1-P1e: runtime-event ledger exactly-once 记录 Pi seam 生命周期事件。
-    const ledger = RuntimeEventLedger.open(paths.runtimeLedgerDb);
-    // R2-P0: ContextMessageUnit 语义 ledger（context.db）——事件提交后
-    // ensureUnitsUpTo 建单元；contextController 从单元投影（不再依赖 Session）。
-    // R2-P3：cap 可注入（软 cap 超限 → disposition="exclude"；硬 cap 超限 →
-    // ContextBoundsExceededError 传播使本 slice 大声失败，fail-closed）。
-    const contextStore = ContextStore.open(paths.contextDb, {
-      lineageId: deriveLineageId(paths.dataRoot),
-      ...(options.maxUnitsPerSession === undefined
-        ? {}
-        : { maxUnitsPerSession: options.maxUnitsPerSession }),
-    });
-    // R2-P1：Provider Renderer 需要 persisted lineage（m0/m1/watermark）。
-    // 幂等创建；rollover 的新 session 默认获得全新 lineage。
-    ensureLineage(contextStore, epoch.runtimeSessionId, epoch.epochId, prepared, providerProfileId);
-    const contextIngest = new ContextIngest(ledger, contextStore, contextStore.lineageId);
-    const contextRenderer = new ContextRenderer(contextStore);
-    // R3-P1：freeze-trigger 接线（opt-in）。flow：HARD fold 提交 →
-    // onMaterialized → 经 ContextHistoryReadPort 读取 lineage 物化边界 →
-    // HistorianManager.enqueueIncremental（freeze 时以该边界 clamp eligible
-    // 范围）。historianManager 缺省 = 不接线（行为与 R2 完全一致）。
-    if (options.historianManager !== undefined) {
-      const historyPort = createContextHistoryReadPort(contextStore);
-      const historianManager = options.historianManager;
-      contextRenderer.onMaterialized = (runtimeSessionId) => {
-        // 端口读取为权威物化边界（values-only，跨库安全）；enqueueIncremental
-        // 把 representedThroughContextSeq 传给 freeze 作为 m0-clamp 上界。
-        const boundary = historyPort.getMaterializedBoundary(runtimeSessionId);
-        void historianManager.enqueueIncremental(runtimeSessionId, {
-          representedThroughContextSeq: boundary.representedThroughContextSeq,
-        });
-      };
-    }
-    const { harness, observers } = createIrisHarness({
-      session,
-      instanceEpoch: epoch.ordinalWithinDate,
-      models,
-      model,
-      tools: [makeReadOnlyTestTool()],
-      currentInvocation,
-      now,
+
+    const assembly = await assembleIrisContext({
+      dataRoot: paths.dataRoot,
+      runtimeSessionId: epoch.runtimeSessionId,
       providerProfileId,
-      callbacks: options.callbacks,
-      contextIngest,
-      contextRenderer,
+      canonicalSystemPrompt: binding.canonicalSystemPrompt,
+      systemProjectionHash: createHash("sha256")
+        .update(binding.canonicalSystemPrompt)
+        .digest("hex"),
+      preparedAt: binding.preparedAt,
+      withHistorian: true,
+      now: () => now,
+      getCurrentSource: () => ({
+        canonicalSystemPrompt: binding.canonicalSystemPrompt,
+        personaSnapshotId: "persona-default-v1",
+        providerProfileId,
+        toolDeclarations: ["test_read_tool"],
+      }),
     });
-    observers.providerContextSnapshots = providerContextSnapshots;
-    attachRuntimeEventSeam(harness, {
-      ledger,
-      runtimeSessionId: epoch.runtimeSessionId,
-      piSessionId: epoch.runtimeSessionId,
-      contextIngest,
-    });
-    const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
-    // R2-P1：prompt 完成后提交最近一次 provider render 的物化决策
-    // （HARD→m0 重建 / SOFT→m1 / SOFT+→仅对齐 watermark）。now 由调用方固定，
-    // 保证确定性（测试传固定时间戳）。
-    const persisted = contextRenderer.persistRender(new Date(now).getTime());
-    const ledgerEvents = ledger.listBySession(epoch.runtimeSessionId);
-    const contextUnits = contextIngest.listUnits(epoch.runtimeSessionId);
-    ledger.close();
-    contextStore.close();
-    const entries = await session.getEntries();
-    await closeSessionStorage(repo);
-    epochStore.close();
-    return {
-      epochId: epoch.epochId,
-      runtimeSessionId: epoch.runtimeSessionId,
-      observers,
-      assistantMessage,
-      entries,
-      ledgerEvents,
-      contextUnits,
-      m0Body: persisted?.m0Body ?? "",
-      m1Body: persisted?.m1Body ?? "",
-      representedThroughContextSeq: persisted?.representedThroughContextSeq ?? 0,
-      dataRoot: options.dataRoot,
-    };
+    try {
+      const { harness, observers } = createIrisHarness({
+        session,
+        instanceEpoch: epoch.ordinalWithinDate,
+        models,
+        model,
+        tools: [makeReadOnlyTestTool()],
+        currentInvocation: binding,
+        now,
+        providerProfileId,
+        callbacks: options.callbacks,
+        irisContext: assembly.contextService,
+      });
+      observers.providerContextSnapshots = providerContextSnapshots;
+      const bridge = new IrisContextBridge({
+        runtimeSessionId: epoch.runtimeSessionId,
+        instanceEpoch: epoch.ordinalWithinDate,
+        contextService: assembly.contextService,
+        getInput: () => binding.input,
+        now: () => now,
+      });
+      bridge.attach(harness);
+      const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
+      const contextUnits = assembly.contextService.listUnits(epoch.runtimeSessionId);
+      const generation = assembly.contextService.getCurrentGeneration();
+      const generationSummary =
+        generation === null
+          ? "no-generation"
+          : `layers=[${generation.header.layerEnds.join(",")}] units=${generation.units.length}`;
+      const entries = await session.getEntries();
+      return {
+        epochId: epoch.epochId,
+        runtimeSessionId: epoch.runtimeSessionId,
+        observers,
+        assistantMessage,
+        entries,
+        contextUnits,
+        generationSummary,
+        dataRoot: options.dataRoot,
+      };
+    } finally {
+      await assembly.close();
+      await closeSessionStorage(repo);
+      epochStore.close();
+    }
   } finally {
     await lock.release();
   }

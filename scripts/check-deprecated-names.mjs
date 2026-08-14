@@ -32,18 +32,17 @@ const DEPRECATED_NAMES = [
   "HistoryPayload",
   // iris_agent#96: the V1 flat layout types (no schemaId/header structure)
   // must not appear in NEW production code as the current generation contract.
-  // They are only allowed in context-v27.ts (as legacy/migration types) and
-  // in migration/test files.
-  // context-v27.ts is EXEMPT because it defines them for the V1→V2 fence.
+  // consume-iris-context: the local context-v27.ts / generation-builder.ts are
+  // gone — the V2 contract now lives in @iris/context; these legacy names are
+  // still forbidden anywhere in this repo.
   "LegacyFlatV1Generation",
   "LegacyFlatV1Unit",
 ];
 
-// Files where LegacyFlat types are permitted (they define/test the fence)
-const LEGACY_TYPE_EXEMPT_FILES = new Set([
-  "src/contracts/context-v27.ts",
-  "src/context/context-store.ts",
-]);
+// Files where LegacyFlat types are permitted (they define/test the fence).
+// consume-iris-context: the old definition files are removed, so no exemption
+// is needed anymore.
+const LEGACY_TYPE_EXEMPT_FILES = new Set([]);
 
 const EXEMPT_PATH_PATTERNS = [
   /node_modules\//,
@@ -153,51 +152,37 @@ if (violations.length > 0) {
 // iris_agent#96: Structural architecture gate
 //
 // A trivial rename of old DTOs must not bypass the architecture boundary.
-// Check that the canonical V2 contract file (context-v27.ts) defines the
-// real structured types with schemaId fields, and that the generation builder
-// exists and produces validated ContextGenerationV2.
+// consume-iris-context: the canonical Context semantics now live in
+// @iris/context (ContextService + ContextGenerationV2 + RuntimeEventInput).
+// This repo must CONSUME those contracts (narrow versioned imports) and must
+// NOT re-implement a second Context/Historian engine.
 // ---------------------------------------------------------------------------
 
 const STRUCTURAL_CHECKS = [
   {
-    description: "generated types must define ContextGenerationV2 with schemaId",
-    file: "contracts/generated/types.ts",
-    pattern: /interface\s+ContextGenerationV2\b/,
+    description: "package.json must depend on @iris/context (single Context authority)",
+    file: "package.json",
+    pattern: /"@iris\/context"\s*:/,
   },
   {
-    description: "generated types must define ContextUnitV2 with schemaId",
-    file: "contracts/generated/types.ts",
-    pattern: /interface\s+ContextUnitV2\b/,
+    description: "provider renderer must consume @iris/context/contracts (ContextGenerationV2)",
+    file: "src/runtime/context-render.ts",
+    pattern: /@iris\/context\/contracts/,
   },
   {
-    description: "generated types must define ContextUnitHeaderV1 with semanticSchemaId",
-    file: "contracts/generated/types.ts",
-    pattern: /semanticSchemaId\s*:/,
+    description: "runtime event bridge must consume @iris/context/contracts/runtime-events",
+    file: "src/runtime/iris-bridge.ts",
+    pattern: /@iris\/context\/contracts\/runtime-events/,
   },
   {
-    description: "generated types must define ContextGenerationHeaderV1 with layerEnds",
-    file: "contracts/generated/types.ts",
-    pattern: /interface\s+ContextGenerationHeaderV1\b[\s\S]*?layerEnds\s*:/,
+    description: "harness factory must accept irisContext: ContextService (@iris/context)",
+    file: "src/runtime/harness-factory.ts",
+    pattern: /irisContext\s*:\s*ContextService/,
   },
   {
-    description: "generated types must define ContextUnitSourceRefV1 with required sourceHash",
-    file: "contracts/generated/types.ts",
-    pattern: /interface\s+ContextUnitSourceRefV1\b[\s\S]*?sourceHash\s*:/,
-  },
-  {
-    description: "context-v27.ts must export V1→V2 fence function",
-    file: "src/contracts/context-v27.ts",
-    pattern: /export\s+function\s+v1ToF2Fence\b/,
-  },
-  {
-    description: "generation-builder.ts must exist with buildContextGenerationV2",
-    file: "src/context/generation-builder.ts",
-    pattern: /export\s+function\s+buildContextGenerationV2\b/,
-  },
-  {
-    description: "V2 schema IDs must use underscores (iris.context_generation.v2), not dashes",
-    file: "contracts/generated/types.ts",
-    pattern: /iris\.context_generation\.v2/,
+    description: "assembly root must register P0-P2 contributors (createIrisSourceContributors)",
+    file: "src/runtime/iris-context.ts",
+    pattern: /createIrisSourceContributors/,
   },
 ];
 

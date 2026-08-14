@@ -1,6 +1,6 @@
-import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
+import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/runtime-ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
-import type { InvocationSourceBinding } from "../contracts/context.js";
+import type { InvocationBinding } from "./harness-factory.js";
 import type { AgentInput } from "../contracts/origin.js";
 import type { ActiveRuntimePort } from "./active-runtime-registry.js";
 import type { Model } from "@iris/pi-ai";
@@ -119,19 +119,18 @@ export interface RuntimeCoordinatorOptions {
    */
   modelOverride?: ModelOverridePort;
   /**
-   * Derives the InvocationSourceBinding (Pi-runtime binding: session binding +
-   * epoch info + canonical system prompt identity) for an input, scoped to
-   * the active runtime Session/Epoch. Called before every prompt().
+   * Derives the InvocationBinding（Pi-runtime binding：session binding + epoch
+   * info + canonical system prompt identity）for an input, scoped to the
+   * active runtime Session/Epoch. Called before every prompt().
    * Feature B (goal.txt §5): the binding is a MINIMAL Pi-runtime binding —
-   * it carries NO Context assembly state. m0/m1 materialization is owned by
-   * ContextRenderer/contextController at provider render time (v12 的
-   * ContextRuntimePort.prepare / materializationIdentity mock 已删除).
+   * it carries NO Context assembly state. Context assembly is owned by
+   * @iris/context（ContextService/generation）。
    */
   prepareInvocation: (
     input: AgentInput,
     runtimeSessionId: string,
     epochId: string,
-  ) => Promise<InvocationSourceBinding>;
+  ) => Promise<InvocationBinding>;
   /**
    * Fired exactly once per invocation when Pi native settled is observed on
    * the bound active Epoch. The Host uses this to release the invocation and,
@@ -240,7 +239,7 @@ export class RuntimeCoordinator implements AgentRuntimePort {
     try {
       yield { type: "turn_start", invocationId };
 
-      // Prepare + bind InvocationSourceBinding for THIS input, scoped to the
+      // Prepare + bind InvocationBinding for THIS input, scoped to the
       // active Session/Epoch (invariant: the bound runtimeSessionId does not
       // change mid-invocation). The binding is a shared mutable container
       // (the adapter holds the same object reference), so updating its
@@ -248,8 +247,13 @@ export class RuntimeCoordinator implements AgentRuntimePort {
       // a stale input (review blocker #1).
       const prepared = await this.prepareInvocation(input, runtimeSessionId, epochId);
       handle.binding.input = input;
-      handle.binding.prepared = prepared;
       handle.binding.invocationId = invocationId;
+      handle.binding.runtimeSessionId = prepared.runtimeSessionId;
+      handle.binding.epochId = prepared.epochId;
+      handle.binding.instanceEpoch = prepared.instanceEpoch;
+      handle.binding.canonicalSystemPrompt = prepared.canonicalSystemPrompt;
+      handle.binding.providerProfileId = prepared.providerProfileId;
+      handle.binding.preparedAt = prepared.preparedAt;
 
       // Forward native events from the current Capsule. Consume the FULL
       // generator: breaking early would return() the Capsule generator and

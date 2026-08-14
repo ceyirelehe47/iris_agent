@@ -59,14 +59,12 @@ export function initializeDataRoot(dataRoot: string, config: AgentConfigV3): Dat
     mkdirSync(dir, { recursive: true });
   }
 
+  // context.db / historian.db / runtime-events 的迁移与 schema 所有权已迁至
+  // @iris/context 包（ContextService.open / HistorianStore.open 自带迁移）；
+  // 本仓库不再保留第二份 migration。
   const migrationRoot = fileURLToPath(new URL("../db/migrations", import.meta.url));
   migrateDatabase(paths.epochRegistryDb, join(migrationRoot, "runtime-epochs"));
   migrateDatabase(paths.ingressDb, join(migrationRoot, "ingress"));
-  migrateDatabase(paths.contextDb, join(migrationRoot, "context"));
-  migrateDatabase(paths.runtimeLedgerDb, join(migrationRoot, "runtime-events"));
-  // R3-P0：historian.db 迁移注册（0001_bootstrap / 0002_delivered_receipt /
-  // 0003_continuity_snapshots），与其它 DB 相同的 checksum/idempotency 语义。
-  migrateDatabase(paths.historianDb, join(migrationRoot, "historian"));
   return paths;
 }
 

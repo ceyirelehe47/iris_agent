@@ -8,6 +8,7 @@ export default tseslint.config(
       "node_modules/**",
       "evidence/**",
       "test-results/**",
+      "contracts/**",
       "scripts/*.mjs",
       "eslint.config.mjs",
       "prettier.config.mjs",

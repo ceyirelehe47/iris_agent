@@ -1,4 +1,5 @@
 import type { AgentHarness } from "@iris/pi-agent-core";
+import { createHash } from "node:crypto";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
@@ -8,7 +9,7 @@ import {
   closeSessionStorage,
   composeProvider,
   openOrCreateSession,
-  prepareContextSources,
+  prepareInvocation,
   makeReadOnlyTestTool,
 } from "../runtime/vertical-slice.js";
 import { createIrisHarness, type InvocationBinding } from "../runtime/harness-factory.js";
@@ -24,13 +25,21 @@ import { acquireDataRootLock, type DataRootLockHandle } from "./lock.js";
 import { SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 import { createNodeSqliteFactory } from "@iris/pi-storage-sqlite-node";
 import { nodeSqliteRepoEnv } from "../runtime/pi-env.js";
+import {
+  assembleIrisContext,
+  type IrisContextAssembly,
+  type CurrentContextSource,
+} from "../runtime/iris-context.js";
+import { IrisContextBridge } from "../runtime/iris-bridge.js";
 
 /**
  * Host composition (00 Module Boundaries): the product path that both
  * `iris serve` and `iris run` share. It owns startup recovery (discards
  * stale 'creating' Epochs and their orphan Pi Session rows), the active
- * Runtime Session, the Pi Harness and the RuntimeCoordinator. This is the
- * real composition seam the CLI uses — not a one-shot library call.
+ * Runtime Session, the Pi Harness, the RuntimeCoordinator AND the
+ * @iris/context assembly (ContextService + Historian + contributors).
+ * This is the real composition seam the CLI uses — not a one-shot library
+ * call.
  *
  * The long-lived `IrisHost` (host.ts) builds on the same seam; openHost is
  * kept as the composition root for one-shot/test/dev entry points.
@@ -43,6 +52,8 @@ export interface HostComposition {
   coordinator: RuntimeCoordinator;
   currentInvocation: InvocationBinding;
   registry: ActiveRuntimeRegistry;
+  /** @iris/context 装配（ContextService + Historian；Identity scope）。 */
+  irisContext: IrisContextAssembly;
   close(): Promise<void>;
 }
 
@@ -52,15 +63,17 @@ export interface OpenHostOptions {
   provider: SliceProviderMode;
 }
 
+function currentSourceFor(holder: { current: CurrentContextSource }): () => CurrentContextSource {
+  return () => holder.current;
+}
+
 export async function openHost(options: OpenHostOptions): Promise<HostComposition> {
   const config = options.config ?? defaultAgentConfig();
   const paths = resolveDataRootPaths(options.dataRoot, config);
   const lock: DataRootLockHandle = await acquireDataRootLock(options.dataRoot, paths.lockFile);
-  // Staged handles so every acquired resource is released even when a later
-  // setup step throws (review blocker #2, fourth pass): nested finally keeps
-  // Session storage, Epoch store and the lock independent.
   let epochStore: RuntimeEpochStore | undefined;
   let sessionHandle: Awaited<ReturnType<typeof openOrCreateSession>> | undefined;
+  let irisAssembly: IrisContextAssembly | undefined;
   try {
     initializeDataRoot(options.dataRoot, config);
     epochStore = new RuntimeEpochStore(
@@ -72,8 +85,7 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     // Re-entrant startup recovery: (1) read stale creating Epochs WITHOUT
     // deleting, (2) idempotently delete their orphan Pi Session rows, (3)
     // only then remove the Epoch rows. A crash between (2) and (3) is
-    // re-entrant — the next startup still sees the creating rows and retries
-    // (review blocker #1, fourth pass).
+    // re-entrant — the next startup still sees the creating rows and retries.
     const staleCreating = epochStore.listCreating();
     if (staleCreating.length > 0) {
       const repo = new SqliteSessionRepository({
@@ -106,17 +118,36 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     sessionHandle = await openOrCreateSession(options.dataRoot, config, epoch.runtimeSessionId);
     const session = sessionHandle.session;
     const { models, model, providerProfileId } = await composeProvider(options.provider);
-    const currentInvocation: InvocationBinding = {
-      input: emptyPlaceholderInput(),
-      prepared: prepareContextSources(
-        emptyPlaceholderInput(),
-        epoch.runtimeSessionId,
-        epoch.epochId,
-        config,
-        new Date().toISOString(),
-      ),
-      invocationId: `invocation-${epoch.runtimeSessionId}`,
+    const now = new Date().toISOString();
+    const binding: InvocationBinding = prepareInvocation(
+      emptyPlaceholderInput(),
+      epoch.runtimeSessionId,
+      epoch.epochId,
+      HOST_INSTANCE_EPOCH,
+      config,
+      now,
+    );
+    const contextSourceHolder: { current: CurrentContextSource } = {
+      current: {
+        canonicalSystemPrompt: binding.canonicalSystemPrompt,
+        personaSnapshotId: "persona-default-v1",
+        providerProfileId,
+        toolDeclarations: ["test_read_tool"],
+      },
     };
+    irisAssembly = await assembleIrisContext({
+      dataRoot: paths.dataRoot,
+      runtimeSessionId: epoch.runtimeSessionId,
+      providerProfileId,
+      canonicalSystemPrompt: binding.canonicalSystemPrompt,
+      systemProjectionHash: createHash("sha256")
+        .update(binding.canonicalSystemPrompt)
+        .digest("hex"),
+      preparedAt: binding.preparedAt,
+      withHistorian: true,
+      now: () => new Date().toISOString(),
+      getCurrentSource: currentSourceFor(contextSourceHolder),
+    });
     const { harness } = createIrisHarness({
       session,
       // review-pass-7 #2 (subagent-review fix): bind the Host's STABLE
@@ -126,25 +157,33 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
       models,
       model,
       tools: [makeReadOnlyTestTool()],
-      currentInvocation,
-      now: new Date().toISOString(),
+      currentInvocation: binding,
+      now,
       providerProfileId,
+      irisContext: irisAssembly.contextService,
     });
+    const bridge = new IrisContextBridge({
+      runtimeSessionId: epoch.runtimeSessionId,
+      instanceEpoch: HOST_INSTANCE_EPOCH,
+      contextService: irisAssembly.contextService,
+      getInput: () => binding.input,
+      now: () => new Date().toISOString(),
+    });
+    bridge.attach(harness);
     const adapter = new PiRuntimeAdapter({
       harness,
       session,
-      binding: currentInvocation,
+      binding,
       repo: sessionHandle.repo,
     });
     const registry = new ActiveRuntimeRegistry();
-    registry.install(activeRuntimeHandle(epoch, adapter, currentInvocation));
+    registry.install(activeRuntimeHandle(epoch, adapter, binding));
 
     // iris_agent#89: production model override port — lets the Recovery
     // Supervisor resolve and apply fallback models through the real
     // PiRuntimeAdapter (harness.setModel()), not a test-injected dispatcher.
     const modelOverride: ModelOverridePort = {
       resolveModel(modelId: string) {
-        // Search across all providers for a model with this id.
         const allModels = models.getModels();
         return allModels.find((m) => m.id === modelId) as Model<string> | undefined;
       },
@@ -157,35 +196,42 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
       activeRuntime: registry,
       modelOverride,
       prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-        prepareContextSources(input, runtimeSessionId, epochId, config, new Date().toISOString()),
+        prepareInvocation(
+          input,
+          runtimeSessionId,
+          epochId,
+          HOST_INSTANCE_EPOCH,
+          config,
+          new Date().toISOString(),
+        ),
     });
 
     let closed = false;
-    // All staged handles are guaranteed present here: any earlier setup
-    // failure would have thrown into the outer catch and released them.
     const readyEpochStore = epochStore;
-    // Narrowed local: TS cannot narrow the outer `sessionHandle` inside
-    // closures (it may be reassigned by the catch path).
     const stagedRepo = sessionHandle.repo;
+    const readyAssembly = irisAssembly;
     const host: HostComposition = {
       dataRoot: options.dataRoot,
       config,
       epochStore: readyEpochStore,
       epoch,
       coordinator,
-      currentInvocation,
+      currentInvocation: binding,
       registry,
+      irisContext: readyAssembly,
       close: async () => {
         if (closed) {
           return;
         }
         closed = true;
-        // Nested cleanup: each resource is released independently, and one
-        // failure does not skip the others or leak the lock (review blocker
-        // #2, fourth pass). The original error is preserved.
         let firstError: unknown;
         try {
           await closeSessionStorage(stagedRepo);
+        } catch (error) {
+          firstError ??= error;
+        }
+        try {
+          await readyAssembly.close();
         } catch (error) {
           firstError ??= error;
         }
@@ -206,12 +252,17 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     };
     return host;
   } catch (error) {
-    // Setup failed partway: release every resource that was already acquired
-    // (Session storage, Epoch store, lock), preserving the original error.
     let firstError: unknown = error;
     try {
       if (sessionHandle !== undefined) {
         await closeSessionStorage(sessionHandle.repo);
+      }
+    } catch (cleanupError) {
+      firstError ??= cleanupError;
+    }
+    try {
+      if (irisAssembly !== undefined) {
+        await irisAssembly.close();
       }
     } catch (cleanupError) {
       firstError ??= cleanupError;

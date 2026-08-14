@@ -1,14 +1,10 @@
 import type { AgentMessage, CustomMessage } from "@iris/pi-agent-core";
 
 import {
-  IRIS_INPUT_META_CONTENT,
-  IRIS_INPUT_META_CUSTOM_TYPE,
-  type MessageProjectionResult,
-  type TransformMessagesInput,
-} from "../contracts/context.js";
-import {
   type InputFrame,
   type IrisInputMetaDetails,
+  IRIS_INPUT_META_CONTENT,
+  IRIS_INPUT_META_CUSTOM_TYPE,
   decodeInputFrames,
   derivePairKey,
   verifyCompanionLayoutHash,
@@ -207,6 +203,19 @@ function projectedUserText(
       return `${sourceLabel(origin)}\n${frame.payload}`;
     })
     .join("\n\n");
+}
+
+export interface TransformMessagesInput {
+  invocationId: string;
+  runtimeSessionId: string;
+  messages: AgentMessage[];
+  model: { provider: string; modelId: string };
+  providerProfileId: string;
+}
+
+/** live-fold 的结果契约：provider 可见的折叠后消息数组。 */
+export interface MessageProjectionResult {
+  messages: AgentMessage[];
 }
 
 export function transformContextMessages(input: TransformMessagesInput): MessageProjectionResult {

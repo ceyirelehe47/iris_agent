@@ -1,4 +1,4 @@
-import type { AgentRuntimePort } from "../contracts/ports.js";
+import type { AgentRuntimePort } from "../contracts/runtime-ports.js";
 import type { RuntimeSessionEpoch } from "../contracts/runtime.js";
 import type { InvocationBinding } from "./harness-factory.js";
 

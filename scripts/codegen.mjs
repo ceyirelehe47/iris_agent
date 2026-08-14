@@ -365,11 +365,14 @@ const addFormats = require("ajv-formats") as typeof import("ajv-formats").defaul
   fs.writeFileSync(path.join(OUTPUT_DIR, "validators.ts"), await formatTs(validatorsOutput));
 
   // --- 4. Generate registry manifest ---
+  // Deterministic output: no wall-clock date (a volatile `generatedAt` made
+  // every regeneration byte-different after midnight, defeating the
+  // freshness gate). `lockedAt` records the design-lock date; the manifest
+  // hash covers everything else.
   const manifest = {
     registryId: source.registryId,
     status: source.registryStatus,
     lockedAt: source.lockedAt,
-    generatedAt: new Date().toISOString().split("T")[0], // date only for reproducibility
     currentGenerationSchemaId: source.currentGenerationSchemaId,
     currentGenerationUnitSchemaId: source.currentGenerationUnitSchemaId,
     currentGenerationHeaderSchemaId: source.currentGenerationHeaderSchemaId,
