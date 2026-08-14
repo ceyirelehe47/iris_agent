@@ -375,7 +375,7 @@ test("r2: empty context.db initializes cleanly; 0001-0008 applied and idempotent
     store.close();
     const reopened = ContextStore.open(join(dir, "context.db"));
     reopened.close();
-    assert.equal(LATEST_MIGRATION_VERSION, "0008_lifecycle_state");
+    assert.equal(LATEST_MIGRATION_VERSION, "0009_legacy_fence");
   } finally {
     cleanupDir(dir);
   }

@@ -3,10 +3,7 @@ import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
 

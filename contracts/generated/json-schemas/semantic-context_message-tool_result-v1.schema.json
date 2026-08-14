@@ -6,14 +6,127 @@
     "role": {
       "const": "toolResult"
     },
-    "content": {},
     "toolCallId": {
       "type": "string",
       "minLength": 1
+    },
+    "toolName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "text"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["type", "text"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "image"
+              },
+              "data": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string"
+              }
+            },
+            "required": ["type", "data", "mimeType"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "reasoning"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["type", "text"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "details": {},
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        },
+        "cacheRead": {
+          "type": "number"
+        },
+        "cacheWrite": {
+          "type": "number"
+        },
+        "cacheWrite1h": {
+          "type": "number"
+        },
+        "reasoning": {
+          "type": "number"
+        },
+        "totalTokens": {
+          "type": "number"
+        },
+        "cost": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "number"
+            },
+            "output": {
+              "type": "number"
+            },
+            "cacheRead": {
+              "type": "number"
+            },
+            "cacheWrite": {
+              "type": "number"
+            },
+            "total": {
+              "type": "number"
+            }
+          },
+          "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
+      "additionalProperties": false
+    },
+    "addedToolNames": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "isError": {
+      "type": "boolean"
+    },
+    "timestamp": {
+      "type": "number"
     }
   },
-  "required": [
-    "role"
-  ],
-  "additionalProperties": true
+  "required": ["role", "toolCallId", "toolName", "content", "isError", "timestamp"],
+  "additionalProperties": false
 }

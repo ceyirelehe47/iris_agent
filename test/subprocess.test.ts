@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { directUserRequest } from "../src/contracts/origin.js";
 
 const repoRoot = join(import.meta.dirname, "..");
-const distBin = join(repoRoot, "dist", "bin.js");
+const distBin = join(repoRoot, "dist", "src", "bin.js");
 
 interface HostProcess {
   child: ChildProcess;

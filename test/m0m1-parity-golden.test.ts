@@ -31,7 +31,8 @@ import {
   encodeInputFrames,
 } from "../src/runtime/companion.js";
 import { RuntimeEventLedger } from "../src/runtime/runtime-event-ledger.js";
-import { runMinimalSlice, sampleAgentInput } from "../src/runtime/vertical-slice.js";
+import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 /**
  * R2-P1 m0/m1 golden parity gate（Roadmap v13 canonical chain 的 Provider

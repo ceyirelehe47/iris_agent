@@ -1,4 +1,4 @@
-// NOT PRODUCTION — SQLite persistence layer stores legacy m0Body/m1Body columns. Migration per Notion v27 pending.
+// SQLite persistence layer for the durable Context semantic ledger.
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -65,6 +65,7 @@ interface UnitRow {
   semantic_schema_id: string | null;
   lifecycle_state: string;
   content_hash_basis: string;
+  legacy_status: string;
   created_at: string;
 }
 
@@ -373,7 +374,9 @@ function parseStoredRawArchiveRef(raw: string): RawArchiveRefV1 {
 
 /**
  * Feature A5 (#113): the canonical unit lifecycle states, fail-closed parsed
- * from the persisted column — never fabricated.
+ * from the persisted column — never fabricated. Exactly the six Notion states
+ * (#122): legacy/quarantine is a PHYSICAL `legacy_status` column, never a
+ * canonical lifecycle value.
  */
 const CANONICAL_LIFECYCLE_STATES: readonly ContextMessageUnitLifecycleState[] = [
   "committed",
@@ -382,10 +385,6 @@ const CANONICAL_LIFECYCLE_STATES: readonly ContextMessageUnitLifecycleState[] = 
   "compartmentalized_pending_bust",
   "represented_in_p3",
   "retired",
-  // A7 (#117): legacy fence state — rows whose true lifecycle is unknown.
-  // These rows are NOT treated as canonical committed; they are fenced
-  // from P5 selection and must be explicitly migrated before use.
-  "legacy_committed_unknown",
 ];
 
 function parseLifecycleState(raw: string): ContextMessageUnitLifecycleState {
@@ -1124,6 +1123,9 @@ export class ContextStore implements ContextUnitStorePort {
     const afterContextSeq = options.afterContextSeq;
     let sql = "SELECT * FROM context_units WHERE context_lineage_id = ?";
     const params: Array<string | number> = [this.resolveLineageId(runtimeSessionId)];
+    // #122: quarantined legacy rows are physically excluded from every
+    // canonical read path — they cannot enter P5 or Historian as current units.
+    sql += " AND legacy_status = 'none'";
     if (disposition !== "all") {
       sql += " AND disposition = ?";
       params.push(disposition);
@@ -1154,6 +1156,9 @@ export class ContextStore implements ContextUnitStorePort {
     const afterContextSeq = options.afterContextSeq;
     let sql = "SELECT * FROM context_units WHERE context_lineage_id = ?";
     const params: Array<string | number> = [lineageId];
+    // #122: quarantined legacy rows are physically excluded from every
+    // canonical read path — they cannot enter P5 or Historian as current units.
+    sql += " AND legacy_status = 'none'";
     if (disposition !== "all") {
       sql += " AND disposition = ?";
       params.push(disposition);
@@ -1180,7 +1185,7 @@ export class ContextStore implements ContextUnitStorePort {
   ): ContextMessageUnitV1[] {
     const rows = this.db
       .prepare(
-        "SELECT * FROM context_units WHERE context_lineage_id = ? AND entry_seq BETWEEN ? AND ? ORDER BY context_seq",
+        "SELECT * FROM context_units WHERE context_lineage_id = ? AND legacy_status = 'none' AND entry_seq BETWEEN ? AND ? ORDER BY context_seq",
       )
       .all(lineageId, fromEntrySeq, toEntrySeq) as unknown as UnitRow[];
     return rows.map((row) => this.rowToUnit(row));
@@ -1197,7 +1202,7 @@ export class ContextStore implements ContextUnitStorePort {
   ): ContextMessageUnitV1[] {
     const rows = this.db
       .prepare(
-        "SELECT * FROM context_units WHERE context_lineage_id = ? AND context_seq BETWEEN ? AND ? ORDER BY context_seq",
+        "SELECT * FROM context_units WHERE context_lineage_id = ? AND legacy_status = 'none' AND context_seq BETWEEN ? AND ? ORDER BY context_seq",
       )
       .all(lineageId, fromContextSeq, toContextSeq) as unknown as UnitRow[];
     return rows.map((row) => this.rowToUnit(row));
@@ -1296,6 +1301,17 @@ export class ContextStore implements ContextUnitStorePort {
 
   /** Row → V1 unit + persistence-layer-only metadata (entry/pairing). */
   private rowToUnitRecord(row: UnitRow): UnitStoreRecord {
+    // Round 7 (#122): a quarantined legacy row is NOT a current
+    // ContextMessageUnitV1. Its pre-#113 payload-only hash cannot prove the
+    // canonical semantic basis, so it must fail closed here rather than
+    // deserialize into a canonical lifecycle state.
+    if (row.legacy_status === "quarantined_legacy") {
+      throw new Error(
+        `context rowToUnit: unit ${row.unit_id} (context_seq ${row.context_seq}) ` +
+          "is quarantined legacy data (content_hash_basis v1, pre-#113) and cannot be " +
+          "read as current ContextMessageUnitV1 until an explicit verified migration/rebuild (fail closed)",
+      );
+    }
     const kind = physicalUnitTypeToKind(row.unit_type);
     const historianDisposition = physicalDispositionToHistorian(row.disposition);
     // Feature A5 (#113): the REAL persisted lifecycle state — never

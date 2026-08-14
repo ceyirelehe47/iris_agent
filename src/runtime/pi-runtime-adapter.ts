@@ -1,4 +1,5 @@
 import type { AgentHarness, Session } from "@iris/pi-agent-core";
+import type { AssistantMessage } from "@iris/pi-ai";
 
 import type { AgentRuntimeEvent, AgentRuntimePort } from "../contracts/ports.js";
 import type { AgentRuntimePhase } from "../contracts/runtime-ports.js";
@@ -77,6 +78,13 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
   private settlementResolve: (() => void) | null = null;
   private settlementReject: ((error: Error) => void) | null = null;
   private nativeSettlementReceipt: Promise<void> | null = null;
+  /**
+   * C7 (#124): monotonically increasing run identity. Every prompt() bumps
+   * it; a "settled" event is only authoritative for the run that captured
+   * the CURRENT token. A late settled from a previous run can never resolve
+   * the current invocation's receipt.
+   */
+  private runToken = 0;
 
   constructor(options: {
     harness: AgentHarness;
@@ -181,7 +189,20 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
     let unsubscribe: (() => void) | undefined;
     let settledSeen = false;
     let failedCode: string | undefined;
+    // C7 (#124): false until THIS run's native agent_end was observed.
+    // In the real harness, agent_end → settled are emitted in strict order
+    // for the SAME run (emitAny then emitOwn); a settled without a
+    // preceding agent_end of the current run is a stale broadcast from a
+    // previous run and cannot authorize this receipt.
+    let nativeRunEnded = false;
     const queue = new EventQueue<AgentRuntimeEvent>();
+    // C7 (#124): bind this prompt's native settlement receipt to an exact
+    // run identity. Every prompt() increments the adapter-level run token;
+    // a "settled" event whose captured token is no longer current belongs to
+    // a PREVIOUS run (late settled) and MUST NOT authorize this run's
+    // receipt — an Invocation A settled can never resolve Invocation B.
+    this.runToken += 1;
+    const runToken = this.runToken;
     // C6: Create native settlement receipt for this invocation.
     this.nativeSettlementReceipt = new Promise<void>((resolve, reject) => {
       this.settlementResolve = resolve;
@@ -216,7 +237,20 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
               toolName: event.toolName,
             });
             return;
+          case "agent_end": {
+            // C7 (#124): this run's native terminal boundary observed.
+            nativeRunEnded = true;
+            return;
+          }
           case "settled":
+            // C7 (#124): ONLY the current run's settled may authorize this
+            // receipt. A late settled from a previous run — arriving without
+            // a preceding agent_end of this run, or after a newer prompt
+            // captured a different token — is ignored and can never resolve
+            // the new invocation.
+            if (!nativeRunEnded || runToken !== this.runToken) {
+              return;
+            }
             settledSeen = true;
             // C6: Resolve the native settlement receipt — proves native terminal state.
             this.settlementResolve?.();
@@ -229,7 +263,10 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
 
       // The binding was updated by the Coordinator before prompt(); encode the
       // CURRENT input's frames so companion pairing never uses a stale input.
-      const promptPromise = this.harness.prompt(encodeInputFrames(input.blocks));
+      let promptResult: AssistantMessage | undefined;
+      const promptPromise = this.harness.prompt(encodeInputFrames(input.blocks)).then((message) => {
+        promptResult = message;
+      });
       for (;;) {
         const event = await Promise.race([queue.next(), promptPromise.then(() => undefined)]);
         if (event === undefined) {
@@ -247,6 +284,20 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
         failedCode = "settled_not_observed";
         this.phase = "failed";
         yield { type: "failed", invocationId, code: failedCode };
+      } else if (promptResult?.errorMessage !== undefined) {
+        // The harness ran its REAL failure path (emitRunFailure): the run
+        // produced a native failure message and still settled. Surface the
+        // native failure so the RecoverySupervisor can classify it
+        // (outcome_unknown / transient / terminal) instead of treating a
+        // failed dispatch as success.
+        failedCode = "native_failure";
+        this.phase = "failed";
+        yield {
+          type: "failed",
+          invocationId,
+          code: failedCode,
+          message: promptResult.errorMessage,
+        };
       } else {
         this.phase = "idle";
       }
@@ -280,11 +331,23 @@ export class PiRuntimeAdapter implements AgentRuntimePort {
     void reason;
     const receipt = this.nativeSettlementReceipt;
     await this.harness.abort();
-    if (receipt === null) return;
+    // C7 (#124): no settlement receipt exists for this invocation — the
+    // abort MUST NOT succeed. Fallback/rollover is only authorized by an
+    // exact native settled proof bound to the ACTIVE invocation; a null
+    // receipt means the run already ended (or never started) without
+    // observable settlement, so any caller treating this abort as success
+    // would dispatch a fallback on unproven state.
+    if (receipt === null) {
+      throw new Error(
+        `no native settlement proof for ${invocationId} — abort without exact settled receipt is not authorized`,
+      );
+    }
     await Promise.race([
       receipt,
       new Promise<void>((_, reject) => {
-        setTimeout(() => reject(new Error(`native settlement timeout for ${invocationId} after ${timeoutMs}ms`)), timeoutMs);
+        setTimeout(() => {
+          reject(new Error(`native settlement timeout for ${invocationId} after ${timeoutMs}ms`));
+        }, timeoutMs);
       }),
     ]);
   }

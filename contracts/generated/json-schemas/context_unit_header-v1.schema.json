@@ -33,12 +33,7 @@
           "minLength": 1
         }
       },
-      "required": [
-        "schemaId",
-        "sourceSchemaId",
-        "sourceId",
-        "sourceHash"
-      ],
+      "required": ["schemaId", "sourceSchemaId", "sourceId", "sourceHash"],
       "additionalProperties": false
     },
     "semanticSchemaId": {
@@ -50,12 +45,6 @@
       "minLength": 1
     }
   },
-  "required": [
-    "schemaId",
-    "contextUnitId",
-    "source",
-    "semanticSchemaId",
-    "contentHash"
-  ],
+  "required": ["schemaId", "contextUnitId", "source", "semanticSchemaId", "contentHash"],
   "additionalProperties": false
 }

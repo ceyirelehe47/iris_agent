@@ -5,10 +5,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
@@ -17,9 +14,9 @@ import { nodeSqliteRepoEnv } from "../src/runtime/pi-env.js";
 import {
   reopenActiveSession,
   rolloverActiveSession,
-  runMinimalSlice,
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
+import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 test("settled rollover closes the old epoch and activates a fresh linked epoch", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-rollover-test-"));

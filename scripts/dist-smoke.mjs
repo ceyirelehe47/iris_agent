@@ -2,8 +2,8 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { defaultAgentConfig } from "../dist/config/load.js";
-import { initializeDataRoot } from "../dist/host/data-root.js";
+import { defaultAgentConfig } from "../dist/src/config/load.js";
+import { initializeDataRoot } from "../dist/src/host/data-root.js";
 
 const dataRoot = mkdtempSync(join(tmpdir(), "iris-dist-smoke-"));
 const config = defaultAgentConfig();

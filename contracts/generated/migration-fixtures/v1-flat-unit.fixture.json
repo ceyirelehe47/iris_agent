@@ -1,0 +1,14 @@
+{
+  "schemaId": "iris.context_unit.v1",
+  "contextUnitId": "fixture-unit-v1-0001",
+  "contextSeq": 1,
+  "kind": "user",
+  "semanticSchemaId": "iris.semantic.context_message.user.v1",
+  "semanticContent": {
+    "role": "user",
+    "content": "v1 flat unit"
+  },
+  "contentHash": "v1-content-hash",
+  "lifecycleState": "committed",
+  "createdAt": "2026-08-01T00:00:00Z"
+}

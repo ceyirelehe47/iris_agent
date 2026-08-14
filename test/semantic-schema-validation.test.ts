@@ -148,8 +148,43 @@ test("assistant.v1 accepts an assistant message payload", () => {
     validateSemanticContentForSchema(ASSISTANT_V1, {
       role: "assistant",
       content: "ok",
+      timestamp: 1,
     }),
     null,
+  );
+});
+
+test("assistant.v1 accepts a full Pi AssistantMessage-shaped payload", () => {
+  const payload = {
+    role: "assistant",
+    content: [{ type: "text", text: "hi" }],
+    api: "opencode-go",
+    provider: "opencode-go",
+    model: "deepseek-v4-flash",
+    usage: {
+      input: 1,
+      output: 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 3,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 1,
+  };
+  assert.equal(validateSemanticContentForSchema(ASSISTANT_V1, payload), null);
+  assert.ok(validateUnitV2Strict(makeUnit("u1", ASSISTANT_V1, payload)).valid);
+});
+
+test("assistant.v1 rejects unknown fields (no open additional-property escape)", () => {
+  assert.match(
+    validateSemanticContentForSchema(ASSISTANT_V1, {
+      role: "assistant",
+      content: "ok",
+      timestamp: 1,
+      sneaky: "unknown",
+    }) ?? "",
+    /must NOT have additional properties/,
   );
 });
 
@@ -169,7 +204,10 @@ test("tool_result.v1 accepts the production toolResult message shape", () => {
   const payload = {
     role: "toolResult",
     content: [{ type: "text", text: "done" }],
+    toolCallId: "tc-1",
     toolName: "read",
+    isError: false,
+    timestamp: 1,
   };
   assert.equal(validateSemanticContentForSchema(TOOL_RESULT_V1, payload), null);
   assert.ok(validateUnitV2Strict(makeUnit("u1", TOOL_RESULT_V1, payload)).valid);
@@ -228,11 +266,15 @@ test("production ingest payload shapes pass the whole generation strict validati
     makeProductionShapedUnit("u-assistant", ASSISTANT_V1, {
       role: "assistant",
       content: "hello",
+      timestamp: 1,
     }),
     makeProductionShapedUnit("u-tool-result", TOOL_RESULT_V1, {
       role: "toolResult",
       content: [{ type: "text", text: "read-only result: iris" }],
+      toolCallId: "tc-prod-1",
       toolName: "test_read_tool",
+      isError: false,
+      timestamp: 1,
     }),
   ];
   const gen = makeGeneration(units);

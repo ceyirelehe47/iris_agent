@@ -26,7 +26,7 @@ test("C6: nativeSettlementReceipt structure — abort waits for native settled, 
   assert.ok(adapterCode.includes("this.settlementResolve?.();"));
 
   // 3. settlementReject is called when !settledSeen
-  assert.ok(adapterCode.includes('prompt ended without native settled'));
+  assert.ok(adapterCode.includes("prompt ended without native settled"));
 
   // 4. abort() races the receipt against a timeout
   assert.ok(adapterCode.includes("Promise.race"));

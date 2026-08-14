@@ -7,28 +7,44 @@
  */
 
 import { createRequire } from "node:module";
+import type { AnySchema, ErrorObject } from "ajv";
 import { KNOWN_SEMANTIC_SCHEMA_IDS } from "./types.js";
 
 const require = createRequire(import.meta.url);
-const Ajv = require("ajv");
-const addFormats = require("ajv-formats");
+const Ajv = require("ajv") as typeof import("ajv").default;
+const addFormats = require("ajv-formats") as typeof import("ajv-formats").default;
 
-const raw_archive_ref_v1 = require("./json-schemas/raw_archive_ref-v1.schema.json");
-const semantic_derivation_refs_v1 = require("./json-schemas/semantic_derivation_refs-v1.schema.json");
-const context_message_unit_v1 = require("./json-schemas/context_message_unit-v1.schema.json");
-const context_unit_source_ref_v1 = require("./json-schemas/context_unit_source_ref-v1.schema.json");
-const context_unit_header_v1 = require("./json-schemas/context_unit_header-v1.schema.json");
-const context_unit_v2 = require("./json-schemas/context_unit-v2.schema.json");
-const context_generation_header_v1 = require("./json-schemas/context_generation_header-v1.schema.json");
-const context_generation_v2 = require("./json-schemas/context_generation-v2.schema.json");
-const semantic_context_message_user_v1 = require("./json-schemas/semantic-context_message-user-v1.schema.json");
-const semantic_context_message_assistant_v1 = require("./json-schemas/semantic-context_message-assistant-v1.schema.json");
-const semantic_context_message_tool_call_v1 = require("./json-schemas/semantic-context_message-tool_call-v1.schema.json");
-const semantic_context_message_tool_result_v1 = require("./json-schemas/semantic-context_message-tool_result-v1.schema.json");
-const semantic_context_message_body_event_v1 = require("./json-schemas/semantic-context_message-body_event-v1.schema.json");
-const semantic_context_message_operational_v1 = require("./json-schemas/semantic-context_message-operational-v1.schema.json");
+const raw_archive_ref_v1 = require("./json-schemas/raw_archive_ref-v1.schema.json") as AnySchema;
+const semantic_derivation_refs_v1 =
+  require("./json-schemas/semantic_derivation_refs-v1.schema.json") as AnySchema;
+const context_message_unit_v1 =
+  require("./json-schemas/context_message_unit-v1.schema.json") as AnySchema;
+const context_unit_source_ref_v1 =
+  require("./json-schemas/context_unit_source_ref-v1.schema.json") as AnySchema;
+const context_unit_header_v1 =
+  require("./json-schemas/context_unit_header-v1.schema.json") as AnySchema;
+const context_unit_v2 = require("./json-schemas/context_unit-v2.schema.json") as AnySchema;
+const context_generation_header_v1 =
+  require("./json-schemas/context_generation_header-v1.schema.json") as AnySchema;
+const context_generation_v2 =
+  require("./json-schemas/context_generation-v2.schema.json") as AnySchema;
+const semantic_context_message_user_v1 =
+  require("./json-schemas/semantic-context_message-user-v1.schema.json") as AnySchema;
+const semantic_context_message_assistant_v1 =
+  require("./json-schemas/semantic-context_message-assistant-v1.schema.json") as AnySchema;
+const semantic_context_message_tool_call_v1 =
+  require("./json-schemas/semantic-context_message-tool_call-v1.schema.json") as AnySchema;
+const semantic_context_message_tool_result_v1 =
+  require("./json-schemas/semantic-context_message-tool_result-v1.schema.json") as AnySchema;
+const semantic_context_message_body_event_v1 =
+  require("./json-schemas/semantic-context_message-body_event-v1.schema.json") as AnySchema;
+const semantic_context_message_operational_v1 =
+  require("./json-schemas/semantic-context_message-operational-v1.schema.json") as AnySchema;
 
-const ajv = new Ajv({ allErrors: true, strict: true });
+// strictTypes is disabled because generated JsonValue unions are legal JSON
+// Schema (union of primitive/array/object) that Ajv's strictTypes check
+// rejects; all other strict checks stay on and validation remains fail-closed.
+const ajv = new Ajv({ allErrors: true, strictTypes: false });
 addFormats(ajv);
 
 ajv.addSchema(raw_archive_ref_v1, "iris.raw_archive_ref.v1");
@@ -43,208 +59,671 @@ ajv.addSchema(context_generation_v2, "iris.context_generation.v2");
 ajv.addSchema(semantic_context_message_user_v1, "iris.semantic.context_message.user.v1");
 ajv.addSchema(semantic_context_message_assistant_v1, "iris.semantic.context_message.assistant.v1");
 ajv.addSchema(semantic_context_message_tool_call_v1, "iris.semantic.context_message.tool_call.v1");
-ajv.addSchema(semantic_context_message_tool_result_v1, "iris.semantic.context_message.tool_result.v1");
-ajv.addSchema(semantic_context_message_body_event_v1, "iris.semantic.context_message.body_event.v1");
-ajv.addSchema(semantic_context_message_operational_v1, "iris.semantic.context_message.operational.v1");
+ajv.addSchema(
+  semantic_context_message_tool_result_v1,
+  "iris.semantic.context_message.tool_result.v1",
+);
+ajv.addSchema(
+  semantic_context_message_body_event_v1,
+  "iris.semantic.context_message.body_event.v1",
+);
+ajv.addSchema(
+  semantic_context_message_operational_v1,
+  "iris.semantic.context_message.operational.v1",
+);
 
 // --- Generated validator functions ---
 
-export function validate_iris_raw_archive_ref_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.raw_archive_ref.v1")!;
+export function validate_iris_raw_archive_ref_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.raw_archive_ref.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.raw_archive_ref.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_semantic_derivation_refs_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.semantic_derivation_refs.v1")!;
+export function validate_iris_semantic_derivation_refs_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.semantic_derivation_refs.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.semantic_derivation_refs.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_message_unit_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_message_unit.v1")!;
+export function validate_iris_context_message_unit_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_message_unit.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.context_message_unit.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_unit_source_ref_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_unit_source_ref.v1")!;
+export function validate_iris_context_unit_source_ref_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_unit_source_ref.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.context_unit_source_ref.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_unit_header_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_unit_header.v1")!;
+export function validate_iris_context_unit_header_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_unit_header.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.context_unit_header.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_unit_v2(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_unit.v2")!;
+export function validate_iris_context_unit_v2(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_unit.v2");
+  if (!validate) return { valid: false, errors: ["schema not registered: iris.context_unit.v2"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_generation_header_v1(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_generation_header.v1")!;
+export function validate_iris_context_generation_header_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_generation_header.v1");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.context_generation_header.v1"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validate_iris_context_generation_v2(data: unknown): { valid: boolean; errors?: string[] } {
-  const validate = ajv.getSchema("iris.context_generation.v2")!;
+export function validate_iris_context_generation_v2(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
+  const validate = ajv.getSchema("iris.context_generation.v2");
+  if (!validate)
+    return { valid: false, errors: ["schema not registered: iris.context_generation.v2"] };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_user_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_user_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("runtimeEventId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: runtimeEventId"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("lifecycleState" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: lifecycleState"] };
-    if ("historianDisposition" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: historianDisposition"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
-    if ("sourceKind" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: sourceKind"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.user.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.user.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.user.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_assistant_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_assistant_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("runtimeEventId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: runtimeEventId"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("lifecycleState" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: lifecycleState"] };
-    if ("historianDisposition" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: historianDisposition"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
-    if ("sourceKind" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: sourceKind"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.assistant.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.assistant.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.assistant.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_tool_call_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_tool_call_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.tool_call.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.tool_call.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.tool_call.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_tool_result_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_tool_result_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.tool_result.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.tool_result.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.tool_result.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_body_event_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_body_event_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.body_event.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.body_event.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.body_event.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
-export function validateSemantic_iris_semantic_context_message_operational_v1(data: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemantic_iris_semantic_context_message_operational_v1(data: unknown): {
+  valid: boolean;
+  errors?: string[];
+} {
   if (data !== null && typeof data === "object" && !Array.isArray(data)) {
     const obj = data as Record<string, unknown>;
-    if ("contextUnitId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextUnitId"] };
-    if ("contextLineageId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextLineageId"] };
-    if ("contextSeq" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contextSeq"] };
-    if ("semanticSchemaId" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"] };
-    if ("contentHash" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: contentHash"] };
-    if ("layer" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: layer"] };
-    if ("pLevel" in obj) return { valid: false, errors: ["forbidden control metadata field in semanticContent: pLevel"] };
+    if ("contextUnitId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextUnitId"],
+      };
+    if ("contextLineageId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextLineageId"],
+      };
+    if ("contextSeq" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contextSeq"],
+      };
+    if ("runtimeEventId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: runtimeEventId"],
+      };
+    if ("semanticSchemaId" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: semanticSchemaId"],
+      };
+    if ("contentHash" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: contentHash"],
+      };
+    if ("lifecycleState" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: lifecycleState"],
+      };
+    if ("historianDisposition" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: historianDisposition"],
+      };
+    if ("layer" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: layer"],
+      };
+    if ("pLevel" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: pLevel"],
+      };
+    if ("sourceKind" in obj)
+      return {
+        valid: false,
+        errors: ["forbidden control metadata field in semanticContent: sourceKind"],
+      };
   }
-  const validate = ajv.getSchema("iris.semantic.context_message.operational.v1")!;
+  const validate = ajv.getSchema("iris.semantic.context_message.operational.v1");
+  if (!validate)
+    return {
+      valid: false,
+      errors: ["schema not registered: iris.semantic.context_message.operational.v1"],
+    };
   const valid = validate(data);
   if (!valid) {
-    return { valid: false, errors: validate.errors?.map((e: any) => `${e.instancePath}: ${e.message ?? ""}`) ?? [] };
+    return {
+      valid: false,
+      errors:
+        (validate.errors as ErrorObject[] | undefined)?.map(
+          (e) => `${e.instancePath}: ${e.message ?? ""}`,
+        ) ?? [],
+    };
   }
   return { valid: true };
 }
 
 // --- Semantic schema registry dispatch ---
-export function validateSemanticContent(semanticSchemaId: string, content: unknown): { valid: boolean; errors?: string[] } {
+export function validateSemanticContent(
+  semanticSchemaId: string,
+  content: unknown,
+): { valid: boolean; errors?: string[] } {
   switch (semanticSchemaId) {
     case "iris.semantic.context_message.user.v1":
       return validateSemantic_iris_semantic_context_message_user_v1(content);
@@ -264,5 +743,5 @@ export function validateSemanticContent(semanticSchemaId: string, content: unkno
 }
 
 export function isKnownSemanticSchemaId(id: string): boolean {
-  return KNOWN_SEMANTIC_SCHEMA_IDS.includes(id as any);
+  return (KNOWN_SEMANTIC_SCHEMA_IDS as readonly string[]).includes(id);
 }

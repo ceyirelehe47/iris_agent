@@ -79,13 +79,10 @@ import type {
   RuntimeEventKind,
   HistorianDisposition,
   SemanticDerivationRefsV1,
-  RawArchiveRefV1,
   ContextMessageUnitV1,
   ContextUnitV2,
   ContextUnitHeaderV1,
   ContextGenerationV2,
-  ContextGenerationHeaderV1,
-  ContextUnitSourceRefV1,
 } from "../../contracts/generated/types.js";
 
 import {
@@ -416,7 +413,10 @@ export function validateUnitV2Strict(unit: unknown): { valid: boolean; reason?: 
   if (typeof hdr["contextUnitId"] !== "string" || (hdr["contextUnitId"] as string).length === 0) {
     return { valid: false, reason: "contextUnitId must be a non-empty string" };
   }
-  if (typeof hdr["semanticSchemaId"] !== "string" || (hdr["semanticSchemaId"] as string).length === 0) {
+  if (
+    typeof hdr["semanticSchemaId"] !== "string" ||
+    (hdr["semanticSchemaId"] as string).length === 0
+  ) {
     return { valid: false, reason: "semanticSchemaId must be a non-empty string" };
   }
   if (typeof hdr["contentHash"] !== "string" || (hdr["contentHash"] as string).length === 0) {

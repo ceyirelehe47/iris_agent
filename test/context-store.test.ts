@@ -74,8 +74,8 @@ test("context-store: repeated open is idempotent (no double migration)", () => {
         ).c;
         assert.equal(
           count,
-          9,
-          "0001..0008 applied once, never re-applied (two 0005 files = 9 total)",
+          10,
+          "0001..0009 applied once, never re-applied (two 0005 files = 10 total)",
         );
       } finally {
         db.close();

@@ -17,14 +17,15 @@
     "fork": {
       "repository": "blueforst/pi",
       "baselineCommit": "ab5f8d88ee1d400c0c8fb5c50ac10b2f4a4851d1",
-      "seamCommit": "9357e59963faeed54bcc17fecb0e48c042b08949",
-      "seamTree": "81845d52efaa7c008af12199caf8a3c53001b8ba",
+      "seamCommit": "48a052247195d2a7d87cda68b9125105e177f7b3",
+      "seamTree": "5a034175f4d0bf9fcab047103301835cad90e4a1",
       "acceptedRuntimeRepository": "blueforst/pi",
       "acceptedRuntimeCommit": "66a3ea14616a438f47d3121979c0581c22ea64bb",
       "acceptedRuntimeTree": "a6bdb67ab97a087e3e0285746462545780ea19b3",
-      "upstreamBaseCommit": "e741cb05ca7c1c7bc5a9664c99697df32de9fac6",
-      "upstreamAuditBaselineCommit": "b4f293684bba718d59cc1157679bcf6157b3a7f5",
-      "adoptionStatus": "file_link_local_development"
+      "upstreamBaseCommit": "581d75a89cea21e50d6a26df840352f94427f633",
+      "upstreamAuditBaselineCommit": "6f707eb36064e82af9c1320a7634f4dfad21049b",
+      "adoptionStatus": "file_link_local_development",
+      "syncNotes": "2026-08-13 partial sync (owner decision): 3 coding-agent commits cherry-picked (a144b78d7/9f6d9de58/62eff41a6); 266 upstream commits still unsynced — mechanical freshness gate (pi scripts/check-upstream-freshness.mjs) reports STALE until full sync."
     }
   },
   "magicContext": {
@@ -32,9 +33,7 @@
     "release": "v0.33.0",
     "commit": "48ab531d8fa98af2f463db2e4d9f8ffdd63d765e",
     "authoritativePath": "packages/plugin/src/hooks/magic-context",
-    "explicitlyNotAdopted": [
-      "experimental.memory_mural"
-    ]
+    "explicitlyNotAdopted": ["experimental.memory_mural"]
   },
   "memoryContracts": {
     "package": "iris-memory-contracts",

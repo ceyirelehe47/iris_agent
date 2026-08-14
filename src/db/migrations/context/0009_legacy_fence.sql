@@ -1,25 +1,23 @@
--- Feature A7 (iris_agent#117): legacy durable state fence.
+-- Round 7 (iris_agent#122): legacy durable rows are fenced PHYSICALLY, not via
+-- the canonical lifecycle enum.
 --
--- Pre-existing rows had lifecycle_state DEFAULT 'committed' (migration 0008)
--- which silently reclassifies unknown historical lifecycle as canonical.
--- Per #117: unknown historical lifecycle must NOT be treated as canonical.
+-- The canonical lifecycle enum is exactly the six Notion states
+-- (committed / historian_eligible / historian_claimed /
+-- compartmentalized_pending_bust / represented_in_p3 / retired) and stays
+-- unchanged. `legacy_status` is a PHYSICAL migration-status column owned by
+-- the persistence layer: it is NOT a ContextMessageUnitV1 lifecycle value and
+-- never appears in `iris.context_message_unit.v1`.
 --
--- This migration renames the default to 'legacy_committed_unknown' so the
--- read path can fence/quarantine these rows instead of treating them as
--- current canonical ContextMessageUnitV1.
---
--- Additionally, rows with content_hash_basis='v1' (legacy payload-only hash)
--- are now fenced from P5 selection until they are explicitly migrated to v2.
+-- Rows with content_hash_basis='v1' carry a pre-#113 payload-only hash whose
+-- canonical semantic meaning (kind/disposition/derivation/schema identity)
+-- cannot be proven. They are quarantined and cannot deserialize as current
+-- ContextMessageUnitV1 until an explicit verified migration/rebuild rewrites
+-- them to 'v2'. The read path fails closed on quarantined rows.
 
--- Rename the DEFAULT and update existing 'committed' rows that were set by
--- the 0008 migration (not by explicit write). We use a sentinel: rows that
--- still have content_hash_basis='v1' are the ones from before #113 — their
--- lifecycle was never explicitly written.
+ALTER TABLE context_units ADD COLUMN legacy_status TEXT NOT NULL DEFAULT 'none' CHECK (
+  legacy_status IN ('none', 'quarantined_legacy')
+);
+
 UPDATE context_units
-SET lifecycle_state = 'legacy_committed_unknown'
-WHERE content_hash_basis = 'v1'
-  AND lifecycle_state = 'committed';
-
--- Add the new lifecycle state to the CHECK constraint.
--- SQLite doesn't support ALTER TABLE ... MODIFY COLUMN, so we recreate.
--- The read path already handles 'legacy_committed_unknown' as a fence state.
+SET legacy_status = 'quarantined_legacy'
+WHERE content_hash_basis = 'v1';

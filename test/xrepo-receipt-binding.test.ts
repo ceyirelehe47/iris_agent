@@ -75,9 +75,30 @@ function sampleEnvelope(
       compartmentIds: ["comp-x"],
       sourceContextMessageUnitIds: [],
     },
+    // iris_memory graphiti-episode-source-v2 required provenance fields.
+    semanticKind: "dialogue",
+    attributionClass: "user",
+    sourceTrust: "observed",
+    referenceTime: "2026-08-06T00:00:00.500Z",
   };
+  // iris_memory#11: the canonical episode-source hash covers the 9-field
+  // identity+provenance+content subset (NOT the new v2 provenance fields) —
+  // the memory re-hashes exactly this subset and fails closed on mismatch.
   const episodeSourceHash = createHash("sha256")
-    .update(canonicalJson(episodeSourceBase), "utf8")
+    .update(
+      canonicalJson({
+        episodeId: episodeSourceBase.episodeId,
+        lineageId: episodeSourceBase.lineageId,
+        contextRange: episodeSourceBase.contextRange,
+        sourceUnitIds: episodeSourceBase.sourceUnitIds,
+        canonicalContent: episodeSourceBase.canonicalContent,
+        targetGroupId: episodeSourceBase.targetGroupId,
+        temporal: episodeSourceBase.temporal,
+        isDerivedOnly: episodeSourceBase.isDerivedOnly,
+        derivation: episodeSourceBase.derivation,
+      }),
+      "utf8",
+    )
     .digest("hex");
   const envelopeBase = {
     schemaVersion: "historian-publication-v3",

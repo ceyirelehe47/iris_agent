@@ -1,9 +1,4 @@
-import {
-  InMemoryCredentialStore,
-  createModels,
-  type Model,
-  type Models,
-} from "@iris/pi-ai";
+import { InMemoryCredentialStore, createModels, type Model, type Models } from "@iris/pi-ai";
 import { opencodeGoProvider } from "@iris/pi-ai/providers/opencode-go";
 
 /**

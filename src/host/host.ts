@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { Session } from "@iris/pi-agent-core";
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../config/schema.js";
 import { defaultAgentConfig } from "../config/load.js";
@@ -61,6 +58,7 @@ import {
   type RecoveryEscalationEvent,
 } from "../runtime/recovery-supervisor.js";
 import {
+  DurableOutcomeResolutionStore,
   defaultFallbackConfig,
   freshRecoveryState,
   logicalExecutionIdFor,
@@ -72,6 +70,13 @@ export interface IrisHostOptions {
   config?: AgentConfigV3;
   /** Provider mode for the active Capsule. */
   provider: "mock" | "live";
+  /**
+   * Test seam: when provider === "mock", make the faux provider throw this
+   * error on its first provider call. The REAL harness failure path then runs
+   * (emitRunFailure → failure message → agent_end → native settled), which is
+   * how production provider dispatch failures behave.
+   */
+  mockProviderError?: Error;
   /**
    * Durable ingress dedupe identity dimension (M4). Semantics: the Host
    * INSTANCE epoch, NOT the Runtime Session Epoch ordinal. It is stable
@@ -179,6 +184,7 @@ export class IrisHost {
   /** SQLite-backed durable recovery state (one row per logical execution). */
   private readonly recoveryStore: RecoveryStateStore;
   private readonly providerMode: "mock" | "live";
+  private readonly mockProviderError: Error | undefined;
 
   private readyFlag = false;
   private shuttingDown = false;
@@ -209,10 +215,12 @@ export class IrisHost {
     currentEpoch: RuntimeSessionEpoch;
     instanceEpoch: number;
     settledTokenBox: { value: { epochId: string; invocationId: string } | null };
+    mockProviderError?: Error;
   }) {
     this.dataRoot = options.dataRoot;
     this.config = options.config;
     this.providerMode = options.provider;
+    this.mockProviderError = options.mockProviderError;
     this.lock = options.lock;
     this.epochStore = options.epochStore;
     this.ingress = options.ingress;
@@ -962,34 +970,17 @@ export class IrisHost {
       const readyRepo = sessionHandle.repo;
 
       // Recover accepted-but-uncommitted inputs into the FIFO (durable
-      // ingress), reconciled against the VERIFIED active Session.
+      // ingress). Classification (reconcileUncommitted) runs AFTER the
+      // startup outcome reconciliation below, so a durable replay_safe
+      // resolution can keep its input accepted for exactly-one replay.
       ingress = InputAcceptanceLedger.open(options.dataRoot, config, instanceEpoch);
-      // A1 / review-pass-2 #1: classify each accepted record — verified full
-      // pair -> session_committed (never re-prompt); no Pi append -> normal
-      // delivery; partial/mismatched -> fail closed (rejected).
       const pending = ingress.recoverUncommitted();
-      if (pending.length > 0) {
-        const { ambiguous } = await reconcileUncommitted(
-          pending,
-          epoch.runtimeSessionId,
-          session,
-          ingress,
-          instanceEpoch,
-        );
-        // review-pass-4 #1: ambiguous recovery means an orphan UserMessage is
-        // claimed by multiple pending identities — the Host cannot uniquely
-        // attribute it and must NOT guess or batch-reject. Fail closed into
-        // not-ready/corrupt so an operator reviews the data root instead of
-        // silently dropping or duplicating logical inputs.
-        if (ambiguous.length > 0) {
-          throw new Error(
-            `ambiguous ingress recovery for inputs: ${ambiguous.join(", ")} — ` +
-              "orphan UserMessage wire claimed by multiple pending identities (not-ready)",
-          );
-        }
-      }
 
-      const { models, model, providerProfileId } = await composeProvider(options.provider);
+      const { models, model, providerProfileId } = await composeProvider(
+        options.provider,
+        undefined,
+        options.mockProviderError,
+      );
 
       const binding: InvocationBinding = {
         input: emptyPlaceholderInput(),
@@ -1089,9 +1080,13 @@ export class IrisHost {
       // state (recovery-state.db in the data root).
       recoveryStore = new RecoveryStateStore(join(paths.dataRoot, "recovery-state.db"));
       const readyRecoveryStore = recoveryStore;
+      const resolutionStore = new DurableOutcomeResolutionStore(
+        join(paths.dataRoot, "recovery-state.db"),
+      );
       const supervisor = new RecoverySupervisor({
         runtime: coordinator,
         config: defaultFallbackConfig(models.getModels().map((m) => `${m.provider}/${m.id}`)),
+        resolutionStore,
         // iris_agent#111: operation-specific reconciliation seam.
         // When the caller provides an outcomeReconciler, the supervisor
         // dispatches to it with the logical execution identity, input
@@ -1124,6 +1119,118 @@ export class IrisHost {
               return "ambiguous" as const;
             },
       });
+
+      // Round 7 (#118/#125): reconcile durable pendingOutcomeUnknown that can
+      // NEVER reach the dispatch path again. The crash window persists
+      // pending FIRST, then appends the Pi pair; when a pending record's
+      // input already has a verified Pi pair, ingress classification marks it
+      // session_committed and the supervisor would never reconcile it. Those
+      // are reconciled here, BEFORE the pump starts. Pending records WITHOUT
+      // a session pair are left to the dispatch path (reconcile-before-dispatch
+      // in the supervisor) so host open alone never consumes them.
+      //   confirmed_applied → durable resolution + session_committed (zero
+      //                       replay, zero re-query on later restarts)
+      //   replay_safe      → durable resolution + pending cleared; the input
+      //                       stays accepted so the dispatch path replays it
+      //                       EXACTLY once with the same identity
+      //   ambiguous        → exhausted persisted (fail closed); the input is
+      //                       session_committed so it never dispatches again
+      const replayAuthorizedInputIds = new Set<string>();
+      const pendingExecutions = readyRecoveryStore.listWithPendingOutcomeUnknown();
+      if (pendingExecutions.length > 0) {
+        const entries = await session.getEntries();
+        const projected = projectSessionMessages(entries);
+        const pairs = findInputPairsByProjection(projected);
+        const pairByInputId = new Map<string, string>();
+        for (const pair of pairs) {
+          const details = (pair.companion.message.details ?? {}) as {
+            iris?: { inputId?: string };
+          };
+          const inputId = details.iris?.inputId;
+          if (typeof inputId === "string" && inputId !== "") {
+            pairByInputId.set(inputId, pair.user.entryId);
+          }
+        }
+        for (const snapshot of pendingExecutions) {
+          const pendingInputId = snapshot.pendingOutcomeUnknown?.inputId;
+          if (pendingInputId === undefined) {
+            continue;
+          }
+          if (!pairByInputId.has(pendingInputId)) {
+            // No Pi pair yet — the dispatch path will reconcile before any
+            // provider dispatch (supervisor prompt entry).
+            continue;
+          }
+          if (snapshot.exhausted) {
+            // D7 (#125): a durable exhausted fence is TERMINAL — the last
+            // reconciliation was ambiguous and the host failed closed.
+            // Repeated restarts must NOT re-query the external reconciler
+            // (zero external re-query, zero replay — #118); the input is
+            // bound to its pair and never re-dispatched.
+            const userEntryId = pairByInputId.get(pendingInputId);
+            if (userEntryId !== undefined) {
+              ingress.markSessionCommitted(
+                pendingInputId,
+                instanceEpoch,
+                epoch.runtimeSessionId,
+                userEntryId,
+              );
+            }
+            continue;
+          }
+          const disposition = await supervisor.reconcilePendingOnStartup(snapshot);
+          const updated = supervisor.getState();
+          if (updated !== null) {
+            readyRecoveryStore.save(updated);
+          }
+          if (disposition === "replay_safe") {
+            // Durable replay_safe resolution: the prior dispatch did NOT
+            // apply. The input stays accepted (never session_committed) so
+            // the pump replays it EXACTLY once with the same identity.
+            replayAuthorizedInputIds.add(pendingInputId);
+            continue;
+          }
+          // confirmed_applied / ambiguous: the input must never be
+          // re-prompted — it is already bound to its Pi pair.
+          const userEntryId = pairByInputId.get(pendingInputId);
+          if (userEntryId !== undefined) {
+            ingress.markSessionCommitted(
+              pendingInputId,
+              instanceEpoch,
+              epoch.runtimeSessionId,
+              userEntryId,
+            );
+          }
+        }
+      }
+
+      // A1 / review-pass-2 #1: classify each accepted record — verified full
+      // pair -> session_committed (never re-prompt); no Pi append -> normal
+      // delivery; partial/mismatched -> fail closed (rejected). Inputs with a
+      // durable replay_safe resolution skip session_committed so the replay
+      // can run (D7 #125).
+      if (pending.length > 0) {
+        const { ambiguous } = await reconcileUncommitted(
+          pending,
+          epoch.runtimeSessionId,
+          session,
+          ingress,
+          instanceEpoch,
+          replayAuthorizedInputIds,
+        );
+        // review-pass-4 #1: ambiguous recovery means an orphan UserMessage is
+        // claimed by multiple pending identities — the Host cannot uniquely
+        // attribute it and must NOT guess or batch-reject. Fail closed into
+        // not-ready/corrupt so an operator reviews the data root instead of
+        // silently dropping or duplicating logical inputs.
+        if (ambiguous.length > 0) {
+          throw new Error(
+            `ambiguous ingress recovery for inputs: ${ambiguous.join(", ")} — ` +
+              "orphan UserMessage wire claimed by multiple pending identities (not-ready)",
+          );
+        }
+      }
+
       return new IrisHost({
         dataRoot: options.dataRoot,
         config,
@@ -1138,6 +1245,9 @@ export class IrisHost {
         currentEpoch: epoch,
         instanceEpoch,
         settledTokenBox,
+        ...(options.mockProviderError === undefined
+          ? {}
+          : { mockProviderError: options.mockProviderError }),
       });
     } catch (error) {
       // Setup failed partway (review-pass-2 #4): release every acquired
@@ -1229,6 +1339,13 @@ async function reconcileUncommitted(
   session: Session,
   ingress: InputAcceptanceLedger,
   currentInstanceEpoch: number,
+  /**
+   * Round 7 (D7 #125): inputIds with a durable replay_safe resolution. These
+   * keep their accepted state even when a verified Pi pair exists — the pump
+   * replays them EXACTLY once with the same logical execution identity
+   * instead of treating the pair as session_committed proof.
+   */
+  replayAuthorizedInputIds?: ReadonlySet<string>,
 ): Promise<{ ambiguous: string[] }> {
   // Separator for the (instanceEpoch, inputId, pairKey) composite identity.
   // review-pass-6 #4: ingress identity is (instanceEpoch, inputId) — the
@@ -1384,6 +1501,14 @@ async function reconcileUncommitted(
     if (verified?.userWire === identity.wire) {
       const frames = decodeInputFrames(identity.wire);
       if (companionMatchesEnvelope(verified.details, identity.envelope, frames, identity.wire)) {
+        if (replayAuthorizedInputIds?.has(entry.inputId) === true) {
+          // D7 (#125): durable replay_safe resolution — the prior dispatch
+          // was confirmed NOT applied. Keep the input accepted so the pump
+          // replays it EXACTLY once with the same logical execution identity
+          // (the pair is not treated as session_committed proof).
+          ingress.dropInFlight(entry.inputId, entry.instanceEpoch);
+          continue;
+        }
         ingress.markSessionCommitted(
           entry.inputId,
           entry.instanceEpoch,

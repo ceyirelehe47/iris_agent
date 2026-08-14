@@ -1,8 +1,8 @@
 {
   "$comment": "Single machine-readable source of truth for iris.agent-domain-contracts.v1. Notion (01 Canonical Schemas) is the human authority; this file is the machine authority. All TypeScript types, JSON Schema validators, semantic validators, and release artifacts are GENERATED from this file by scripts/codegen.mjs. NEVER hand-write duplicate interfaces or validators.",
   "registryId": "iris.agent-domain-contracts.v1",
-  "registryStatus": "R0_codegen_authoritative",
-  "lockedAt": "2026-08-13",
+  "registryStatus": "design_locked_pending_R0_codegen",
+  "lockedAt": "2026-08-09",
   "currentGenerationSchemaId": "iris.context_generation.v2",
   "currentGenerationUnitSchemaId": "iris.context_unit.v2",
   "currentGenerationHeaderSchemaId": "iris.context_generation_header.v1",
@@ -24,8 +24,7 @@
         "historian_claimed",
         "compartmentalized_pending_bust",
         "represented_in_p3",
-        "retired",
-        "legacy_committed_unknown"
+        "retired"
       ]
     }
   },
@@ -33,13 +32,34 @@
     "iris.raw_archive_ref.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.raw_archive_ref.v1" },
-        "runtimeSessionId": { "type": "string", "minLength": 1 },
-        "startEntrySeq": { "type": "integer" },
-        "endEntrySeq": { "type": "integer" },
-        "entryIds": { "type": "array", "items": { "type": "string" } },
-        "sourceHash": { "type": "string" },
-        "blobRefs": { "type": "array", "items": { "type": "string" } }
+        "schemaId": {
+          "const": "iris.raw_archive_ref.v1"
+        },
+        "runtimeSessionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startEntrySeq": {
+          "type": "integer"
+        },
+        "endEntrySeq": {
+          "type": "integer"
+        },
+        "entryIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sourceHash": {
+          "type": "string"
+        },
+        "blobRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "required": ["schemaId", "runtimeSessionId"],
       "additionalProperties": false
@@ -47,11 +67,30 @@
     "iris.semantic_derivation_refs.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.semantic_derivation_refs.v1" },
-        "memoryRefs": { "type": "array", "items": { "type": "string" } },
-        "compartmentIds": { "type": "array", "items": { "type": "string" } },
-        "workSnapshotVersion": { "type": "integer" },
-        "sourceContextMessageUnitIds": { "type": "array", "items": { "type": "string" } }
+        "schemaId": {
+          "const": "iris.semantic_derivation_refs.v1"
+        },
+        "memoryRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compartmentIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workSnapshotVersion": {
+          "type": "integer"
+        },
+        "sourceContextMessageUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "required": ["schemaId"],
       "additionalProperties": false
@@ -59,37 +98,96 @@
     "iris.context_message_unit.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_message_unit.v1" },
-        "contextUnitId": { "type": "string", "minLength": 1 },
-        "contextLineageId": { "type": "string", "minLength": 1 },
-        "contextSeq": { "type": "integer", "minimum": 0 },
-        "runtimeEventId": { "type": "string", "minLength": 1 },
-        "invocationId": { "type": "string" },
-        "kind": { "$ref": "#/primitives/RuntimeEventKind" },
-        "semanticSchemaId": { "type": "string", "minLength": 1 },
-        "semanticContent": { "type": "jsonValue" },
-        "historianDisposition": { "$ref": "#/primitives/HistorianDisposition" },
-        "derivationRefs": { "$ref": "#/schemas/iris.semantic_derivation_refs.v1" },
-        "rawArchiveRef": { "$ref": "#/schemas/iris.raw_archive_ref.v1" },
-        "contentHash": { "type": "string", "minLength": 1 },
-        "lifecycleState": { "$ref": "#/primitives/ContextMessageUnitLifecycleState" },
-        "createdAt": { "type": "string", "minLength": 1 }
+        "schemaId": {
+          "const": "iris.context_message_unit.v1"
+        },
+        "contextUnitId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contextLineageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contextSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runtimeEventId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/primitives/RuntimeEventKind"
+        },
+        "semanticSchemaId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semanticContent": {
+          "type": "jsonValue"
+        },
+        "historianDisposition": {
+          "$ref": "#/primitives/HistorianDisposition"
+        },
+        "derivationRefs": {
+          "$ref": "#/schemas/iris.semantic_derivation_refs.v1"
+        },
+        "rawArchiveRef": {
+          "$ref": "#/schemas/iris.raw_archive_ref.v1"
+        },
+        "contentHash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycleState": {
+          "$ref": "#/primitives/ContextMessageUnitLifecycleState"
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "required": [
-        "schemaId", "contextUnitId", "contextLineageId", "contextSeq",
-        "runtimeEventId", "kind", "semanticSchemaId", "semanticContent",
-        "historianDisposition", "contentHash", "lifecycleState", "createdAt"
+        "schemaId",
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "kind",
+        "semanticSchemaId",
+        "semanticContent",
+        "historianDisposition",
+        "contentHash",
+        "lifecycleState",
+        "createdAt"
       ],
       "additionalProperties": false
     },
     "iris.context_unit_source_ref.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_unit_source_ref.v1" },
-        "sourceSchemaId": { "type": "string", "minLength": 1 },
-        "sourceId": { "type": "string", "minLength": 1 },
-        "sourceRevision": { "type": "string" },
-        "sourceHash": { "type": "string", "minLength": 1 }
+        "schemaId": {
+          "const": "iris.context_unit_source_ref.v1"
+        },
+        "sourceSchemaId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceRevision": {
+          "type": "string"
+        },
+        "sourceHash": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "required": ["schemaId", "sourceSchemaId", "sourceId", "sourceHash"],
       "additionalProperties": false
@@ -97,11 +195,24 @@
     "iris.context_unit_header.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_unit_header.v1" },
-        "contextUnitId": { "type": "string", "minLength": 1 },
-        "source": { "$ref": "#/schemas/iris.context_unit_source_ref.v1" },
-        "semanticSchemaId": { "type": "string", "minLength": 1 },
-        "contentHash": { "type": "string", "minLength": 1 }
+        "schemaId": {
+          "const": "iris.context_unit_header.v1"
+        },
+        "contextUnitId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/schemas/iris.context_unit_source_ref.v1"
+        },
+        "semanticSchemaId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contentHash": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "required": ["schemaId", "contextUnitId", "source", "semanticSchemaId", "contentHash"],
       "additionalProperties": false
@@ -109,9 +220,15 @@
     "iris.context_unit.v2": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_unit.v2" },
-        "header": { "$ref": "#/schemas/iris.context_unit_header.v1" },
-        "semanticContent": { "type": "jsonValue" }
+        "schemaId": {
+          "const": "iris.context_unit.v2"
+        },
+        "header": {
+          "$ref": "#/schemas/iris.context_unit_header.v1"
+        },
+        "semanticContent": {
+          "type": "jsonValue"
+        }
       },
       "required": ["schemaId", "header", "semanticContent"],
       "additionalProperties": false
@@ -119,33 +236,64 @@
     "iris.context_generation_header.v1": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_generation_header.v1" },
-        "contextGenerationId": { "type": "string", "minLength": 1 },
-        "contextLineageId": { "type": "string", "minLength": 1 },
-        "sourceSnapshotHash": { "type": "string", "minLength": 1 },
+        "schemaId": {
+          "const": "iris.context_generation_header.v1"
+        },
+        "contextGenerationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contextLineageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceSnapshotHash": {
+          "type": "string",
+          "minLength": 1
+        },
         "layerEnds": {
           "type": "array",
-          "items": { "type": "integer", "minimum": 0 },
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
           "minItems": 6,
           "maxItems": 6
         },
-        "contextGenerationHash": { "type": "string", "minLength": 1 },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "contextGenerationHash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       },
       "required": [
-        "schemaId", "contextGenerationId", "contextLineageId", "sourceSnapshotHash",
-        "layerEnds", "contextGenerationHash", "createdAt"
+        "schemaId",
+        "contextGenerationId",
+        "contextLineageId",
+        "sourceSnapshotHash",
+        "layerEnds",
+        "contextGenerationHash",
+        "createdAt"
       ],
       "additionalProperties": false
     },
     "iris.context_generation.v2": {
       "type": "object",
       "properties": {
-        "schemaId": { "const": "iris.context_generation.v2" },
-        "header": { "$ref": "#/schemas/iris.context_generation_header.v1" },
+        "schemaId": {
+          "const": "iris.context_generation.v2"
+        },
+        "header": {
+          "$ref": "#/schemas/iris.context_generation_header.v1"
+        },
         "units": {
           "type": "array",
-          "items": { "$ref": "#/schemas/iris.context_unit.v2" }
+          "items": {
+            "$ref": "#/schemas/iris.context_unit.v2"
+          }
         }
       },
       "required": ["schemaId", "header", "units"],
@@ -155,116 +303,671 @@
   "semanticSchemas": {
     "iris.semantic.context_message.user.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "runtimeEventId",
-        "semanticSchemaId", "contentHash", "lifecycleState", "historianDisposition",
-        "layer", "pLevel", "sourceKind"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "role": { "type": "string", "enum": ["user", "custom"] },
-          "content": { "type": "string" }
+          "role": {
+            "type": "string",
+            "enum": ["user", "custom"]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "text"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "image"
+                        },
+                        "data": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "data", "mimeType"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "toolCall"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "arguments": {
+                          "type": "object"
+                        },
+                        "thoughtSignature": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id", "name", "arguments"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "thinking"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "signature": {
+                          "type": "string"
+                        },
+                        "redacted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["type", "text"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "timestamp": {
+            "type": "number"
+          }
         },
         "required": ["role", "content"],
-        "additionalProperties": true
+        "additionalProperties": false
       }
     },
     "iris.semantic.context_message.assistant.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "runtimeEventId",
-        "semanticSchemaId", "contentHash", "lifecycleState", "historianDisposition",
-        "layer", "pLevel", "sourceKind"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "role": { "const": "assistant" },
-          "content": { "type": "string" }
+          "role": {
+            "const": "assistant"
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "text"
+                        },
+                        "text": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "text"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "image"
+                        },
+                        "data": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "data", "mimeType"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "toolCall"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "arguments": {
+                          "type": "object"
+                        },
+                        "thoughtSignature": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id", "name", "arguments"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "thinking"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "signature": {
+                          "type": "string"
+                        },
+                        "redacted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["type", "text"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "api": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "responseModel": {
+            "type": "string"
+          },
+          "responseId": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["type", "message"],
+              "additionalProperties": false
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "cacheRead": {
+                "type": "number"
+              },
+              "cacheWrite": {
+                "type": "number"
+              },
+              "cacheWrite1h": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "cacheRead": {
+                    "type": "number"
+                  },
+                  "cacheWrite": {
+                    "type": "number"
+                  },
+                  "total": {
+                    "type": "number"
+                  }
+                },
+                "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
+            "additionalProperties": false
+          },
+          "stopReason": {
+            "type": "string",
+            "enum": ["pending", "stop", "length", "toolUse", "error", "aborted"]
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "rawStopReason": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          }
         },
-        "required": ["role", "content"],
-        "additionalProperties": true
+        "required": ["role", "content", "timestamp"],
+        "additionalProperties": false
       }
     },
     "iris.semantic.context_message.tool_call.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "role": { "type": "string", "minLength": 1 },
-          "content": {},
+          "role": {
+            "const": "assistant"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "text"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "image"
+                    },
+                    "data": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "data", "mimeType"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "toolCall"
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "arguments": {
+                      "type": "object"
+                    },
+                    "thoughtSignature": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "id", "name", "arguments"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "thinking"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "signature": {
+                      "type": "string"
+                    },
+                    "redacted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["type", "text"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
           "toolCalls": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "minLength": 1 },
-                "type": { "type": "string", "minLength": 1 },
-                "function": {
-                  "type": "object",
-                  "properties": {
-                    "name": { "type": "string", "minLength": 1 },
-                    "arguments": {}
-                  },
-                  "required": ["name"],
-                  "additionalProperties": true
+                "type": {
+                  "const": "toolCall"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "arguments": {
+                  "type": "object"
+                },
+                "thoughtSignature": {
+                  "type": "string"
                 }
               },
-              "required": ["id", "type", "function"],
-              "additionalProperties": true
+              "required": ["type", "id", "name", "arguments"],
+              "additionalProperties": false
             }
+          },
+          "timestamp": {
+            "type": "number"
           }
         },
-        "required": ["role"],
-        "additionalProperties": true
+        "required": ["role", "content"],
+        "additionalProperties": false
       }
     },
     "iris.semantic.context_message.tool_result.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "role": { "const": "toolResult" },
-          "content": {},
-          "toolCallId": { "type": "string", "minLength": 1 }
+          "role": {
+            "const": "toolResult"
+          },
+          "toolCallId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "toolName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "text"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "image"
+                    },
+                    "data": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "data", "mimeType"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "reasoning"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "text"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "details": {},
+          "usage": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "cacheRead": {
+                "type": "number"
+              },
+              "cacheWrite": {
+                "type": "number"
+              },
+              "cacheWrite1h": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              },
+              "cost": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "cacheRead": {
+                    "type": "number"
+                  },
+                  "cacheWrite": {
+                    "type": "number"
+                  },
+                  "total": {
+                    "type": "number"
+                  }
+                },
+                "required": ["input", "output", "cacheRead", "cacheWrite", "total"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
+            "additionalProperties": false
+          },
+          "addedToolNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "timestamp": {
+            "type": "number"
+          }
         },
-        "required": ["role"],
-        "additionalProperties": true
+        "required": ["role", "toolCallId", "toolName", "content", "isError", "timestamp"],
+        "additionalProperties": false
       }
     },
     "iris.semantic.context_message.body_event.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "type": { "type": "string", "minLength": 1 },
-          "data": {}
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "data": {
+            "type": "object"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "timestamp": {
+            "type": "number"
+          }
         },
         "required": ["type"],
-        "additionalProperties": true
+        "additionalProperties": false
       }
     },
     "iris.semantic.context_message.operational.v1": {
       "forbiddenPayloadFields": [
-        "contextUnitId", "contextLineageId", "contextSeq", "semanticSchemaId",
-        "contentHash", "layer", "pLevel"
+        "contextUnitId",
+        "contextLineageId",
+        "contextSeq",
+        "runtimeEventId",
+        "semanticSchemaId",
+        "contentHash",
+        "lifecycleState",
+        "historianDisposition",
+        "layer",
+        "pLevel",
+        "sourceKind"
       ],
       "schema": {
         "type": "object",
         "properties": {
-          "type": { "type": "string", "minLength": 1 },
-          "data": {}
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "data": {
+            "type": "object"
+          },
+          "timestamp": {
+            "type": "number"
+          }
         },
         "required": ["type"],
-        "additionalProperties": true
+        "additionalProperties": false
       }
     }
   }

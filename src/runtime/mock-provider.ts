@@ -3,7 +3,6 @@ import {
   fauxAssistantMessage,
   fauxProvider,
   fauxToolCall,
-  type AssistantMessage,
   type Model,
   type Models,
   type FauxResponseStep,
@@ -17,27 +16,59 @@ export interface MockProviderHandle {
 
 export interface MockProviderOptions {
   onContext?: (messages: unknown[]) => void;
+  /** When set, the faux provider throws this error on its first call. */
+  failWith?: Error;
+  /**
+   * Override the default looping response pair with an exact response
+   * sequence (used by C7 native-settled fault tests to control provider
+   * liveness: hang / reject / settle).
+   */
+  responses?: FauxResponseStep[];
+  /**
+   * Extra model ids to register on the faux provider (fallback-chain tests
+   * need a second model slot). The primary model is always
+   * "mock-deepseek-v4-flash".
+   */
+  extraModelIds?: string[];
 }
 
 export function createMockProvider(options: MockProviderOptions = {}): MockProviderHandle {
-  const faux = fauxProvider({ provider: "mock-iris", models: [{ id: "mock-deepseek-v4-flash" }] });
+  const modelDefs = [
+    { id: "mock-deepseek-v4-flash" },
+    ...(options.extraModelIds ?? []).map((id) => ({ id })),
+  ];
+  const faux = fauxProvider({ provider: "mock-iris", models: modelDefs });
   const models = createModels();
   models.setProvider(faux.provider);
-  const capture =
-    (message: AssistantMessage): FauxResponseStep =>
-    (context) => {
+  if (options.failWith !== undefined) {
+    // First provider call throws — the REAL harness failure path runs
+    // (emitRunFailure → failure message → agent_end → native settled).
+    const failWith = options.failWith;
+    faux.setResponses([
+      () => {
+        throw failWith;
+      },
+    ]);
+  } else {
+    // Responses LOOP: each tool-turn factory re-appends the pair after
+    // consumption, so any number of prompts (multi-prompt coordinator tests)
+    // always have a response queued.
+    const toolTurn = fauxAssistantMessage(
+      [fauxToolCall("test_read_tool", { query: "iris" }, { id: "tool-call-1" })],
+      { stopReason: "toolUse" },
+    );
+    const finalTurn = fauxAssistantMessage("mock assistant final");
+    const toolFactory: FauxResponseStep = (context) => {
       options.onContext?.(context.messages);
-      return message;
+      faux.appendResponses([toolFactory, finalFactory]);
+      return toolTurn;
     };
-  faux.setResponses([
-    capture(
-      fauxAssistantMessage(
-        [fauxToolCall("test_read_tool", { query: "iris" }, { id: "tool-call-1" })],
-        { stopReason: "toolUse" },
-      ),
-    ),
-    capture(fauxAssistantMessage("mock assistant final")),
-  ]);
+    const finalFactory: FauxResponseStep = (context) => {
+      options.onContext?.(context.messages);
+      return finalTurn;
+    };
+    faux.setResponses(options.responses ?? [toolFactory, finalFactory]);
+  }
   const model = faux.getModel("mock-deepseek-v4-flash") ?? faux.getModel();
   return { models, model, faux };
 }

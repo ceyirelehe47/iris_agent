@@ -29,8 +29,6 @@
       }
     }
   },
-  "required": [
-    "schemaId"
-  ],
+  "required": ["schemaId"],
   "additionalProperties": false
 }

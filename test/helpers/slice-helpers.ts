@@ -1,8 +1,5 @@
 import type { Session } from "@iris/pi-agent-core";
-import {
-  createNodeSqliteFactory,
-  SqliteSessionRepository,
-} from "@iris/pi-storage-sqlite-node";
+import { createNodeSqliteFactory, SqliteSessionRepository } from "@iris/pi-storage-sqlite-node";
 
 import type { AgentConfigV3 } from "../../src/config/schema.js";
 import { resolveDataRootPaths } from "../../src/host/data-root.js";
