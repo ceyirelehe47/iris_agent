@@ -163,9 +163,18 @@ try {
   const pkgPath = join(worktree, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
   const originalTest = pkg.scripts.test;
-  pkg.scripts.test = originalTest.replace("test/iris-bridge.test.ts", "");
+  pkg.scripts.test = originalTest
+    .replace("test/iris-bridge.test.ts", "")
+    // consume-iris-context (Phase G Finding 2): production-lock.test.ts is
+    // part of npm test, but its ../pi gate resolves the adjacent checkout
+    // relative to the REPO root — a /tmp sensitivity worktree has no
+    // adjacent ../pi (and a stale /tmp/pi must not decide this probe). The
+    // pairing regression under test is unrelated to the pin gate, so drop
+    // the production-lock test from THIS scenario only.
+    .replace("test/production-lock.test.ts", "");
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
   fs.rmSync(join(worktree, "test", "iris-bridge.test.ts"), { force: true });
+  fs.rmSync(join(worktree, "test", "production-lock.test.ts"), { force: true });
   // Same regression, critical test removed from the list → npm test must PASS
   // (the regression escapes: the removed entry was load-bearing).
   fs.writeFileSync(bridgePath, regression);

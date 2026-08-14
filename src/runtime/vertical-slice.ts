@@ -26,8 +26,6 @@ import {
   type InvocationBinding,
 } from "./harness-factory.js";
 import { assembleIrisContext, deriveIrisLineageId } from "./iris-context.js";
-import { IrisContextBridge } from "./iris-bridge.js";
-import { HistoricalSessionRecoveryIngest } from "./recovery-ingest.js";
 
 export interface VerticalSliceResult {
   epochId: string;
@@ -152,154 +150,22 @@ export async function openOrCreateSession(
   return { repo, session: await repo.create({ id: runtimeSessionId, cwd: dataRoot }) };
 }
 
-export interface ReconcileHistoricalSessionResult {
-  /** Pi receipts replayed into the Context ingest. */
-  replayed: number;
-  /** The durable identity lineage resolved for the historical session. */
-  lineageId: string;
-  /** Context units created/paired by the recovery ingest (lineage view). */
-  units: ContextMessageUnitV1[];
-  runtimeSessionId: string;
-}
-
 /**
- * Recovery Reconciler：rollover 后把旧 Runtime Session 的未提交 crash 窗口
- * （Pi durable append + pending receipt，Iris 未 commit）恢复到其 durable
- * identity lineage。
+ * ⚠️ 已删除（consume-iris-context Phase G 清理，Finding 3）：旧
+ * `reconcileHistoricalSession`（Recovery Reconciler）与本仓库自建的
+ * recovery-ingest adapter 是死代码 —— head 无调用者、无测试。
  *
- * 流程：
- *  1. 读取 Session 的 pending receipts（Pi 恢复证据）；
- *  2. 用 verify 过的 receipt 经 @iris/context 的 resolveLineageForRecovery
- *     解析 lineage（binding ledger 存在性 + checksum 完整性，fail closed）；
- *  3. harness.recoverPendingCommitReceipts() 重放事件 → IrisContextBridge →
- *     recovery ingest（按 lineage 直查，绝不把旧 Session 重新变回 current）；
- *  4. ensureUnitsUpTo 幂等补建；acknowledgeSessionReconciled 标记对账完成。
- *
- * 旧 Session 的 raw archive attribution（runtimeSessionId）保留在事件与
- * unit 上；identity lineage 与 Runtime Session id 是两个不同的概念。
+ * 历史 Runtime Session 的恢复对账（crash → rollover → restart 后把旧
+ * Session 的未提交 crash 窗口恢复到 durable identity lineage）由
+ * @iris/context 自己承担并测试：
+ *   - ContextStore.resolveLineageForRecovery（binding ledger + checksum +
+ *     receipt 身份验证，fail closed）；
+ *   - recovery-mode ContextIngest（按 lineage 直查重放、exactly-once）；
+ *   - acknowledgeSessionReconciled / reclaimReconciledBindings；
+ *   - 行为覆盖见 @iris/context test/historical-lineage-recovery.test.ts。
+ * 本仓库 Host 的恢复路径（RecoverySupervisor + ingress reconcileUncommitted
+ * + 启动 outcome reconciliation）不依赖该函数。
  */
-export async function reconcileHistoricalSession(options: {
-  dataRoot: string;
-  config?: AgentConfigV3;
-  runtimeSessionId: string;
-  now?: string;
-}): Promise<ReconcileHistoricalSessionResult> {
-  const config = options.config ?? defaultAgentConfig();
-  const now = options.now ?? "2026-08-01T00:00:00.000Z";
-  const paths = resolveDataRootPaths(options.dataRoot, config);
-  const lock = await acquireDataRootLock(options.dataRoot, paths.lockFile);
-  try {
-    initializeDataRoot(options.dataRoot, config);
-    const epochStore = new RuntimeEpochStore(
-      paths.epochRegistryDb,
-      config.runtime_sessions.session_id_prefix,
-      config.runtime_sessions.timezone,
-    );
-    const { repo, session } = await openOrCreateSession(
-      options.dataRoot,
-      config,
-      options.runtimeSessionId,
-    );
-    try {
-      const pending = await session.readPendingCommitReceipts();
-      const lineageId = deriveIrisLineageId(paths.dataRoot);
-      const assembly = await assembleIrisContext({
-        dataRoot: paths.dataRoot,
-        runtimeSessionId: options.runtimeSessionId,
-        providerProfileId: config.model.main_agent.active_profile,
-        canonicalSystemPrompt: "",
-        systemProjectionHash: "",
-        preparedAt: new Date(now).toISOString(),
-        withHistorian: false,
-        now: () => now,
-        getCurrentSource: () => ({
-          canonicalSystemPrompt: "",
-          personaSnapshotId: "persona-default-v1",
-          providerProfileId: config.model.main_agent.active_profile,
-          toolDeclarations: [],
-        }),
-      });
-      try {
-        if (pending.length === 0) {
-          // 无 pending receipt 窗口 → Session 无需进一步恢复；标记 binding
-          // 对账完成（幂等），使其可被 bounded-ledger reclaim 回收。
-          assembly.contextService.getStore().acknowledgeSessionReconciled(options.runtimeSessionId);
-          return {
-            replayed: 0,
-            lineageId: "",
-            units: [],
-            runtimeSessionId: options.runtimeSessionId,
-          };
-        }
-        // 解析必须是"已验证的绑定"：binding ledger 行 + checksum + receipt
-        // 身份。任一步失败 → throw（fail closed），不 ingest 任何事件。
-        const firstPending = pending[0];
-        if (firstPending === undefined) {
-          throw new Error(
-            `reconcileHistoricalSession: pending receipts vanished between read and resolve`,
-          );
-        }
-        const recoveryIngest = new HistoricalSessionRecoveryIngest(
-          assembly.contextService,
-          lineageId,
-        );
-        const resolvedLineage = recoveryIngest.resolveLineageForRecovery(
-          options.runtimeSessionId,
-          firstPending,
-        );
-        const { models, model, providerProfileId } = await composeProvider("mock");
-        const binding = prepareInvocation(
-          sampleAgentInput(),
-          options.runtimeSessionId,
-          "recovery",
-          1,
-          config,
-          now,
-        );
-        const { harness } = createIrisHarness({
-          session,
-          instanceEpoch: 1,
-          models,
-          model,
-          tools: [makeReadOnlyTestTool()],
-          currentInvocation: binding,
-          now,
-          providerProfileId,
-          // 恢复路径：contextController 使用当前 generation 渲染；若无
-          // generation 则 fail-closed —— 恢复重放不依赖 provider dispatch。
-          irisContext: assembly.contextService,
-        });
-        const bridge = new IrisContextBridge({
-          runtimeSessionId: options.runtimeSessionId,
-          instanceEpoch: 1,
-          contextService: assembly.contextService,
-          getInput: () => binding.input,
-          now: () => now,
-        });
-        bridge.attach(harness);
-        const replayed = await harness.recoverPendingCommitReceipts();
-        // ensureUnitsUpTo 幂等（hasUnitForEvent 跳过已建单元）；恢复模式返回
-        // LINEAGE 视图（历史 Session 不按 session 解析）。
-        const units = recoveryIngest.ensureUnitsUpTo();
-        // 对账完成（权威证据）——binding 可被 bounded-ledger reclaim 回收。
-        recoveryIngest.acknowledgeSessionReconciled(options.runtimeSessionId);
-        return {
-          replayed,
-          lineageId: resolvedLineage,
-          units,
-          runtimeSessionId: options.runtimeSessionId,
-        };
-      } finally {
-        await assembly.close();
-      }
-    } finally {
-      await closeSessionStorage(repo);
-      epochStore.close();
-    }
-  } finally {
-    await lock.release();
-  }
-}
 
 export function makeReadOnlyTestTool(): AgentHarnessTool<undefined> {
   return {

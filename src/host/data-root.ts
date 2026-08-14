@@ -13,7 +13,6 @@ export interface DataRootPaths {
   historianDb: string;
   toolExecutionDb: string;
   ingressDb: string;
-  runtimeLedgerDb: string;
   blobsHistory: string;
   blobsToolsRecovery: string;
   blobsIngress: string;
@@ -35,7 +34,6 @@ export function resolveDataRootPaths(dataRoot: string, config: AgentConfigV3): D
     historianDb: rel(config.historian?.sqlite_path, "historian.db"),
     toolExecutionDb: rel(config.tools?.sqlite_path, "tool-execution.db"),
     ingressDb: rel(config.host.ingress.sqlite_path, "ingress.db"),
-    runtimeLedgerDb: rel(undefined, "runtime-ledger.db"),
     blobsHistory: rel(config.runtime_sessions.blob_root, "blobs/history"),
     blobsToolsRecovery: rel(config.tools?.recovery_blob_root, "blobs/tools/recovery"),
     blobsIngress: rel(config.host.ingress.blob_root, "blobs/ingress"),

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "documentedAt": "2026-08-14",
+  "toolchain": {
+    "node": ">=22.19.0",
+    "nodeCiExact": "22.19.0",
+    "packageManager": "npm",
+    "lockfile": "package-lock.json"
+  },
+  "pi": {
+    "currentDependencySource": "file_link_adjacent_fork_checkout",
+    "packages": {
+      "@iris/pi-agent-core": "file:../pi/packages/agent",
+      "@iris/pi-ai": "file:../pi/packages/ai",
+      "@iris/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node"
+    },
+    "fork": {
+      "repository": "blueforst/pi",
+      "baselineCommit": "ab5f8d88ee1d400c0c8fb5c50ac10b2f4a4851d1",
+      "seamCommit": "edd724be790ec3a73b3a85bb051882a45acc5c72",
+      "seamTree": "b0a87becb5add1f52c571e168918933b8cffe531",
+      "acceptedRuntimeRepository": "blueforst/pi",
+      "acceptedRuntimeCommit": "66a3ea14616a438f47d3121979c0581c22ea64bb",
+      "acceptedRuntimeTree": "a6bdb67ab97a087e3e0285746462545780ea19b3",
+      "upstreamBaseCommit": "581d75a89cea21e50d6a26df840352f94427f633",
+      "upstreamAuditBaselineCommit": "6f707eb36064e82af9c1320a7634f4dfad21049b",
+      "adoptionStatus": "file_link_local_development",
+      "syncNotes": "2026-08-14 (consume-iris-context seam refresh): seamCommit advanced to edd724be (post-Round-7 fork head, carries pi#77/#78/#79 JSONL matrix tests and the earendil-works scope rename of the three consumed packages). Dependency names in this lock are the @iris/* alias names used by package.json; the adjacent checkout declares the @earendil-works/* scope. acceptedRuntime (66a3ea1) and baseline (ab5f8d8) are unchanged and remain ancestors of the seam. Prior seam 48a05224 is an ancestor."
+    }
+  },
+  "magicContext": {
+    "repository": "cortexkit/magic-context",
+    "release": "v0.33.0",
+    "commit": "48ab531d8fa98af2f463db2e4d9f8ffdd63d765e",
+    "authoritativePath": "packages/plugin/src/hooks/magic-context",
+    "explicitlyNotAdopted": ["experimental.memory_mural"]
+  },
+  "memoryContracts": {
+    "package": "iris-memory-contracts",
+    "version": "0.3.0",
+    "manifestSha256": "b55b5e1c8b022063019ce0bd02c26e184749e600f9c2f0cb6c4e737559fae560",
+    "owner": "blueforst/iris_memory"
+  },
+  "graphitiNeo4j": {
+    "owner": "blueforst/iris_memory",
+    "agentDirectDependency": false,
+    "candidateLock": {
+      "graphitiCore": "0.29.2",
+      "neo4jDriverMinimum": "5.26.0"
+    }
+  }
+}
