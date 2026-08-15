@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Type, type AssistantMessage } from "@iris/pi-ai";
-import type { ContextMessageUnitV1 } from "@iris/context/contracts";
+import type { ContextUnit } from "@iris/context/contracts";
 
 import { type AgentHarnessTool, type Session, type SessionTreeEntry } from "@iris/pi-agent-core";
 import {
@@ -33,8 +33,8 @@ export interface VerticalSliceResult {
   observers: HarnessObservers;
   assistantMessage: AssistantMessage;
   entries: SessionTreeEntry[];
-  /** @iris/context 已提交的 ContextMessageUnitV1（会话视图）。 */
-  contextUnits: ContextMessageUnitV1[];
+  /** @iris/context 已接纳的统一 ContextUnit（会话视图，同一 Unit 贯穿）。 */
+  contextUnits: ContextUnit[];
   /** 最近一次 provider 边界的 generation 分层摘要（测试/诊断）。 */
   generationSummary: string;
   dataRoot: string;

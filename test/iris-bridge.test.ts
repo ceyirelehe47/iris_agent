@@ -5,17 +5,15 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { isDshMessageRef, type DshMessageRef } from "@iris/context/contracts";
+
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
 import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
-import { decodeInputFrames, derivePairKey, encodeInputFrames } from "../src/runtime/companion.js";
+import { encodeInputFrames } from "../src/runtime/companion.js";
 import { createIrisHarness } from "../src/runtime/harness-factory.js";
 import { assembleIrisContext } from "../src/runtime/iris-context.js";
-import {
-  IrisContextBridge,
-  deriveRuntimeEventId,
-  toNeutralOrigin,
-} from "../src/runtime/iris-bridge.js";
+import { IrisContextBridge } from "../src/runtime/iris-bridge.js";
 import {
   closeSessionStorage,
   composeProvider,
@@ -25,60 +23,22 @@ import {
   sampleAgentInput,
 } from "../src/runtime/vertical-slice.js";
 import type { AgentInput } from "../src/contracts/origin.js";
-import { directUserRequest } from "../src/contracts/origin.js";
 
 /**
- * IrisContextBridge（Pi → @iris/context RuntimeEventInput ingest）契约测试。
+ * IrisContextBridge（Pi → @iris/context 统一 ContextUnit admission）契约测试。
  *
  * 覆盖：
- *  - deriveRuntimeEventId 确定性（同一 session+entry 恒等）；
- *  - toNeutralOrigin 中性化（不泄漏 Pi 消息形状；缺省 → data_only+untrusted）；
  *  - 端到端：真实 @iris/context 装配 + 真实 harness + bridge attach →
- *    prompt 后 canonical 单元按 user→assistant/tool_result 提交；
- *  - 双事件模型：Pi UserMessage + iris_input_meta CustomMessage →
- *    user 主事件 + operational companion 事件（companionOf 指向主事件）；
- *    ContextService 合并后 user 单元 pairing 验证通过（paired=true、
- *    pairKey 与 inputPairKey 一致）；
- *  - 非 iris_input_meta 的 custom 消息不产生语义事件（只留 raw archive）。
+ *    prompt 后 canonical ContextUnit 按 user→assistant/tool_result 接纳；
+ *  - 每个 runtime-origin unit 的 sourceRef 都是 DshMessageRef
+ *    （sessionId = Pi runtimeSessionId，messageId = Pi entryId）；
+ *  - 统一 ContextUnit 模型：无 companion/pairing/operational 事件
+ *    （旧双事件模型的 hidden companion 已废止）。
  */
 
 const NOW = "2026-08-05T00:00:00.000Z";
 
-test("bridge: deriveRuntimeEventId is deterministic and prefix-stable", () => {
-  const a = deriveRuntimeEventId("session-a", "entry-1");
-  const b = deriveRuntimeEventId("session-a", "entry-1");
-  const c = deriveRuntimeEventId("session-a", "entry-2");
-  assert.equal(a, b);
-  assert.notEqual(a, c);
-  assert.match(a, /^re-[0-9a-f]{24}$/);
-  // 同一 entry 在不同 session 必须产生不同 eventId（session 是 identity 键）。
-  assert.notEqual(a, deriveRuntimeEventId("session-b", "entry-1"));
-});
-
-test("bridge: toNeutralOrigin neutralizes agent origin without leaking Pi shape", () => {
-  const agentOrigin = {
-    schemaVersion: 1,
-    channel: "cli",
-    principalKind: "user" as const,
-    principalRef: "usr-1",
-    authority: "user_request" as const,
-    trust: "limited" as const,
-  };
-  const neutral = toNeutralOrigin(agentOrigin);
-  assert.equal(neutral.schemaId, "iris.origin_envelope.v1");
-  assert.equal(neutral.channel, "cli");
-  assert.equal(neutral.principalKind, "user");
-  assert.equal(neutral.principalRef, "usr-1");
-  assert.equal(neutral.authority, "user_request");
-  assert.equal(neutral.trust, "limited");
-  // 无 origin → 保守默认。
-  const fallback = toNeutralOrigin(undefined);
-  assert.equal(fallback.authority, "data_only");
-  assert.equal(fallback.trust, "untrusted");
-  assert.equal(fallback.principalKind, "environment");
-});
-
-test("bridge e2e: prompt commits canonical units + companion pairing (double-event model)", async () => {
+test("bridge e2e: prompt admits canonical ContextUnits (unified ContextUnit model)", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-bridge-e2e-"));
   const config = defaultAgentConfig();
   try {
@@ -144,77 +104,65 @@ test("bridge e2e: prompt commits canonical units + companion pairing (double-eve
       assert.ok(assistantMessage.content.length > 0);
       bridge.close();
 
-      // --- canonical units（user → assistant/tool_result；无 synthetic）---
-      const units = assembly.contextService.listUnits(epoch.runtimeSessionId);
-      assert.ok(units.length >= 2, `expected >=2 units, got ${units.length}`);
-      assert.equal(units[0]?.kind, "user", "first unit must be the user request");
+      // --- canonical units（user → assistant/tool_result；统一 ContextUnit）---
+      const units = assembly.contextService
+        .getStore()
+        .listContextUnits(assembly.lineageId, { disposition: "all" });
+      assert.ok(units.length >= 2, `expected >=2 ContextUnits, got ${units.length}`);
+
+      // 首个单元必须是 user 请求（contentSchemaId 是 user 语义 schema）。
+      const first = units[0];
+      assert.ok(first !== undefined, "first unit must exist");
+      assert.equal(
+        first.contentSchemaId,
+        "iris.semantic.context_message.user.v1",
+        "first unit must be the user request",
+      );
+
+      // 每个 runtime-origin unit 的 sourceRef 都是 DshMessageRef：
+      // sessionId = Pi runtimeSessionId，messageId = Pi entryId（稳定 identity）。
       for (const unit of units) {
         assert.ok(
-          unit.kind === "user" || unit.kind === "assistant" || unit.kind === "tool_result",
-          `unexpected kind ${unit.kind}`,
+          isDshMessageRef(unit.sourceRef),
+          `unit ${unit.unitId} must carry a DshMessageRef sourceRef, got ${JSON.stringify(unit.sourceRef)}`,
+        );
+        assert.equal(
+          unit.sourceRef.sessionId,
+          epoch.runtimeSessionId,
+          "DshMessageRef.sessionId must equal the Pi runtimeSessionId",
+        );
+        assert.ok(
+          unit.sourceRef.messageId.length > 0,
+          `unit ${unit.unitId} DshMessageRef.messageId must be non-empty`,
+        );
+        // 统一 ContextUnit 只接受 user/assistant/tool_result 语义（无 synthetic）。
+        assert.ok(
+          unit.contentSchemaId === "iris.semantic.context_message.user.v1" ||
+            unit.contentSchemaId === "iris.semantic.context_message.assistant.v1" ||
+            unit.contentSchemaId === "iris.semantic.context_message.tool_result.v1",
+          `unexpected contentSchemaId ${unit.contentSchemaId}`,
         );
       }
 
-      // --- 双事件模型：companion 事件已提交（operational + companionOf）---
-      const store = assembly.contextService.getStore();
-      const events = store.listStoredEventsByLineage(assembly.lineageId);
-      const companionEvents = events.filter((event) => event.kind === "operational");
-      assert.equal(companionEvents.length, 1, "exactly one operational companion event");
-      const companion = companionEvents[0];
-      assert.ok(companion !== undefined);
-      assert.equal(companion.role, "custom");
+      // 统一 ContextUnit 模型：无 companion/pairing/operational 事件可断言
+      // （旧双事件模型的 hidden companion 已废止；Pi raw archive 保存原文）。
 
-      // --- user 主事件 + pairing 合并 ---
-      const userUnit = units[0];
-      assert.ok(userUnit !== undefined);
-      const userRecord = store.findBySourceEvent(userUnit.runtimeEventId);
-      assert.ok(userRecord !== undefined, "user unit must resolve via findBySourceEvent");
-      assert.equal(userRecord.persistenceMeta.paired, true, "companion pairing must verify");
-      // pairKey 是 epoch-bound（Host instanceEpoch 是配对身份的一部分）。
-      const expectedPairKey = derivePairKey(
-        input.inputId,
-        decodeInputFrames(encodeInputFrames(input.blocks)),
-        epoch.ordinalWithinDate,
-      );
-      assert.equal(
-        userRecord.persistenceMeta.pairKey,
-        expectedPairKey,
-        "pairKey must equal the epoch-bound input pair key",
-      );
-      // 双事件模型的配对落在主 user 单元上：companionEntryId 指向 companion
-      // 事件（stored CanonicalRuntimeEventV1 不保留 companionOf 字段；配对
-      // 关系由 store 的 pairing 列持有）。
-      assert.ok(
-        userRecord.persistenceMeta.companionEntryId !== null,
-        "companion entry id must be recorded on the user main unit",
-      );
-      assert.equal(
-        userRecord.persistenceMeta.companionEntryId,
-        companion.runtimeEventId,
-        "companionEntryId must point at the committed companion event",
-      );
-      // companion 事件 payload 是中性 CompanionPayloadV1（不泄漏 Pi 形状）。
-      const companionPayload = companion.payload as { type?: string };
-      assert.equal(companionPayload.type, "iris_input_meta");
-
-      // --- eventId 确定性：user 单元 id == 由 session entry 派生的 id ---
+      // DshMessageRef.messageId 必须是 Pi entryId（稳定 identity；本断言只在本
+      // 测试做 —— 它是 bridge 消息身份映射的唯一精确校验）。
       const entries = await session.getEntries();
       const userEntry = entries.find(
         (entry) => entry.type === "message" && entry.message?.role === "user",
       );
-      assert.ok(userEntry !== undefined);
-      assert.equal(
-        userUnit.runtimeEventId,
-        deriveRuntimeEventId(epoch.runtimeSessionId, userEntry.id),
-        "user unit eventId must equal derived stable event id",
+      assert.ok(userEntry !== undefined, "user Pi entry must exist");
+      const userUnit = units.find(
+        (unit) => unit.contentSchemaId === "iris.semantic.context_message.user.v1",
       );
-
-      // --- origin 中性化：user 事件 origin 来自 triggerOrigin（cli/user）---
-      const userEvent = store.findRuntimeEventByEventId(userUnit.runtimeEventId);
-      assert.ok(userEvent !== undefined);
-      assert.equal(userEvent.origin.schemaId, "iris.origin_envelope.v1");
-      assert.equal(userEvent.origin.channel, directUserRequest().channel);
-      assert.equal(userEvent.origin.principalKind, "user");
+      assert.ok(userUnit !== undefined, "user ContextUnit must exist");
+      assert.equal(
+        (userUnit.sourceRef as DshMessageRef).messageId,
+        userEntry.id,
+        "DshMessageRef.messageId must equal the Pi entry id",
+      );
     } finally {
       await assembly.close();
       await closeSessionStorage(repo);

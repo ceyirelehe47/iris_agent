@@ -6,6 +6,8 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
+import { isDshMessageRef } from "@iris/context/contracts";
+
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
 import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
@@ -25,15 +27,15 @@ import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 
 /**
  * R1 Exit Gate 契约测试（Roadmap v13 R1）。consume-iris-context 适配：
- * Context 语义经 @iris/context ContextService（ingestRuntimeEvent →
- * ContextMessageUnitV1）提交，本地 runtime-event-ledger / seam 已废止。
+ * Context 语义经 @iris/context ContextService（admitRuntimeMessage →
+ * 统一 ContextUnit v3）提交，本地 runtime-event-ledger / seam 已废止。
  *
  *  Gate 1: Iris 正常 Provider path 不从 Session.buildContext() 构造 Context；
  *  Gate 3: user/assistant/tool_result 顺序与 exactly-once attribution 可执行
- *    验证（canonical ContextMessageUnitV1：contextSeq 严格单调、runtimeEventId
- *    唯一、首个单元是 user）；
- *  Gate 4: 不生成 synthetic assistant/ToolResult repair（unit kinds 只来自
- *    真实 RuntimeEvent kinds，且每个单元都能映射到已提交事件）。
+ *    验证（统一 ContextUnit：unitId 唯一、DshMessageRef.messageId 唯一、
+ *    首个单元是 user）；
+ *  Gate 4: 不生成 synthetic assistant/ToolResult repair（contentSchemaId
+ *    只来自真实消息语义，且每个单元都映射到已提交 DSH message）。
  *  Gate 2（默认 Pi native path 兼容）由 fork 的 runtime-seams 测试覆盖。
  */
 
@@ -113,7 +115,9 @@ test("r1 gate1: Iris provider path never calls Session.buildContext (spy throws)
         typeof assistantMessage.content === "string" || Array.isArray(assistantMessage.content),
       );
       // canonical units were committed via the bridge (not via buildContext).
-      const units = assembly.contextService.listUnits(epoch.runtimeSessionId);
+      const units = assembly.contextService
+        .getStore()
+        .listContextUnits(assembly.lineageId, { disposition: "all" });
       assert.ok(units.length >= 2, "bridge must commit canonical user/assistant units");
       bridge.close();
     } finally {
@@ -138,29 +142,37 @@ test("r1 gate3: mock slice commits canonical units in order, exactly-once", asyn
     const units = result.contextUnits;
     assert.ok(units.length >= 2, `expected >=2 canonical units, got ${units.length}`);
 
-    // exactly-once: runtimeEventId / contextUnitId unique.
-    const eventIds = new Set(units.map((unit) => unit.runtimeEventId));
-    assert.equal(eventIds.size, units.length, "runtimeEventId must be unique per unit");
-    const unitIds = new Set(units.map((unit) => unit.contextUnitId));
-    assert.equal(unitIds.size, units.length, "contextUnitId must be unique per unit");
+    // exactly-once: unitId 唯一（同一 contextId+sourceRef 派生确定性 unitId）。
+    const unitIds = new Set(units.map((unit) => unit.unitId));
+    assert.equal(unitIds.size, units.length, "unitId must be unique per unit");
+    // runtime-origin 单元：DshMessageRef.messageId 唯一（每条消息恰好一个单元）。
+    const messageIds = new Set(
+      units.map((unit) => {
+        assert.ok(
+          isDshMessageRef(unit.sourceRef),
+          `unit ${unit.unitId} must carry a DshMessageRef sourceRef`,
+        );
+        return unit.sourceRef.messageId;
+      }),
+    );
+    assert.equal(messageIds.size, units.length, "messageId must be unique per unit");
 
-    // 顺序：contextSeq 严格单调；首个单元是 user；每个单元映射到真实事件。
-    for (let index = 1; index < units.length; index += 1) {
-      const prev = units[index - 1];
-      const curr = units[index];
-      assert.ok(
-        prev !== undefined && curr !== undefined && curr.contextSeq > prev.contextSeq,
-        "contextSeq must be strictly increasing",
-      );
-    }
+    // 顺序：listContextUnits 按 context_seq 返回；首个单元是 user。
     const first = units[0];
-    assert.equal(first?.kind, "user", "first canonical unit must be the user request");
+    assert.ok(first !== undefined, "first unit must exist");
+    assert.equal(
+      first.contentSchemaId,
+      "iris.semantic.context_message.user.v1",
+      "first canonical unit must be the user request",
+    );
 
-    // Gate 4：不生成 synthetic 单元 —— kinds 只来自真实 RuntimeEvent。
+    // Gate 4：不生成 synthetic 单元 —— contentSchemaId 只来自真实消息语义。
     for (const unit of units) {
       assert.ok(
-        unit.kind === "user" || unit.kind === "assistant" || unit.kind === "tool_result",
-        `unexpected synthetic unit kind ${unit.kind}`,
+        unit.contentSchemaId === "iris.semantic.context_message.user.v1" ||
+          unit.contentSchemaId === "iris.semantic.context_message.assistant.v1" ||
+          unit.contentSchemaId === "iris.semantic.context_message.tool_result.v1",
+        `unexpected synthetic unit contentSchemaId ${unit.contentSchemaId}`,
       );
     }
 
@@ -171,7 +183,7 @@ test("r1 gate3: mock slice commits canonical units in order, exactly-once", asyn
   }
 });
 
-test("r1 gate4: no synthetic repair — every unit maps to a committed event entry", async () => {
+test("r1 gate4: no synthetic repair — every unit maps to a committed DSH message", async () => {
   const dataRoot = mkdtempSync(join(tmpdir(), "iris-r1-gate4-"));
   try {
     const result = await runMinimalSlice({
@@ -182,25 +194,28 @@ test("r1 gate4: no synthetic repair — every unit maps to a committed event ent
     });
     const units = result.contextUnits;
 
-    // 每个单元必须有一个已提交事件的稳定 eventId（re-<hash> 派生）；
+    // 每个 runtime-origin 单元必须携带稳定 DshMessageRef（sessionId+messageId）；
     // 无 synthetic 单元（无凭空生成的 assistant/toolResult）。
     for (const unit of units) {
-      assert.match(
-        unit.runtimeEventId,
-        /^re-[0-9a-f]{24}$/,
-        `unit runtimeEventId must be a derived stable event id, got ${unit.runtimeEventId}`,
+      assert.ok(
+        isDshMessageRef(unit.sourceRef),
+        `unit ${unit.unitId} must carry a DshMessageRef sourceRef, got ${JSON.stringify(unit.sourceRef)}`,
       );
-      assert.equal(unit.historianDisposition, "include");
-      assert.equal(unit.lifecycleState, "committed");
+      assert.ok(
+        unit.sourceRef.sessionId.length > 0 && unit.sourceRef.messageId.length > 0,
+        `unit ${unit.unitId} DshMessageRef must have non-empty sessionId/messageId`,
+      );
     }
 
     // tool 循环：存在 tool_result 单元时，其后必须还有 assistant 单元
     // （final turn）—— 即没有把 tool_result 当成最终回复。
-    const toolIndex = units.findIndex((unit) => unit.kind === "tool_result");
+    const toolIndex = units.findIndex(
+      (unit) => unit.contentSchemaId === "iris.semantic.context_message.tool_result.v1",
+    );
     if (toolIndex >= 0) {
       const after = units.slice(toolIndex);
       assert.ok(
-        after.some((unit) => unit.kind === "assistant"),
+        after.some((unit) => unit.contentSchemaId === "iris.semantic.context_message.assistant.v1"),
         "a committed tool_result must be followed by a final assistant unit",
       );
     }

@@ -106,7 +106,9 @@ export async function runMinimalSlice(options: {
       });
       bridge.attach(harness);
       const assistantMessage = await harness.prompt(encodeInputFrames(input.blocks));
-      const contextUnits = assembly.contextService.listUnits(epoch.runtimeSessionId);
+      const contextUnits = assembly.contextService
+        .getStore()
+        .listContextUnits(assembly.lineageId, { disposition: "all" });
       const generation = assembly.contextService.getCurrentGeneration();
       const generationSummary =
         generation === null

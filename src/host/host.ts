@@ -1120,15 +1120,26 @@ export class IrisHost {
       const coordinator = new RuntimeCoordinator({
         activeRuntime: registry,
         modelOverride,
-        prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-          prepareInvocation(
+        prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) => {
+          const binding = prepareInvocation(
             input,
             runtimeSessionId,
             epochId,
             instanceEpoch,
             config,
             new Date().toISOString(),
-          ),
+          );
+          // P0–P2 contributor 的权威 source holder 必须随每次 invocation 更新，
+          // 否则 BUST 重建的 generation P0–P2（provider 可见 system prompt）
+          // 恒为装配时的占位版本（regression: contextSourceHolder 只在装配时初始化）。
+          contextSourceHolder.current = {
+            canonicalSystemPrompt: binding.canonicalSystemPrompt,
+            personaSnapshotId: "persona-default-v1",
+            providerProfileId: binding.providerProfileId,
+            toolDeclarations: ["test_read_tool"],
+          };
+          return binding;
+        },
         maxQueuedInputs: config.host.input_queue_max ?? 20,
         // A3: consume the ONE-TIME native-settled authorization. Every
         // invocation that observes Pi native settled on the active Epoch

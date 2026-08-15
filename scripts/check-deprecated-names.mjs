@@ -165,14 +165,16 @@ const STRUCTURAL_CHECKS = [
     pattern: /"@iris\/context"\s*:/,
   },
   {
-    description: "provider renderer must consume @iris/context/contracts (ContextGenerationV2)",
+    description:
+      "provider renderer must consume @iris/context/contracts (ContextGenerationV3/ContextUnit)",
     file: "src/runtime/context-render.ts",
     pattern: /@iris\/context\/contracts/,
   },
   {
-    description: "runtime event bridge must consume @iris/context/contracts/runtime-events",
+    description:
+      "runtime bridge must consume @iris/context unified ContextUnit admission (admitRuntimeMessage)",
     file: "src/runtime/iris-bridge.ts",
-    pattern: /@iris\/context\/contracts\/runtime-events/,
+    pattern: /admitRuntimeMessage/,
   },
   {
     description: "harness factory must accept irisContext: ContextService (@iris/context)",

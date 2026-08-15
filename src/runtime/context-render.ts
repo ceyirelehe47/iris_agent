@@ -1,25 +1,24 @@
 /**
- * Provider Renderer —— ContextGenerationV2 → provider-native wire（iris_agent 侧）。
+ * Provider Renderer —— ContextGenerationV3 → provider-native wire（iris_agent 侧）。
  *
  * 架构级职责（Notion 01 Context Assembly｜Provider Wire Terminology Override）：
- * 把已验证的 P0–P5 `ContextGenerationV2 { header, units }` 转成 Pi provider 的
- * native wire（systemPrompt + AgentMessage[]）。渲染结果是一次 provider-call-only
+ * 把已验证的 P0–P5 `ContextGenerationV3 { header, units: ContextUnit[] }` 转成 Pi
+ * provider 的 native wire（systemPrompt + AgentMessage[]）。渲染结果是一次 provider-call-only
  * 视图，不写回 Session、不改写 canonical Context state、不构造 m0/m1/LKG 等
  * 第二套中间上下文表示。
  *
  * 层映射：
  *  - P0 System / P1 Persona / P2 Capability → system prompt 前缀（声明层）；
- *  - P3 Compartment / P4 Memory recall → provider 可见的 user 前缀消息
- *    （Pi convertToLlm 只保留 user/assistant/toolResult，不能是 system role）；
- *  - P5 Live Layer → 按单元语义内容渲染为 user/assistant/toolResult 消息
- *    （1:1 投影；role/content-part 映射与 provider-specific serialization）。
+ *  - P3 Compartment / P4 Recollection → provider 可见的 user 前缀消息；
+ *  - P5 Live Layer → 按 ContextUnit 的 canonical content 渲染为
+ *    user/assistant/toolResult 消息（同一 ContextUnit，无投影 DTO）。
  *
  * fail-closed：generation 缺失/非法由调用方（contextController）处理；本模块
  * 遇到未知语义形状直接抛错，绝不猜测（无 iris.semantic.p5.unknown.v1 escape
  * hatch）。
  */
 import type { AgentMessage } from "@iris/pi-agent-core";
-import type { ContextGenerationV2, ContextUnitV2, JsonValue } from "@iris/context/contracts";
+import type { ContextGenerationV3, ContextUnitV3, JsonValue } from "@iris/context/contracts";
 
 export interface RenderedProviderContext {
   systemPrompt: string;
@@ -42,7 +41,7 @@ const EMPTY_USAGE = {
  * （0 <= e0 <= ... <= e5 == units.length）。
  */
 export function renderGenerationForProvider(
-  generation: ContextGenerationV2,
+  generation: ContextGenerationV3,
 ): RenderedProviderContext {
   const ends = generation.header.layerEnds;
   const e2 = ends[2] ?? 0;
@@ -91,19 +90,15 @@ export function renderGenerationForProvider(
 }
 
 /** P0–P2 声明层文本（`{ type, data: { text } }` 形状，iris_agent 贡献者定义）。 */
-function declarationText(unit: ContextUnitV2): string {
-  const content = unit.semanticContent as Record<string, unknown> | undefined;
+function declarationText(unit: ContextUnitV3): string {
+  const content = unit.content as Record<string, unknown> | undefined;
   if (content === null || typeof content !== "object" || Array.isArray(content)) {
-    throw new Error(
-      `provider render: P0-P2 unit ${unit.header.contextUnitId} has non-object semanticContent`,
-    );
+    throw new Error(`provider render: P0-P2 unit ${unit.unitId} has non-object content`);
   }
   const data = content["data"] as Record<string, unknown> | undefined;
   const text = data === null || typeof data !== "object" ? undefined : data["text"];
   if (typeof text !== "string") {
-    throw new Error(
-      `provider render: P0-P2 unit ${unit.header.contextUnitId} has no data.text declaration`,
-    );
+    throw new Error(`provider render: P0-P2 unit ${unit.unitId} has no data.text declaration`);
   }
   return text;
 }
@@ -119,12 +114,10 @@ function userPrefixMessage(text: string, kind: "context" | "memory"): AgentMessa
 }
 
 /** P3 compartment 语义内容 → 文本块（结构化摘要）。 */
-function compartmentText(unit: ContextUnitV2): string {
-  const content = unit.semanticContent as Record<string, unknown> | undefined;
+function compartmentText(unit: ContextUnitV3): string {
+  const content = unit.content as Record<string, unknown> | undefined;
   if (content === null || typeof content !== "object" || Array.isArray(content)) {
-    throw new Error(
-      `provider render: compartment unit ${unit.header.contextUnitId} has non-object semanticContent`,
-    );
+    throw new Error(`provider render: compartment unit ${unit.unitId} has non-object content`);
   }
   const parts: string[] = [];
   const compartmentId = stringField(content, "compartmentId");
@@ -141,12 +134,10 @@ function compartmentText(unit: ContextUnitV2): string {
 }
 
 /** P4 recollection 语义内容 → 文本块。 */
-function recollectionText(unit: ContextUnitV2): string {
-  const content = unit.semanticContent as Record<string, unknown> | undefined;
+function recollectionText(unit: ContextUnitV3): string {
+  const content = unit.content as Record<string, unknown> | undefined;
   if (content === null || typeof content !== "object" || Array.isArray(content)) {
-    throw new Error(
-      `provider render: recollection unit ${unit.header.contextUnitId} has non-object semanticContent`,
-    );
+    throw new Error(`provider render: recollection unit ${unit.unitId} has non-object content`);
   }
   if (content["status"] === "unavailable") {
     const reason = stringField(content, "unavailableReason");
@@ -158,12 +149,10 @@ function recollectionText(unit: ContextUnitV2): string {
 }
 
 /** P5 durable live unit → provider-native AgentMessage（1:1 投影）。 */
-function renderP5Unit(unit: ContextUnitV2): AgentMessage {
-  const content = unit.semanticContent as Record<string, unknown> | undefined;
+function renderP5Unit(unit: ContextUnitV3): AgentMessage {
+  const content = unit.content as Record<string, unknown> | undefined;
   if (content === null || typeof content !== "object" || Array.isArray(content)) {
-    throw new Error(
-      `provider render: P5 unit ${unit.header.contextUnitId} has non-object semanticContent (fail closed)`,
-    );
+    throw new Error(`provider render: P5 unit ${unit.unitId} has non-object content (fail closed)`);
   }
   const role = content["role"];
   switch (role) {
@@ -204,7 +193,7 @@ function renderP5Unit(unit: ContextUnitV2): AgentMessage {
       } as unknown as AgentMessage;
     default:
       throw new Error(
-        `provider render: P5 unit ${unit.header.contextUnitId} has unknown role ${JSON.stringify(role)} (fail closed)`,
+        `provider render: P5 unit ${unit.unitId} has unknown role ${JSON.stringify(role)} (fail closed)`,
       );
   }
 }
@@ -301,9 +290,9 @@ function numberField(record: Record<string, unknown>, key: string, fallback: num
 }
 
 /** 供测试/诊断使用的 generation → 文本快照（P0–P5 分层）。 */
-export function generationLayerSummary(generation: ContextGenerationV2): string {
+export function generationLayerSummary(generation: ContextGenerationV3): string {
   const ends = generation.header.layerEnds;
   return `layers=[${ends.join(",")}] units=${generation.units.length} hash=${generation.header.contextGenerationHash.slice(0, 12)}`;
 }
 
-export type { ContextGenerationV2, JsonValue };
+export type { ContextGenerationV3, ContextUnitV3, JsonValue };

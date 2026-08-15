@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { ContextGenerationV2, ContextUnitV2, JsonValue } from "@iris/context/contracts";
+import type { ContextGenerationV3, ContextUnitV3, JsonValue } from "@iris/context/contracts";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { renderGenerationForProvider } from "../src/runtime/context-render.js";
@@ -12,47 +12,48 @@ import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
 
 /**
- * Provider Renderer（ContextGenerationV2 → provider-native wire）契约测试。
+ * Provider Renderer（ContextGenerationV3 → provider-native wire）契约测试。
  *
  * 层映射（Notion 01 Context Assembly｜Provider Wire Terminology Override）：
  *  - P0 System / P1 Persona / P2 Capability → system prompt 前缀（声明层）；
  *  - P3 Compartment / P4 Memory recall → provider 可见 user 前缀消息；
- *  - P5 Live Layer → 按单元语义内容 1:1 投影为 user/assistant/toolResult。
+ *  - P5 Live Layer → 按 ContextUnit 的 canonical content 1:1 投影为
+ *    user/assistant/toolResult（统一 ContextUnit 模型；renderGenerationForProvider
+ *    不校验 contextGenerationHash/sourceRef，fixture 填占位即可）。
  *
  * fail-closed：未知语义形状/未知 role → 抛错（绝不猜测）。
- * 端到端：真实 @iris/context 装配 + mock slice → ingest → BUST → generation
+ * 端到端：真实 @iris/context 装配 + mock slice → admit → BUST → generation
  * → render（验证 P0–P2 进 system、P3–P5 进 messages）。
  */
 
-function unit(contextUnitId: string, semanticContent: JsonValue, index: number): ContextUnitV2 {
+function unit(unitId: string, content: JsonValue, index: number): ContextUnitV3 {
   void index;
   return {
-    schemaId: "iris.context_unit.v2",
-    header: {
-      schemaId: "iris.context_unit_header.v1",
-      contextUnitId,
-      source: {
-        schemaId: "iris.context_unit_source_ref.v1",
-        sourceSchemaId: "iris.system_source.v1",
-        sourceId: `source-${contextUnitId}`,
-        sourceHash: `hash-${contextUnitId}`,
-      },
-      semanticSchemaId: "iris.semantic.context_message.operational.v1",
-      contentHash: `content-${contextUnitId}`,
+    schemaId: "iris.context_unit.v3",
+    unitId,
+    contextId: "lineage-test",
+    contentSchemaId: "iris.semantic.context_message.operational.v1",
+    content,
+    contentHash: `content-${unitId}`,
+    sourceRef: {
+      schemaId: "iris.context_unit_source_ref.v1",
+      sourceSchemaId: "iris.system_source.v1",
+      sourceId: `source-${unitId}`,
+      sourceHash: `hash-${unitId}`,
     },
-    semanticContent,
   };
 }
 
-function buildGeneration(layerEnds: number[], units: ContextUnitV2[]): ContextGenerationV2 {
+function buildGeneration(layerEnds: number[], units: ContextUnitV3[]): ContextGenerationV3 {
   return {
-    schemaId: "iris.context_generation.v2",
+    schemaId: "iris.context_generation.v3",
     header: {
       schemaId: "iris.context_generation_header.v1",
       contextGenerationId: "gen-test",
       contextLineageId: "lineage-test",
       sourceSnapshotHash: "snapshot-hash",
       layerEnds,
+      // renderGenerationForProvider 不校验 hash；占位即可。
       contextGenerationHash: "gen-hash",
       createdAt: "2026-08-05T00:00:00.000Z",
     },
@@ -202,12 +203,12 @@ test("render: fail-closed on unknown P5 role", () => {
   assert.throws(() => renderGenerationForProvider(generation), /unknown role/);
 });
 
-test("render: fail-closed on non-object semanticContent", () => {
+test("render: fail-closed on non-object content", () => {
   const generation = buildGeneration(
     [1, 1, 1, 1, 1, 1],
     [unit("p0-bad", "not-an-object" as unknown as JsonValue, 0)],
   );
-  assert.throws(() => renderGenerationForProvider(generation), /non-object semanticContent/);
+  assert.throws(() => renderGenerationForProvider(generation), /non-object content/);
 });
 
 test("render e2e: mock slice ingest→BUST→generation→provider wire", async () => {

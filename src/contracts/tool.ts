@@ -57,7 +57,6 @@ export interface ToolExecutionContext {
   toolCallId: string;
   toolExecutionKey: string;
   workspaceRoot: string;
-  contextIntegrityMode: "normal" | "lkg" | "provider_gate_fail_closed" | "emergency_fail_closed";
   abortSignal: AbortSignal;
 }
 

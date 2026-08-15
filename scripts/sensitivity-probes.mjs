@@ -145,18 +145,21 @@ try {
   // list entry is what gives the gate its teeth.
   const bridgePath = join(worktree, "src", "runtime", "iris-bridge.ts");
   const originalBridge = fs.readFileSync(bridgePath, "utf8");
-  // Regression: the bridge stops wiring companionOf → the user unit pairing
-  // never merges (only test/iris-bridge.test.ts asserts this).
+  // Regression: the bridge maps the user message to a WRONG messageId (not
+  // the Pi entry id). Only test/iris-bridge.test.ts asserts messageId == Pi
+  // entry id (the unique message-identity mapping check); r1/host tests only
+  // check non-empty sessionId/messageId and still pass, so removing the
+  // listed test lets the regression escape (proving the entry is load-bearing).
   const regression = originalBridge.replace(
-    "...(this.pendingUser !== null ? { companionOf: this.pendingUser.eventId } : {}),",
-    "// SENSITIVITY PROBE: companion pairing wiring removed",
+    'this.admit(event.entryId, "iris.semantic.context_message.user.v1", payload, "user");',
+    'this.admit(`probe-${event.entryId}`, "iris.semantic.context_message.user.v1", payload, "user"); // SENSITIVITY PROBE: messageId mapping broken',
   );
   fs.writeFileSync(bridgePath, regression);
   const caught = run("npx tsx --test test/iris-bridge.test.ts", worktree);
   expectFailure(
-    "iris-bridge catches the companion-pairing regression",
+    "iris-bridge catches the messageId-mapping regression",
     caught,
-    "companion pairing must verify",
+    "DshMessageRef.messageId must equal the Pi entry id",
   );
   fs.writeFileSync(bridgePath, originalBridge);
 
@@ -195,7 +198,7 @@ try {
   fs.writeFileSync(
     renderPath,
     originalRender.replace(
-      /throw new Error\(\s*`provider render: P5 unit \$\{unit\.header\.contextUnitId\} has unknown role \$\{JSON\.stringify\(role\)\} \(fail closed\)`,\s*\);/,
+      /throw new Error\(\s*`provider render: P5 unit \$\{unit\.unitId\} has unknown role \$\{JSON\.stringify\(role\)\} \(fail closed\)`,\s*\);/,
       'return { role: "user", content: [], timestamp: 0 } as unknown as AgentMessage; // SENSITIVITY PROBE: fail-closed disabled',
     ),
   );

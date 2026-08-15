@@ -195,15 +195,25 @@ export async function openHost(options: OpenHostOptions): Promise<HostCompositio
     const coordinator = new RuntimeCoordinator({
       activeRuntime: registry,
       modelOverride,
-      prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) =>
-        prepareInvocation(
+      prepareInvocation: async (input: AgentInput, runtimeSessionId: string, epochId: string) => {
+        const binding = prepareInvocation(
           input,
           runtimeSessionId,
           epochId,
           HOST_INSTANCE_EPOCH,
           config,
           new Date().toISOString(),
-        ),
+        );
+        // P0–P2 contributor 的权威 source holder 必须随每次 invocation 更新
+        //（否则 BUST generation 的 P0–P2 恒为装配占位版）。
+        contextSourceHolder.current = {
+          canonicalSystemPrompt: binding.canonicalSystemPrompt,
+          personaSnapshotId: "persona-default-v1",
+          providerProfileId: binding.providerProfileId,
+          toolDeclarations: ["test_read_tool"],
+        };
+        return binding;
+      },
     });
 
     let closed = false;
