@@ -347,3 +347,93 @@ test("dsh ingress sensitivity: writing to the DSH Session from the adapter fails
     "adapter must contain no session.append call (P0–P4 no-session-write gate)",
   );
 });
+
+test("dsh ingress: assistant with real DSH TokenUsage ingests with Iris usage shape", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "dsh-usage-"));
+  const { assembly, close } = await mountAssembly(dataRoot, "dsh-session-a");
+  try {
+    const session = Session.create(SessionId("dsh-session-a"));
+    const assistant = createAssistantMessage({
+      content: [{ type: "text", text: "token heavy reply" }],
+      source: { provider: "deepseek", model: "deepseek-v4-flash" },
+    });
+    session.append(
+      "assistant/message",
+      {
+        turn: 1,
+        step: 1,
+        message: assistant,
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 20, reasoningTokens: 5 },
+      },
+      { surfaceOp: "append" },
+    );
+    const result = new DshIngressAdapter(assembly.contextService).ingest(session);
+    assert.equal(result.admitted, 1, "assistant with usage must be admitted (not fail closed)");
+    const units = assembly.contextService
+      .getStore()
+      .listContextUnits(assembly.lineageId, { disposition: "all" });
+    const assistantUnit = units.find(
+      (u) => u.contentSchemaId === "iris.semantic.context_message.assistant.v1",
+    );
+    assert.ok(assistantUnit, "assistant unit must exist");
+    const usage = (assistantUnit.content as { usage?: Record<string, unknown> }).usage;
+    assert.ok(usage, "assistant unit must retain converted usage");
+    assert.equal(usage["input"], 100);
+    assert.equal(usage["output"], 50);
+    assert.equal(usage["cacheRead"], 20);
+    assert.equal(usage["totalTokens"], 170);
+    assert.equal(usage["reasoning"], 5);
+    // Iris 语义 usage 形状（cost 为 DSH 不携带的中性 0）。
+    assert.deepEqual(usage["cost"], { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+  } finally {
+    await close();
+  }
+});
+
+test("dsh ingress: tool result with reasoning block maps to reasoning (not thinking)", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "dsh-toolreason-"));
+  const { assembly, close } = await mountAssembly(dataRoot, "dsh-session-a");
+  try {
+    const session = Session.create(SessionId("dsh-session-a"));
+    session.append("tool/call", {
+      turn: 1,
+      step: 1,
+      callId: CallId("call-r1"),
+      name: "read_file",
+      arguments: "{}",
+    });
+    const toolResult = createToolResultMessage({
+      callId: CallId("call-r1"),
+      content: [
+        { type: "reasoning", text: "reasoned about the file" },
+        { type: "text", text: "file content" },
+      ],
+      isError: false,
+    });
+    session.append(
+      "tool/result",
+      { turn: 1, step: 1, message: toolResult },
+      { surfaceOp: "append" },
+    );
+    const result = new DshIngressAdapter(assembly.contextService).ingest(session);
+    assert.equal(result.admitted, 1, "tool result with reasoning block must be admitted");
+    const units = assembly.contextService
+      .getStore()
+      .listContextUnits(assembly.lineageId, { disposition: "all" });
+    const toolUnit = units.find(
+      (u) => u.contentSchemaId === "iris.semantic.context_message.tool_result.v1",
+    );
+    assert.ok(toolUnit, "tool result unit must exist");
+    const content = (toolUnit.content as { content?: Array<{ type: string }> }).content ?? [];
+    assert.ok(
+      content.some((part) => part.type === "reasoning"),
+      "tool_result content must carry a reasoning part (schema requires reasoning, not thinking)",
+    );
+    assert.ok(
+      !content.some((part) => part.type === "thinking"),
+      "tool_result content must not carry a thinking part",
+    );
+  } finally {
+    await close();
+  }
+});

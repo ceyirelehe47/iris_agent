@@ -50,8 +50,17 @@ export interface DshIngestResult {
   skipped: number;
 }
 
-/** DSH ContentBlock → Iris 语义 canonical part（未知块 fail-closed）。 */
-export function dshContentToSemanticParts(content: readonly ContentBlock[]): JsonValue[] {
+/**
+ * DSH ContentBlock → Iris 语义 canonical part（未知块 fail-closed）。
+ *
+ * reasoning 块的映射随目标语义 schema 变化：user/assistant content 接受
+ * `thinking`，tool_result content 接受 `reasoning` —— 传 `toolResult: true`
+ * 时按 `reasoning` 映射（否则 `thinking`）。
+ */
+export function dshContentToSemanticParts(
+  content: readonly ContentBlock[],
+  opts?: { toolResult?: boolean },
+): JsonValue[] {
   const parts: JsonValue[] = [];
   for (const block of content) {
     switch (block.type) {
@@ -59,7 +68,10 @@ export function dshContentToSemanticParts(content: readonly ContentBlock[]): Jso
         parts.push({ type: "text", text: block.text });
         break;
       case "reasoning":
-        parts.push({ type: "thinking", text: block.text });
+        parts.push({
+          type: opts?.toolResult === true ? "reasoning" : "thinking",
+          text: block.text,
+        });
         break;
       case "image":
         parts.push({
@@ -210,7 +222,7 @@ export class DshIngressAdapter {
         content: dshContentToSemanticParts(event.message.content),
         ...(source.provider !== undefined ? { provider: source.provider } : {}),
         ...(source.model !== undefined ? { model: source.model } : {}),
-        ...(event.usage !== undefined ? { usage: event.usage as JsonValue } : {}),
+        ...(event.usage !== undefined ? { usage: dshUsageToIris(event.usage) } : {}),
         timestamp: time,
       },
       runtimeSourceKind: "model",
@@ -250,7 +262,7 @@ export class DshIngressAdapter {
         role: "toolResult",
         toolCallId: callId,
         toolName,
-        content: dshContentToSemanticParts(resultBlock.content),
+        content: dshContentToSemanticParts(resultBlock.content, { toolResult: true }),
         isError: resultBlock.isError === true,
         timestamp: time,
       },
@@ -259,6 +271,39 @@ export class DshIngressAdapter {
     });
     return true;
   }
+}
+
+/**
+ * DSH TokenUsage → Iris assistant/tool_result 语义 usage 形状（review F4
+ * BLOCKING）。DSH 计费字段为 inputTokens/outputTokens/cacheReadTokens/
+ * cacheWriteTokens/reasoningTokens；Iris 语义 schema 要求
+ * {input,output,cacheRead,cacheWrite,totalTokens,cost{...}} 且
+ * additionalProperties:false —— 原样透传 DSH TokenUsage 会在真实带计费的
+ * assistant 消息上 fail-closed。cost 是 provider 定价派生字段，DSH 不携带；
+ * 以 0 表示（诚实的中性值），token 计数按 DSH 实值转换。
+ */
+export function dshUsageToIris(usage: unknown): JsonValue {
+  const record = usage as {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+  };
+  const input = record.inputTokens ?? 0;
+  const output = record.outputTokens ?? 0;
+  const cacheRead = record.cacheReadTokens ?? 0;
+  const cacheWrite = record.cacheWriteTokens ?? 0;
+  const totalTokens = input + output + cacheRead + cacheWrite;
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    ...(record.reasoningTokens !== undefined ? { reasoning: record.reasoningTokens } : {}),
+    totalTokens,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
 }
 
 /** 消息的确定性 source hash（canonical content 的 sha256；跨 restart 可重放）。 */

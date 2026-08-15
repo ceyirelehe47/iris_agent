@@ -172,8 +172,15 @@ const STRUCTURAL_CHECKS = [
   },
   {
     description:
-      "runtime bridge must consume @iris/context unified ContextUnit admission (admitRuntimeMessage)",
+      "Pi compatibility bridge must consume the generic runtime source admission " +
+      "(admitGenericRuntimeSource), NOT DshMessageRef (iris_agent#130)",
     file: "src/runtime/iris-bridge.ts",
+    pattern: /admitGenericRuntimeSource/,
+  },
+  {
+    description:
+      "real DSH ingress adapter must consume the DSH-only admission (admitRuntimeMessage -> DshMessageRef)",
+    file: "src/runtime/dsh-adapter.ts",
     pattern: /admitRuntimeMessage/,
   },
   {
