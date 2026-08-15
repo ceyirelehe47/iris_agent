@@ -3,7 +3,8 @@
  *
  * iris_agent 是 Persona/System/Capability 权威 source 的 owner；BUST full
  * rebuild 时 @iris/context 的 BustCoordinator 调用 contributor.project() 冻结
- * 投影为 pre-projected ContextUnit（P0–P2）。本 seam 只提供 frozen
+ * 投影为中性 **AdmissionCandidate**（iris-context#5：当前 source candidate；
+ * 不是 legacy P0P1P2P3P4Unit pre-projection DTO）。本 seam 只提供 frozen
  * snapshot / identity / hash + invalidation，不允许直接 push/splice
  * generation（Notion Composition & Plugin Model v29）。
  *
@@ -20,7 +21,7 @@
  */
 import { createHash } from "node:crypto";
 
-import type { JsonValue } from "@iris/context/contracts";
+import type { AdmissionCandidate } from "@iris/context/contracts";
 
 /** 与 @iris/context bust-coordinator 的 ContextSourceContributor 结构兼容。 */
 export interface IrisSourceContributor {
@@ -28,22 +29,9 @@ export interface IrisSourceContributor {
   readonly sourceId: string;
   readonly sourceRevision: string;
   readonly sourceHash: string;
-  project(): readonly IrisProjectedUnit[];
+  /** 冻结并投影当前 authoritative source 为中性 AdmissionCandidate[]。 */
+  project(): readonly AdmissionCandidate[];
   invalidate?(sourceId: string): boolean;
-}
-
-/** 与 @iris/context generation-builder 的 P0P1P2P3P4Unit 结构兼容。 */
-export interface IrisProjectedUnit {
-  readonly contextUnitId: string;
-  readonly source: {
-    readonly schemaId: "iris.context_unit_source_ref.v1";
-    readonly sourceSchemaId: string;
-    readonly sourceId: string;
-    readonly sourceRevision?: string;
-    readonly sourceHash: string;
-  };
-  readonly semanticSchemaId: string;
-  readonly semanticContent: JsonValue;
 }
 
 /** P0–P2 语义 schema（generated registry 已知 schema）。 */
@@ -62,25 +50,23 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-function staticUnit(input: {
-  contextUnitId: string;
+function staticCandidate(input: {
   sourceId: string;
   sourceHash: string;
   sourceRevision: string;
   type: string;
   text: string;
-}): IrisProjectedUnit {
+}): AdmissionCandidate {
   return {
-    contextUnitId: input.contextUnitId,
-    source: {
+    sourceRef: {
       schemaId: SOURCE_REF_SCHEMA_ID,
       sourceSchemaId: "iris.system_source.v1",
       sourceId: input.sourceId,
       sourceRevision: input.sourceRevision,
       sourceHash: input.sourceHash,
     },
-    semanticSchemaId: OPERATIONAL_SCHEMA_ID,
-    semanticContent: { type: input.type, data: { text: input.text } },
+    contentSchemaId: OPERATIONAL_SCHEMA_ID,
+    content: { type: input.type, data: { text: input.text } },
   };
 }
 
@@ -88,8 +74,9 @@ function staticUnit(input: {
  * 创建 P0/P1/P2 三个 contributor（layer 各自独立；全部消费同一个
  * `getCurrent()` 权威快照 holder）。返回的数组按 [p0, p1, p2] 顺序。
  *
- * 确定性：unit identity / source hash 只依赖冻结的 source 内容；同一
- * canonicalSystemPrompt + persona + tool 声明必须产生同一投影。
+ * 确定性：unit identity（由 @iris/context deriveContextUnitId 派生）/ source
+ * hash 只依赖冻结的 source 内容；同一 canonicalSystemPrompt + persona + tool
+ * 声明必须产生同一投影。
  */
 export function createIrisSourceContributors(
   getCurrent: () => CurrentContextSource,
@@ -103,8 +90,7 @@ export function createIrisSourceContributors(
       const current = getCurrent();
       const hash = sha256(current.canonicalSystemPrompt);
       return [
-        staticUnit({
-          contextUnitId: "p0-system",
+        staticCandidate({
           sourceId: "iris-system-v1",
           sourceHash: hash,
           sourceRevision: "v1",
@@ -124,8 +110,7 @@ export function createIrisSourceContributors(
       const current = getCurrent();
       const hash = sha256(`persona:${current.personaSnapshotId}`);
       return [
-        staticUnit({
-          contextUnitId: "p1-persona",
+        staticCandidate({
           sourceId: "iris-persona-v1",
           sourceHash: hash,
           sourceRevision: "v1",
@@ -146,8 +131,7 @@ export function createIrisSourceContributors(
       const text = current.toolDeclarations.join("\n");
       const hash = sha256(`capability:${text}`);
       return [
-        staticUnit({
-          contextUnitId: "p2-capability",
+        staticCandidate({
           sourceId: "iris-capability-v1",
           sourceHash: hash,
           sourceRevision: "v1",

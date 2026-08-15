@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { ContextGenerationV3, ContextUnitV3, JsonValue } from "@iris/context/contracts";
+import type { ContextGeneration, ContextUnitV3, JsonValue } from "@iris/context/contracts";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { renderGenerationForProvider } from "../src/runtime/context-render.js";
@@ -12,7 +12,7 @@ import { runMinimalSlice } from "../src/runtime/vertical-slice-demo.js";
 import { sampleAgentInput } from "../src/runtime/vertical-slice.js";
 
 /**
- * Provider Renderer（ContextGenerationV3 → provider-native wire）契约测试。
+ * Provider Renderer（ContextGeneration → provider-native wire）契约测试。
  *
  * 层映射（Notion 01 Context Assembly｜Provider Wire Terminology Override）：
  *  - P0 System / P1 Persona / P2 Capability → system prompt 前缀（声明层）；
@@ -44,7 +44,7 @@ function unit(unitId: string, content: JsonValue, index: number): ContextUnitV3 
   };
 }
 
-function buildGeneration(layerEnds: number[], units: ContextUnitV3[]): ContextGenerationV3 {
+function buildGeneration(layerEnds: number[], units: ContextUnitV3[]): ContextGeneration {
   return {
     schemaId: "iris.context_generation.v3",
     header: {

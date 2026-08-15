@@ -1,8 +1,8 @@
 /**
- * Provider Renderer —— ContextGenerationV3 → provider-native wire（iris_agent 侧）。
+ * Provider Renderer —— ContextGeneration → provider-native wire（iris_agent 侧）。
  *
  * 架构级职责（Notion 01 Context Assembly｜Provider Wire Terminology Override）：
- * 把已验证的 P0–P5 `ContextGenerationV3 { header, units: ContextUnit[] }` 转成 Pi
+ * 把已验证的 P0–P5 `ContextGeneration { header, units: ContextUnit[] }` 转成 Pi
  * provider 的 native wire（systemPrompt + AgentMessage[]）。渲染结果是一次 provider-call-only
  * 视图，不写回 Session、不改写 canonical Context state、不构造 m0/m1/LKG 等
  * 第二套中间上下文表示。
@@ -18,7 +18,7 @@
  * hatch）。
  */
 import type { AgentMessage } from "@iris/pi-agent-core";
-import type { ContextGenerationV3, ContextUnitV3, JsonValue } from "@iris/context/contracts";
+import type { ContextGeneration, ContextUnitV3, JsonValue } from "@iris/context/contracts";
 
 export interface RenderedProviderContext {
   systemPrompt: string;
@@ -41,7 +41,7 @@ const EMPTY_USAGE = {
  * （0 <= e0 <= ... <= e5 == units.length）。
  */
 export function renderGenerationForProvider(
-  generation: ContextGenerationV3,
+  generation: ContextGeneration,
 ): RenderedProviderContext {
   const ends = generation.header.layerEnds;
   const e2 = ends[2] ?? 0;
@@ -290,9 +290,9 @@ function numberField(record: Record<string, unknown>, key: string, fallback: num
 }
 
 /** 供测试/诊断使用的 generation → 文本快照（P0–P5 分层）。 */
-export function generationLayerSummary(generation: ContextGenerationV3): string {
+export function generationLayerSummary(generation: ContextGeneration): string {
   const ends = generation.header.layerEnds;
   return `layers=[${ends.join(",")}] units=${generation.units.length} hash=${generation.header.contextGenerationHash.slice(0, 12)}`;
 }
 
-export type { ContextGenerationV3, ContextUnitV3, JsonValue };
+export type { ContextGeneration, ContextUnitV3, JsonValue };
