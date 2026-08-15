@@ -13,7 +13,7 @@
     "commit": "323c66342b198c3c157ee0ef8c3bfd31c0c185b1",
     "tree": "c4622a1b1cce3c4527b9268db427ba65d7550602",
     "vendorPath": "../.iris-vendor/iris-context",
-    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into ./vendor/iris-context (preinstall). 323c663 is the reviewed iris-context#2/#4/#5 head on ceyirelehe47/iris-context:extract-context-module (Feature 1 + Feature 2 independent-review PASS). After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
+    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into <repo>/../.iris-vendor/iris-context (preinstall). 323c663 is the reviewed iris-context#2/#4/#5 head on ceyirelehe47/iris-context:extract-context-module (Feature 1 + Feature 2 independent-review PASS). After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
   },
   "pi": {
     "currentDependencySource": "vendored_exact_git_pin",
@@ -33,7 +33,7 @@
       "upstreamBaseCommit": "581d75a89cea21e50d6a26df840352f94427f633",
       "upstreamAuditBaselineCommit": "6f707eb36064e82af9c1320a7634f4dfad21049b",
       "adoptionStatus": "vendored_exact_git_pin",
-      "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): blueforst/pi does not exist on GitHub (HTTP 404). The real fork with the pinned seam is ceyirelehe47/pi (public); scripts/bootstrap-vendor-deps.mjs materializes it into ./vendor/pi at seamCommit/seamTree (preinstall) and builds ai/agent/sqlite-node. Dependency names in this lock are the @iris/* alias names used by package.json; the vendored checkout declares the @earendil-works/* scope. acceptedRuntime (66a3ea1) and baseline (ab5f8d8) are unchanged and remain ancestors of the seam. Prior seam 48a05224 is an ancestor."
+      "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): blueforst/pi does not exist on GitHub (HTTP 404). The real fork with the pinned seam is ceyirelehe47/pi (public); scripts/bootstrap-vendor-deps.mjs materializes it into <repo>/../.iris-vendor/pi at seamCommit/seamTree (preinstall) and builds ai/agent/sqlite-node. Dependency names in this lock are the @iris/* alias names used by package.json; the vendored checkout declares the @earendil-works/* scope. acceptedRuntime (66a3ea1) and baseline (ab5f8d8) are unchanged and remain ancestors of the seam. Prior seam 48a05224 is an ancestor."
     }
   },
   "magicContext": {

@@ -156,12 +156,12 @@ const PI_BUILD_MARKERS = [
 
 function ensureVendorBuilds() {
   if (!existsSync(IRIS_CONTEXT_BUILD_MARKER)) {
-    console.log("bootstrap: building @iris/context (vendor/iris-context)…");
+    console.log("bootstrap: building @iris/context (../.iris-vendor/iris-context)…");
     runNpm(CACHE_IRIS_CONTEXT, ["ci", "--no-audit", "--no-fund"]);
     runNpm(CACHE_IRIS_CONTEXT, ["run", "build"]);
   }
   if (!PI_BUILD_MARKERS.every(existsSync)) {
-    console.log("bootstrap: building @iris/pi-* (vendor/pi)…");
+    console.log("bootstrap: building @iris/pi-* (../.iris-vendor/pi)…");
     runNpm(CACHE_PI, ["ci", "--no-audit", "--no-fund"]);
     for (const pkg of ["packages/ai", "packages/agent", "packages/storage/sqlite-node"]) {
       runNpm(resolve(CACHE_PI, pkg), ["run", "build"]);

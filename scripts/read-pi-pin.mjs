@@ -1,8 +1,10 @@
 // Reads the authoritative Pi checkout ref from the production lock.
 //
-// Single source of truth for CI: .github/workflows/ci.yml uses this script's
-// output as the actions/checkout ref for blueforst/pi, so the CI Pi checkout
-// can never drift from src/contracts/pins/production-lock.json (iris_agent#41).
+// Single source of truth: src/contracts/pins/production-lock.json (iris_agent#41).
+// scripts/bootstrap-vendor-deps.mjs materializes the pinned Pi fork
+// (ceyirelehe47/pi; blueforst/pi does not exist on GitHub) into
+// <repo>/../.iris-vendor/pi at seamCommit/seamTree; this reader exposes the
+// pinned ref for gate/tooling use.
 //
 // Usage:
 //   node scripts/read-pi-pin.mjs            # prints pi.fork.seamCommit
