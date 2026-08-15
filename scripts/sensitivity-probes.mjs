@@ -71,22 +71,27 @@ try {
   // Install deps in the worktree (node_modules symlink keeps it fast).
   run(`ln -s ${REPO_ROOT}/node_modules ${worktree}/node_modules`, worktree);
   // iris_agent#131: the shared node_modules/@iris/* links resolve through the
-  // sibling managed cache (<repo>/../.iris-vendor). Mirror it beside the
-  // worktree so those symlinks resolve inside the probe environment.
-  // iris_agent#131: the shared node_modules/@iris/* links resolve through the
   // sibling managed cache (<repo>/../.iris-vendor). When the worktree's parent
   // already IS the cache location (e.g. a repo cloned into /tmp), the links
   // resolve natively and no mirror is needed. Otherwise mirror the cache at
   // the worktree's parent. NEVER delete a real cache directory — only remove a
-  // previously-created mirror symlink.
+  // previously-created mirror symlink (lstat-based detection also handles a
+  // dangling symlink, which existsSync() would miss).
   const realVendor = resolve(REPO_ROOT, "..", ".iris-vendor");
   const vendorMirror = join(dirname(worktree), ".iris-vendor");
+  const mirrorStat = (() => {
+    try {
+      return fs.lstatSync(vendorMirror);
+    } catch {
+      return null;
+    }
+  })();
   if (
     fs.existsSync(realVendor) &&
     resolve(realVendor) !== resolve(vendorMirror) &&
-    !(fs.existsSync(vendorMirror) && fs.lstatSync(vendorMirror).isDirectory())
+    !(mirrorStat !== null && mirrorStat.isDirectory())
   ) {
-    if (fs.existsSync(vendorMirror)) {
+    if (mirrorStat !== null) {
       fs.rmSync(vendorMirror, { force: true });
     }
     fs.symlinkSync(realVendor, vendorMirror, "dir");
