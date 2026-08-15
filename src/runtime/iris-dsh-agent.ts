@@ -148,11 +148,7 @@ export class IrisLoopAgent implements Agent {
     // 输入消息必须已经由 Host append 进 Session（与 DshIngressAdapter 的
     // 重放语义一致）；未找到 → fail-closed，绝不静默丢弃（review F2）。
     const lastUser = [...this.session.events].reverse().find((e) => e.type === "user/message");
-    if (
-      lastUser === undefined ||
-      lastUser.type !== "user/message" ||
-      lastUser.data.id !== message.id
-    ) {
+    if (lastUser?.type !== "user/message" || lastUser.data.id !== message.id) {
       throw new Error(
         `iris agent ${this.id}: followup message ${message.id} is not the latest committed ` +
           "user/message in the Session — Host must append it before followup (fail closed)",
