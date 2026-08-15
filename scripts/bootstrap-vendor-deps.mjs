@@ -39,7 +39,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, lstatSync } from "node:fs";
+import { existsSync, readFileSync, lstatSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import {
@@ -170,8 +170,15 @@ function provisionRepo(dir, name, repository, commit, tree) {
     }
     return;
   }
-  if (existsSync(dir)) {
-    rmSync(dir, { recursive: true, force: true });
+  // 非 git 目录（陈旧/损坏/被误放的目录）：**fail-closed**，绝不递归删除 ——
+  // 受管 vendor 检出中只允许安全、明确范围的 clean（dist/node_modules/
+  // stamp，见 cleanVendorBuild）；任何无法确认是受管 git 检出的路径都要
+  // 人工清理（review minor-3 加固：不得误删仓库外其它目录）。
+  if (existsSync(dir) && !isGitRepo(dir)) {
+    throw new Error(
+      `bootstrap: ${dir} exists but is not a git repository (stale/foreign dir). ` +
+        "Refusing to recursively delete it (fail closed); remove it manually and re-run.",
+    );
   }
   run("mkdir", ["-p", dirname(dir)]);
   const init = run("git", ["init", "-q", dir]);

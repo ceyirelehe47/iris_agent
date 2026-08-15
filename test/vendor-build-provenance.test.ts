@@ -267,3 +267,45 @@ test("A6: bootstrap --check passes only when stamps are valid (env-injected temp
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("A6: a non-git directory at a managed vendor path fails closed (never recursively deleted)", () => {
+  const { root, vendor, stamps } = tempVendor();
+  try {
+    // vendor/pi 是普通目录（非 git），且放一个可疑文件 —— 必须 fail-closed，
+    // 绝不能递归删除（review minor-3：不得误删仓库外其它目录）。
+    mkdirSync(join(vendor, "pi"), { recursive: true });
+    writeFileSync(join(vendor, "pi", "user-data.txt"), "do not delete");
+    const pinPath = join(root, "production-lock.json");
+    const pin = {
+      pi: { fork: { repository: "fake/pi", seamCommit: "a".repeat(40), seamTree: "b".repeat(40) } },
+      irisContext: {
+        repository: "fake/iris-context",
+        commit: "c".repeat(40),
+        tree: "d".repeat(40),
+      },
+    };
+    writeFileSync(pinPath, JSON.stringify(pin, null, 2));
+    assert.throws(
+      () =>
+        execFileSync(
+          process.execPath,
+          [resolve(REPO_ROOT, "scripts", "bootstrap-vendor-deps.mjs")],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              IRIS_VENDOR_ROOT: vendor,
+              IRIS_VENDOR_PIN_PATH: pinPath,
+              IRIS_VENDOR_STAMP_DIR: stamps,
+            },
+          },
+        ),
+      /not a git repository/,
+      "provisioning must fail closed on a foreign/non-git dir at the managed path",
+    );
+    // 目录与数据保留（未被删除）。
+    assert.ok(existsSync(join(vendor, "pi", "user-data.txt")), "foreign dir must NOT be deleted");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
