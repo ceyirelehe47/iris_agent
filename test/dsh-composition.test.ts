@@ -334,3 +334,45 @@ test("B4: generation rebuild is deterministic after a turn (layer summary)", asy
     await runtime.close();
   }
 });
+
+test("B4 regression (review F1): re-ingesting the same Session after a turn does not duplicate the assistant unit", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "iris-dsh-f1-"));
+  const runtime = await mount(dataRoot, "iris-dsh-session-f1");
+  try {
+    const user = userMessage("hello");
+    runtime.session.append("user/message", user, { surfaceOp: "append" });
+    new DshIngressAdapter(runtime.contextService).ingest(runtime.session);
+    const handle = await runtime.agents.create({
+      sessionId: SessionId("iris-agent-f1"),
+      agentOptions: { provider: "mock", model: "mock-model" },
+    });
+    handle.agent.followup(user);
+    await handle.agent.whenIdle();
+    await runtime.contextService.runBustIfPending();
+    const before = runtime.contextService
+      .getStore()
+      .listContextUnits(runtime.lineageId, { disposition: "all" })
+      .filter((u) => u.contentSchemaId === "iris.semantic.context_message.assistant.v1");
+    assert.equal(before.length, 1, "one assistant unit after the turn");
+
+    // restart 恢复路径：对同一 Session 重新 ingest（adapter 用 event.time 计算
+    // sourceHash）。assistant 的 sourceHash 必须与 loop admission 时一致
+    // （都来自 committed event time）→ 不产生重复 assistant Unit。
+    const reingest = new DshIngressAdapter(runtime.contextService).ingest(runtime.session);
+    // admitted 计数含幂等 re-admission（非新增行）；真正的 exactly-once 看 unit
+    // 数量是否保持。
+    assert.equal(reingest.admitted, 2, "re-ingest processes the two committed messages");
+    const after = runtime.contextService
+      .getStore()
+      .listContextUnits(runtime.lineageId, { disposition: "all" })
+      .filter((u) => u.contentSchemaId === "iris.semantic.context_message.assistant.v1");
+    assert.equal(
+      after.length,
+      1,
+      "re-ingesting the same Session must NOT duplicate the assistant ContextUnit (F1)",
+    );
+    await handle.dispose();
+  } finally {
+    await runtime.close();
+  }
+});

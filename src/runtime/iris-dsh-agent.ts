@@ -145,8 +145,19 @@ export class IrisLoopAgent implements Agent {
           "(fail closed; #128 next slice)",
       );
     }
-    // 输入消息由 Host 已 append 进 Session；这里只驱动 turn。
-    void message;
+    // 输入消息必须已经由 Host append 进 Session（与 DshIngressAdapter 的
+    // 重放语义一致）；未找到 → fail-closed，绝不静默丢弃（review F2）。
+    const lastUser = [...this.session.events].reverse().find((e) => e.type === "user/message");
+    if (
+      lastUser === undefined ||
+      lastUser.type !== "user/message" ||
+      lastUser.data.id !== message.id
+    ) {
+      throw new Error(
+        `iris agent ${this.id}: followup message ${message.id} is not the latest committed ` +
+          "user/message in the Session — Host must append it before followup (fail closed)",
+      );
+    }
     this.driveTurn();
   }
 
@@ -256,15 +267,18 @@ export class IrisLoopAgent implements Agent {
       ...(this.options.maxTokens !== undefined ? { maxTokens: this.options.maxTokens } : {}),
     });
     // 5. assistant/message committed 到 DSH Session（raw archive；P0–P4 永不写入）。
-    const eventSeq = this.session.seq + 1;
-    this.session.append(
+    const appended = this.session.append(
       "assistant/message",
       { turn, step: 1, message: assistant, ...(usage !== undefined ? { usage } : {}) },
       { surfaceOp: "append" },
     );
+    // 用 committed event 的权威 time/seq（与 dsh-adapter 的 event.time/event.seq
+    // 语义一致）→ restart 后重 ingest 同一 Session 时 sourceHash 不变
+    // （review F1：不得用进程内 nowMs()，否则重放会因 time 不同产生重复 Unit）。
+    const eventSeq = appended.seq;
+    const eventTime = appended.time;
     // 6. assistant ContextUnit admission（同一 ContextUnit 模型；exactly-once）。
     const source = (assistant.source as { provider?: string; model?: string }) ?? {};
-    const nowMs = this.deps.nowMs ?? Date.now;
     contextService.admitRuntimeMessage({
       sessionId: this.session.id,
       messageId: assistant.id,
@@ -276,12 +290,12 @@ export class IrisLoopAgent implements Agent {
         ...(source.provider !== undefined ? { provider: source.provider } : {}),
         ...(source.model !== undefined ? { model: source.model } : {}),
         ...(usage !== undefined ? { usage: dshUsageToIris(usage) } : {}),
-        timestamp: nowMs(),
+        timestamp: eventTime,
       },
       runtimeSourceKind: "model",
       sourceHash: dshAssistantSourceHash(assistant, {
         usage,
-        time: nowMs(),
+        time: eventTime,
       }),
     });
     // 7. 下一 generation 重建（BUST）。
