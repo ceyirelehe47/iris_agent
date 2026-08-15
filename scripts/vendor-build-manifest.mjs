@@ -56,11 +56,23 @@ export function walkFiles(dir, out = [], base = dir) {
   return out;
 }
 
-/** 构建产物清单（相对路径 → sha256）。 */
-export function artifactManifest(dir) {
+/**
+ * 构建产物清单（相对路径 → sha256）。
+ *
+ * A6：只 hash **构建产物**（build output），**绝不** hash 整个 vendor 检出
+ * （.git/、源码、node_modules 等会变化的非产物不进入 stamp —— 否则 stamp
+ * 会因 git 元数据变化而持续失效）。`artifactDirs` 是相对 vendor 根的构建
+ * 输出目录（如 ["dist"] 或 ["packages/ai/dist", "packages/agent/dist"]）；
+ * 缺省 = 整目录（兼容单测/简单场景）。
+ */
+export function artifactManifest(dir, artifactDirs) {
   const manifest = {};
-  for (const rel of walkFiles(dir)) {
-    manifest[rel] = sha256File(join(dir, rel));
+  const roots = artifactDirs ?? ["."];
+  for (const rel of roots) {
+    const base = resolve(dir, rel);
+    for (const fileRel of walkFiles(base)) {
+      manifest[rel === "." ? fileRel : `${rel}/${fileRel}`] = sha256File(join(base, fileRel));
+    }
   }
   return manifest;
 }
@@ -88,11 +100,11 @@ export function readBuildStamp(name, stampDir) {
   }
 }
 
-export function artifactsMatch(stamp, dir) {
+export function artifactsMatch(stamp, dir, artifactDirs) {
   if (!stamp || typeof stamp.artifacts !== "object" || stamp.artifacts === null) {
     return false;
   }
-  const current = artifactManifest(dir);
+  const current = artifactManifest(dir, artifactDirs);
   const stamped = stamp.artifacts;
   const keys = Object.keys(stamped);
   if (keys.length === 0) return false;
@@ -107,7 +119,7 @@ export function artifactsMatch(stamp, dir) {
  * stamp 是否有效：存在 + commit/tree/lockHash 与 pin 一致 + 产物 hash 全匹配。
  * 返回 { valid, reason? }。
  */
-export function buildStampValid(name, dir, pin, stampDir) {
+export function buildStampValid(name, dir, pin, stampDir, artifactDirs) {
   const stamp = readBuildStamp(name, stampDir);
   if (stamp === undefined) {
     return { valid: false, reason: `build stamp missing for ${name}` };
@@ -136,16 +148,16 @@ export function buildStampValid(name, dir, pin, stampDir) {
       reason: `build stamp lockHash ${stamp.lockHash} != current ${lockHash}`,
     };
   }
-  if (!artifactsMatch(stamp, dir)) {
+  if (!artifactsMatch(stamp, dir, artifactDirs)) {
     return { valid: false, reason: `build artifacts do not match the stamp manifest for ${name}` };
   }
   return { valid: true };
 }
 
 /** --check：返回问题列表（空数组 = 通过）。 */
-export function verifyBuildStamp(name, dir, pin, stampDir) {
+export function verifyBuildStamp(name, dir, pin, stampDir, artifactDirs) {
   const problems = [];
-  const check = buildStampValid(name, dir, pin, stampDir);
+  const check = buildStampValid(name, dir, pin, stampDir, artifactDirs);
   if (!check.valid) {
     problems.push(check.reason);
   }
@@ -157,7 +169,7 @@ export function verifyBuildStamp(name, dir, pin, stampDir) {
  * repo / commit / tree / package-lock hash / Node / npm / build profile /
  * artifact manifest hashes。
  */
-export function writeBuildStamp({ name, dir, pin, stampDir, buildProfile }) {
+export function writeBuildStamp({ name, dir, pin, stampDir, buildProfile, artifactDirs }) {
   mkdirSync(stampDir, { recursive: true });
   const lockHash = computeLockHash(dir);
   const stamp = {
@@ -171,7 +183,7 @@ export function writeBuildStamp({ name, dir, pin, stampDir, buildProfile }) {
     npm: process.env.npm_version ?? "unknown",
     buildProfile: buildProfile ?? "npm-ci-build",
     builtAt: new Date().toISOString(),
-    artifacts: artifactManifest(dir),
+    artifacts: artifactManifest(dir, artifactDirs),
   };
   writeFileSync(stampPath(name, stampDir), JSON.stringify(stamp, null, 2) + "\n");
   return stamp;

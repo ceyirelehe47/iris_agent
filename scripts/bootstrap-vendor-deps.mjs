@@ -208,13 +208,13 @@ function runNpm(dir, args) {
   return result;
 }
 
-/** 构建产物 markers（供 symlink 快速通道的快速判断；真实验证走 build stamp）。 */
-const IRIS_CONTEXT_BUILD_MARKER = resolve(CACHE_IRIS_CONTEXT, "dist", "src", "cordis", "index.js");
-const PI_BUILD_MARKERS = [
-  "packages/ai/dist/index.js",
-  "packages/agent/dist/index.js",
-  "packages/storage/sqlite-node/dist/index.js",
-].map((rel) => resolve(CACHE_PI, rel));
+/** 构建产物目录（相对 vendor 根）—— artifact manifest 只 hash 这些 build output。 */
+const IRIS_CONTEXT_ARTIFACT_DIRS = ["dist"];
+const PI_ARTIFACT_DIRS = [
+  "packages/ai/dist",
+  "packages/agent/dist",
+  "packages/storage/sqlite-node/dist",
+];
 
 /**
  * 确保 vendor 检出有**与 pin + lock + 产物一致**的构建（A6）：
@@ -223,8 +223,8 @@ const PI_BUILD_MARKERS = [
  *     （dist/node_modules/stamp；symlink 快速通道不 clean，直接重建覆盖）+
  *     重建 + 写版本化 build stamp。
  */
-function ensureVendorBuild(name, dir, pin, buildSteps) {
-  const check = verifyBuildStamp(name, dir, pin, STAMP_DIR);
+function ensureVendorBuild(name, dir, pin, buildSteps, artifactDirs) {
+  const check = verifyBuildStamp(name, dir, pin, STAMP_DIR, artifactDirs);
   if (check.length === 0) {
     console.log(`bootstrap: ${name} build stamp valid (${pin.commit})`);
     return;
@@ -234,7 +234,14 @@ function ensureVendorBuild(name, dir, pin, buildSteps) {
     cleanVendorBuild(dir, name, STAMP_DIR);
   }
   buildSteps();
-  writeBuildStamp({ name, dir, pin, stampDir: STAMP_DIR, buildProfile: "npm-ci-build" });
+  writeBuildStamp({
+    name,
+    dir,
+    pin,
+    stampDir: STAMP_DIR,
+    buildProfile: "npm-ci-build",
+    artifactDirs,
+  });
   console.log(`bootstrap: ${name} rebuilt and stamped at ${pin.commit}`);
 }
 
@@ -296,6 +303,7 @@ if (checkOnly) {
       CACHE_PI,
       { repository: piFork.repository, commit: piFork.seamCommit, tree: piFork.seamTree },
       STAMP_DIR,
+      PI_ARTIFACT_DIRS,
     ),
     ...verifyBuildStamp(
       "iris-context",
@@ -306,6 +314,7 @@ if (checkOnly) {
         tree: irisContextPin.tree,
       },
       STAMP_DIR,
+      IRIS_CONTEXT_ARTIFACT_DIRS,
     ),
   );
   if (problems.length > 0) {

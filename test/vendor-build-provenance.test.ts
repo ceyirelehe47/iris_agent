@@ -232,14 +232,23 @@ test("A6: bootstrap --check passes only when stamps are valid (env-injected temp
       irisContext: { repository: "fake/iris-context", commit: ictx.head, tree: ictx.tree },
     };
     writeFileSync(pinPath, JSON.stringify(pin, null, 2));
-    // 写有效 build stamp（带 dist artifact manifest）。
-    mkdirSync(join(vendor, "pi", "dist"), { recursive: true });
-    writeFileSync(join(vendor, "pi", "dist", "index.js"), "1");
+    // 写有效 build stamp（带 dist artifact manifest；pi 是 monorepo，artifact
+    // 目录为 packages/{ai,agent,storage/sqlite-node}/dist —— 与 bootstrap 的
+    // PI_ARTIFACT_DIRS 一致）。
+    for (const pkg of ["ai", "agent", "storage/sqlite-node"]) {
+      mkdirSync(join(vendor, "pi", "packages", pkg, "dist"), { recursive: true });
+      writeFileSync(join(vendor, "pi", "packages", pkg, "dist", "index.js"), "1");
+    }
     writeBuildStamp({
       name: "pi",
       dir: join(vendor, "pi"),
       pin: { repository: pin.pi.fork.repository, commit: pi.head, tree: pi.tree },
       stampDir: stamps,
+      artifactDirs: [
+        "packages/ai/dist",
+        "packages/agent/dist",
+        "packages/storage/sqlite-node/dist",
+      ],
     });
     mkdirSync(join(vendor, "iris-context", "dist", "src"), { recursive: true });
     writeFileSync(join(vendor, "iris-context", "dist", "src", "index.js"), "1");
@@ -248,6 +257,7 @@ test("A6: bootstrap --check passes only when stamps are valid (env-injected temp
       dir: join(vendor, "iris-context"),
       pin: { repository: pin.irisContext.repository, commit: ictx.head, tree: ictx.tree },
       stampDir: stamps,
+      artifactDirs: ["dist"],
     });
     const out = execFileSync(
       process.execPath,
