@@ -22,7 +22,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const REPO_ROOT = join(import.meta.dirname, "..");
 
@@ -70,6 +70,15 @@ try {
   }
   // Install deps in the worktree (node_modules symlink keeps it fast).
   run(`ln -s ${REPO_ROOT}/node_modules ${worktree}/node_modules`, worktree);
+  // iris_agent#131: the shared node_modules/@iris/* links resolve through the
+  // sibling managed cache (<repo>/../.iris-vendor). Mirror it beside the
+  // worktree so those symlinks resolve inside the probe environment.
+  const realVendor = resolve(REPO_ROOT, "..", ".iris-vendor");
+  const vendorMirror = join(dirname(worktree), ".iris-vendor");
+  if (fs.existsSync(realVendor)) {
+    fs.rmSync(vendorMirror, { recursive: true, force: true });
+    fs.symlinkSync(realVendor, vendorMirror, "dir");
+  }
 
   // consume-iris-context: overlay the CURRENT working-tree state so the
   // probes exercise the CURRENT gates (the HEAD worktree alone would test the
@@ -83,6 +92,7 @@ try {
   }
   for (const file of [
     "package.json",
+    "package-lock.json",
     "tsconfig.json",
     "tsconfig.build.json",
     "eslint.config.mjs",

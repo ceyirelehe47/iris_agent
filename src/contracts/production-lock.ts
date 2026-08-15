@@ -11,6 +11,14 @@ export interface ProductionLock {
     packageManager: string;
     lockfile: string;
   };
+  irisContext: {
+    package: string;
+    repository: string;
+    commit: string;
+    tree: string;
+    vendorPath: string;
+    syncNotes?: string;
+  };
   pi: {
     currentDependencySource: string;
     packages: Record<string, string>;
@@ -56,6 +64,7 @@ export function readProductionLock(): ProductionLock {
     schemaVersion: pin.schemaVersion,
     documentedAt: pin.documentedAt,
     toolchain: { ...pin.toolchain },
+    irisContext: { ...pin.irisContext },
     pi: {
       currentDependencySource: pin.pi.currentDependencySource,
       packages: { ...pin.pi.packages },

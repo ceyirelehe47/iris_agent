@@ -1,31 +1,39 @@
 {
   "schemaVersion": 2,
-  "documentedAt": "2026-08-14",
+  "documentedAt": "2026-08-15",
   "toolchain": {
     "node": ">=22.19.0",
     "nodeCiExact": "22.19.0",
     "packageManager": "npm",
     "lockfile": "package-lock.json"
   },
+  "irisContext": {
+    "package": "@iris/context",
+    "repository": "ceyirelehe47/iris-context",
+    "commit": "323c66342b198c3c157ee0ef8c3bfd31c0c185b1",
+    "tree": "c4622a1b1cce3c4527b9268db427ba65d7550602",
+    "vendorPath": "../.iris-vendor/iris-context",
+    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into ./vendor/iris-context (preinstall). 323c663 is the reviewed iris-context#2/#4/#5 head on ceyirelehe47/iris-context:extract-context-module (Feature 1 + Feature 2 independent-review PASS). After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
+  },
   "pi": {
-    "currentDependencySource": "file_link_adjacent_fork_checkout",
+    "currentDependencySource": "vendored_exact_git_pin",
     "packages": {
-      "@iris/pi-agent-core": "file:../pi/packages/agent",
-      "@iris/pi-ai": "file:../pi/packages/ai",
-      "@iris/pi-storage-sqlite-node": "file:../pi/packages/storage/sqlite-node"
+      "@iris/pi-agent-core": "file:../.iris-vendor/pi/packages/agent",
+      "@iris/pi-ai": "file:../.iris-vendor/pi/packages/ai",
+      "@iris/pi-storage-sqlite-node": "file:../.iris-vendor/pi/packages/storage/sqlite-node"
     },
     "fork": {
-      "repository": "blueforst/pi",
+      "repository": "ceyirelehe47/pi",
       "baselineCommit": "ab5f8d88ee1d400c0c8fb5c50ac10b2f4a4851d1",
       "seamCommit": "edd724be790ec3a73b3a85bb051882a45acc5c72",
       "seamTree": "b0a87becb5add1f52c571e168918933b8cffe531",
-      "acceptedRuntimeRepository": "blueforst/pi",
+      "acceptedRuntimeRepository": "ceyirelehe47/pi",
       "acceptedRuntimeCommit": "66a3ea14616a438f47d3121979c0581c22ea64bb",
       "acceptedRuntimeTree": "a6bdb67ab97a087e3e0285746462545780ea19b3",
       "upstreamBaseCommit": "581d75a89cea21e50d6a26df840352f94427f633",
       "upstreamAuditBaselineCommit": "6f707eb36064e82af9c1320a7634f4dfad21049b",
-      "adoptionStatus": "file_link_local_development",
-      "syncNotes": "2026-08-14 (consume-iris-context seam refresh): seamCommit advanced to edd724be (post-Round-7 fork head, carries pi#77/#78/#79 JSONL matrix tests and the earendil-works scope rename of the three consumed packages). Dependency names in this lock are the @iris/* alias names used by package.json; the adjacent checkout declares the @earendil-works/* scope. acceptedRuntime (66a3ea1) and baseline (ab5f8d8) are unchanged and remain ancestors of the seam. Prior seam 48a05224 is an ancestor."
+      "adoptionStatus": "vendored_exact_git_pin",
+      "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): blueforst/pi does not exist on GitHub (HTTP 404). The real fork with the pinned seam is ceyirelehe47/pi (public); scripts/bootstrap-vendor-deps.mjs materializes it into ./vendor/pi at seamCommit/seamTree (preinstall) and builds ai/agent/sqlite-node. Dependency names in this lock are the @iris/* alias names used by package.json; the vendored checkout declares the @earendil-works/* scope. acceptedRuntime (66a3ea1) and baseline (ab5f8d8) are unchanged and remain ancestors of the seam. Prior seam 48a05224 is an ancestor."
     }
   },
   "magicContext": {

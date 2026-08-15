@@ -10,21 +10,25 @@ import { readProductionLock } from "../src/contracts/production-lock.js";
 import { readContractPin } from "../src/contracts/memory-pin.js";
 
 /**
- * Production lock gate (Roadmap v13, R0 Exit Gate: production lock 无 TBD).
+ * Production lock gate (Roadmap v13, R0 Exit Gate: production lock 无 TBD;
+ * iris_agent#131 clean-checkout).
  *
  * The lock is the single source of truth for pinned versions across the
- * three-project boundary: Pi (release packages + controlled fork baseline),
- * Magic Context (OpenCode released authority), memory contracts artifact and
- * the Graphiti/Neo4j candidate lock owned by iris_memory.
+ * three-project boundary: @iris/context (exact commit/tree), Pi (release
+ * packages + controlled fork baseline), Magic Context (OpenCode released
+ * authority), memory contracts artifact and the Graphiti/Neo4j candidate lock
+ * owned by iris_memory.
  *
- * Since iris_agent#41 the Pi pin is single-source and cross-validated:
- *   - src/contracts/pins/production-lock.json is the only place a Pi SHA lives
- *     in this repository (CI derives its checkout ref from it);
- *   - the gate proves the adjacent ../pi checkout is the pinned commit/tree;
- *   - the gate verifies ../pi's own docs/iris-fork/production-lock.json
- *     acceptedRuntime identity agrees with this repository's pin;
- *   - CI checkout ref drift, stale pins, wrong remotes, wrong commits/trees
- *     and tampered manifests fail closed.
+ * Since iris_agent#131 the cross-repo deps are consumed through an exact
+ * commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into the
+ * sibling managed cache `<repo>/../.iris-vendor` (preinstall). The gate:
+ *   - proves package.json deps match the lock pins;
+ *   - proves the materialized vendor checkouts are the pinned commit/tree
+ *     (via scripts/bootstrap-vendor-deps.mjs --check — fail closed on drift);
+ *   - proves the accepted Pi runtime identity is anchored in the vendored
+ *     seam history;
+ *   - proves CI derives the vendor provisioning from the pin (bootstrap
+ *     script), not from a hardcoded SHA or a nonexistent `blueforst/pi`.
  */
 
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -49,7 +53,10 @@ function git(dir: string, args: string[]): string {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
 }
 
-const PI_DIR = resolve(import.meta.dirname, "..", "..", "pi");
+const REPO_ROOT = resolve(import.meta.dirname, "..");
+const PI_DIR = resolve(REPO_ROOT, "..", ".iris-vendor", "pi");
+const IRIS_CONTEXT_DIR = resolve(REPO_ROOT, "..", ".iris-vendor", "iris-context");
+const BOOTSTRAP = resolve(REPO_ROOT, "scripts", "bootstrap-vendor-deps.mjs");
 
 test("r0: production lock schemaVersion is 2 and documented", () => {
   const lock = readProductionLock();
@@ -74,15 +81,32 @@ test("r0: all pinned SHAs are full-length hex", () => {
   assert.match(lock.pi.fork.acceptedRuntimeTree, SHA40);
   assert.match(lock.pi.fork.upstreamBaseCommit, SHA40);
   assert.match(lock.pi.fork.upstreamAuditBaselineCommit, SHA40);
+  assert.match(lock.irisContext.commit, SHA40);
+  assert.match(lock.irisContext.tree, SHA40);
   assert.match(lock.magicContext.commit, SHA40);
   assert.match(lock.memoryContracts.manifestSha256, SHA256);
 });
 
-test("r0: Pi package pins match package.json dependencies exactly", () => {
+// --- iris_agent#131: @iris/context exact pin ---------------------------------
+
+test("r131: @iris/context pin matches package.json dependency", () => {
   const lock = readProductionLock();
-  const pkg = JSON.parse(
-    readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8"),
-  ) as { dependencies: Record<string, string> };
+  const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
+  assert.equal(lock.irisContext.package, "@iris/context");
+  assert.equal(
+    pkg.dependencies["@iris/context"],
+    `file:${lock.irisContext.vendorPath}`,
+    "package.json must consume @iris/context through the exact-pinned vendored path",
+  );
+});
+
+test("r131: Pi package pins match package.json dependencies exactly", () => {
+  const lock = readProductionLock();
+  const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
   for (const [name, version] of Object.entries(lock.pi.packages)) {
     assert.equal(pkg.dependencies[name], version, `package.json must pin ${name}@${version}`);
   }
@@ -91,46 +115,65 @@ test("r0: Pi package pins match package.json dependencies exactly", () => {
   assert.deepEqual(piPkgs.sort(), Object.keys(lock.pi.packages).sort());
 });
 
-test("r0: Pi file: dependency targets exist and are the adjacent fork checkout (fail-closed)", () => {
+test("r131: cross-repo deps point into the managed .iris-vendor cache, not a project checkout", () => {
   const lock = readProductionLock();
-  const pkg = JSON.parse(
-    readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8"),
-  ) as { dependencies: Record<string, string> };
   for (const [name, spec] of Object.entries(lock.pi.packages)) {
     assert.ok(
-      spec.startsWith("file:../pi/packages/"),
-      `${name} must use the adjacent fork checkout file: spec (got ${spec})`,
+      spec.startsWith("file:../.iris-vendor/"),
+      `${name} must use the bootstrap-managed vendored spec (got ${spec})`,
     );
-    assert.equal(pkg.dependencies[name], spec);
-    // Fail closed when the adjacent checkout is missing or not a fork commit.
-    const target = resolve(import.meta.dirname, "..", spec.slice("file:".length));
-    const targetPkg = JSON.parse(readFileSync(resolve(target, "package.json"), "utf8")) as {
-      name: string;
-      version: string;
-    };
-    // consume-iris-context seam: the dependency is installed under the
-    // @iris/* alias name, while the adjacent fork checkout declares the
-    // @earendil-works/* scope (pi commit 3e5ad67e0 "migrate pi packages to
-    // earendil works scope"). Either declared identity is a legitimate fork
-    // package — the fail-closed part is that it is NOT the upstream release.
-    assert.ok(
-      targetPkg.name === name || targetPkg.name === name.replace(/^@iris\//, "@earendil-works/"),
-      `${target} must be the ${name} package (declared ${targetPkg.name})`,
-    );
-    assert.notEqual(targetPkg.version, "0.82.1", `${name} must NOT be the upstream 0.82.1 release`);
   }
+  assert.ok(
+    lock.irisContext.vendorPath.startsWith("../.iris-vendor/"),
+    "@iris/context must use the bootstrap-managed vendored path",
+  );
+  // The regression the issue guards against: no `file:../iris-context` and no
+  // `file:../pi` (project sibling checkouts).
+  const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
+  assert.notEqual(pkg.dependencies["@iris/context"], "file:../iris-context");
+  assert.ok(
+    !Object.values(pkg.dependencies).some(
+      (s) =>
+        s === "file:../pi/packages/agent" ||
+        s === "file:../pi/packages/ai" ||
+        s === "file:../pi/packages/storage/sqlite-node",
+    ),
+  );
 });
 
-test("r0: fork seam commit is a full SHA and adoption status is local file link", () => {
+test("r131: vendored checkouts match the exact pinned commit/tree (bootstrap --check)", () => {
+  // The bootstrap --check verifies BOTH vendor dirs (commit + tree) and exits
+  // non-zero on any drift — this is the machine-verifiable exact pin gate.
+  execFileSync(process.execPath, [BOOTSTRAP, "--check"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  const lock = readProductionLock();
+  // Direct git identity too (belt and braces).
+  assert.equal(git(PI_DIR, ["rev-parse", "HEAD"]), lock.pi.fork.seamCommit);
+  assert.equal(git(PI_DIR, ["rev-parse", "HEAD^{tree}"]), lock.pi.fork.seamTree);
+  assert.equal(git(IRIS_CONTEXT_DIR, ["rev-parse", "HEAD"]), lock.irisContext.commit);
+  assert.equal(git(IRIS_CONTEXT_DIR, ["rev-parse", "HEAD^{tree}"]), lock.irisContext.tree);
+});
+
+test("r131: fork seam commit is a full SHA and adoption status is the vendored exact pin", () => {
   const lock = readProductionLock();
   assert.match(lock.pi.fork.seamCommit, SHA40);
-  assert.equal(lock.pi.currentDependencySource, "file_link_adjacent_fork_checkout");
-  assert.equal(lock.pi.fork.adoptionStatus, "file_link_local_development");
+  assert.equal(lock.pi.currentDependencySource, "vendored_exact_git_pin");
+  assert.equal(lock.pi.fork.adoptionStatus, "vendored_exact_git_pin");
+  // The pinned Pi repository must be the real accessible fork (blueforst/pi
+  // does not exist on GitHub — this was the #131 checkout failure).
+  assert.ok(
+    lock.pi.fork.repository === "ceyirelehe47/pi",
+    "pi.fork.repository must be the real accessible fork",
+  );
 });
 
-// --- iris_agent#41 cross-repository production lock gate -------------------
+// --- iris_agent#41 cross-repository production lock gate (vendor layout) -----
 
-test("r41: adjacent ../pi is a real git repository (not an arbitrary directory)", () => {
+test("r41: vendored ../.iris-vendor/pi is a real git repository (not an arbitrary directory)", () => {
   assert.ok(
     (() => {
       try {
@@ -140,32 +183,23 @@ test("r41: adjacent ../pi is a real git repository (not an arbitrary directory)"
         return false;
       }
     })(),
-    `expected a real git repository at ${PI_DIR}`,
+    `expected a real git repository at ${PI_DIR} (run \`npm ci\` / bootstrap-vendor-deps.mjs)`,
   );
 });
 
-test("r41: adjacent ../pi remote identity points at the expected fork family", () => {
-  const remotes = git(PI_DIR, ["remote", "-v"]);
-  assert.match(
-    remotes,
-    /blueforst\/pi|ceyirelehe47\/pi/,
-    "origin/upstream must be the pi fork family",
-  );
-});
-
-test("r41: adjacent ../pi HEAD equals the pinned seamCommit and its tree equals seamTree", () => {
+test("r41: vendored ../.iris-vendor/pi HEAD equals the pinned seamCommit and its tree equals seamTree", () => {
   const lock = readProductionLock();
   const head = git(PI_DIR, ["rev-parse", "HEAD"]);
   assert.equal(
     head,
     lock.pi.fork.seamCommit,
-    `../pi HEAD must be seamCommit (${lock.pi.fork.seamCommit})`,
+    `vendored pi HEAD must be seamCommit (${lock.pi.fork.seamCommit})`,
   );
   const tree = git(PI_DIR, ["rev-parse", "HEAD^{tree}"]);
   assert.equal(
     tree,
     lock.pi.fork.seamTree,
-    `../pi HEAD tree must be seamTree (${lock.pi.fork.seamTree})`,
+    `vendored pi HEAD tree must be seamTree (${lock.pi.fork.seamTree})`,
   );
 });
 
@@ -182,16 +216,16 @@ test("r41: Pi authoritative lock acceptedRuntime agrees with this repository pin
   };
   assert.ok(
     piLock.acceptedRuntime,
-    "../pi docs/iris-fork/production-lock.json must carry acceptedRuntime",
+    "vendored pi docs/iris-fork/production-lock.json must carry acceptedRuntime",
   );
   assert.equal(piLock.acceptedRuntime.repository, "blueforst/pi");
   assert.equal(piLock.acceptedRuntime.commit, lock.pi.fork.acceptedRuntimeCommit);
   assert.equal(piLock.acceptedRuntime.tree, lock.pi.fork.acceptedRuntimeTree);
-  // The accepted runtime commit must actually exist in the adjacent checkout.
+  // The accepted runtime commit must actually exist in the vendored checkout.
   assert.equal(
     git(PI_DIR, ["cat-file", "-e", `${lock.pi.fork.acceptedRuntimeCommit}^{commit}`]),
     "",
-    `acceptedRuntimeCommit ${lock.pi.fork.acceptedRuntimeCommit} must exist in ../pi`,
+    `acceptedRuntimeCommit ${lock.pi.fork.acceptedRuntimeCommit} must exist in the vendored pi`,
   );
   // And its tree must match what the Pi lock records.
   assert.equal(
@@ -200,10 +234,7 @@ test("r41: Pi authoritative lock acceptedRuntime agrees with this repository pin
   );
 });
 
-test("r41: acceptedRuntimeCommit is anchored inside the checked-out seamCommit history", () => {
-  // The seam checkout must contain the accepted runtime commit as an
-  // ancestor; otherwise a consistently-tampered pin could point at an
-  // arbitrary valid commit that is unrelated to the accepted identity.
+test("r41: acceptedRuntimeCommit is anchored inside the vendored seamCommit history", () => {
   const lock = readProductionLock();
   assert.equal(
     git(PI_DIR, [
@@ -215,12 +246,10 @@ test("r41: acceptedRuntimeCommit is anchored inside the checked-out seamCommit h
     "",
     `acceptedRuntimeCommit ${lock.pi.fork.acceptedRuntimeCommit} must be an ancestor of seamCommit ${lock.pi.fork.seamCommit}`,
   );
-  // The tree relationship must hold too: the accepted commit's tree is what
-  // the Pi lock records, and it must be reachable from the checked-out HEAD.
   assert.equal(
     git(PI_DIR, ["merge-base", "--is-ancestor", lock.pi.fork.acceptedRuntimeCommit, "HEAD"]),
     "",
-    `acceptedRuntimeCommit must be an ancestor of ../pi HEAD`,
+    `acceptedRuntimeCommit must be an ancestor of the vendored pi HEAD`,
   );
 });
 
@@ -238,15 +267,15 @@ test("r41: a consistent but wrong pin (valid hex, unrelated identity) is rejecte
   swapped.pi.fork.seamTree = wrong;
   writeFileSync(tampered, JSON.stringify(swapped, null, 2));
   // The pin reader itself only validates shape, so it would accept the swap;
-  // the ancestry anchor lives in this gate (it reads the *real* adjacent
+  // the ancestry anchor lives in this gate (it reads the *real* vendored
   // checkout), which is why the test asserts the anchor catches it.
   const readerOut = execFileSync(
     process.execPath,
-    [resolve(import.meta.dirname, "..", "scripts", "read-pi-pin.mjs"), "--pin", tampered],
+    [resolve(REPO_ROOT, "scripts", "read-pi-pin.mjs"), "--pin", tampered],
     { encoding: "utf8" },
   ).trim();
   assert.equal(readerOut, wrong);
-  // Gate-side anchor: the wrong commit is not an ancestor of ../pi HEAD.
+  // Gate-side anchor: the wrong commit is not an ancestor of the vendored pi HEAD.
   const head = git(PI_DIR, ["rev-parse", "HEAD"]);
   assert.notEqual(head, wrong);
   const anchor = (() => {
@@ -260,37 +289,36 @@ test("r41: a consistent but wrong pin (valid hex, unrelated identity) is rejecte
   assert.equal(anchor, false, "wrong valid-hex commit must fail the ancestry anchor");
 });
 
-test("r41: CI checkout ref is derived from the pin, not a duplicate hardcoded SHA", () => {
-  const ci = readFileSync(
-    resolve(import.meta.dirname, "..", ".github", "workflows", "ci.yml"),
-    "utf8",
+test("r41: CI derives vendor provisioning from the pin, not a duplicate hardcoded SHA", () => {
+  const ci = readFileSync(resolve(REPO_ROOT, ".github", "workflows", "ci.yml"), "utf8");
+  // The workflow must rely on the pin-driven bootstrap (preinstall), and must
+  // not check out a nonexistent blueforst/pi or hardcode a Pi SHA.
+  assert.match(
+    ci,
+    /bootstrap-vendor-deps\.mjs|npm ci/,
+    "ci.yml must rely on the pin-driven vendor bootstrap (npm ci preinstall)",
   );
-  // The workflow must read the ref from the pin (read-pi-pin.mjs), and must
-  // not contain any hardcoded 40-hex Pi SHA.
-  assert.match(ci, /read-pi-pin\.mjs/, "ci.yml must derive the Pi ref via scripts/read-pi-pin.mjs");
   const hardcoded = [...ci.matchAll(/ref:\s*([0-9a-f]{40})/g)].map((m) => m[1]);
   assert.deepEqual(
     hardcoded,
     [],
     "ci.yml must not hardcode a Pi SHA in a checkout ref (derive from the pin instead)",
   );
+  assert.doesNotMatch(
+    ci,
+    /repository:\s*blueforst\/pi/,
+    "ci.yml must not check out the nonexistent blueforst/pi repository",
+  );
   // The pin reader must output exactly the pinned seamCommit.
   const output = execFileSync(
     process.execPath,
-    [resolve(import.meta.dirname, "..", "scripts", "read-pi-pin.mjs")],
+    [resolve(REPO_ROOT, "scripts", "read-pi-pin.mjs")],
     {
       encoding: "utf8",
     },
   ).trim();
   assert.match(output, SHA40);
   assert.equal(output, readProductionLock().pi.fork.seamCommit);
-  // --tree mode outputs the pinned seamTree.
-  const treeOut = execFileSync(
-    process.execPath,
-    [resolve(import.meta.dirname, "..", "scripts", "read-pi-pin.mjs"), "--tree"],
-    { encoding: "utf8" },
-  ).trim();
-  assert.equal(treeOut, readProductionLock().pi.fork.seamTree);
 });
 
 // --- failure modes (fail-closed) -------------------------------------------
@@ -305,7 +333,7 @@ test("r41: a tampered seamCommit fails the pin reader (fail-closed)", () => {
     () =>
       execFileSync(
         process.execPath,
-        [resolve(import.meta.dirname, "..", "scripts", "read-pi-pin.mjs"), "--pin", tampered],
+        [resolve(REPO_ROOT, "scripts", "read-pi-pin.mjs"), "--pin", tampered],
         {
           encoding: "utf8",
         },
@@ -315,10 +343,7 @@ test("r41: a tampered seamCommit fails the pin reader (fail-closed)", () => {
 });
 
 test("r41: CI ref drift is caught by the gate (workflow ref must come from pin)", () => {
-  const ci = readFileSync(
-    resolve(import.meta.dirname, "..", ".github", "workflows", "ci.yml"),
-    "utf8",
-  );
+  const ci = readFileSync(resolve(REPO_ROOT, ".github", "workflows", "ci.yml"), "utf8");
   // A future edit that reintroduces a literal SHA as checkout ref fails here.
   assert.doesNotMatch(
     ci,

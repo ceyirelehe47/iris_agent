@@ -18,7 +18,8 @@
 //                      developer branch. Implies --check for that dir.
 //   --fetch <remote>   Optional remote URL to fetch the accepted commit from
 //                      when the worktree's repository does not have it yet.
-//                      Defaults to https://github.com/blueforst/pi.git
+//                      Defaults to https://github.com/ceyirelehe47/pi.git (the real
+//                      accessible fork; blueforst/pi does not exist on GitHub)
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -27,7 +28,7 @@ import { resolve } from "node:path";
 const REPO_ROOT = resolve(import.meta.dirname, "..");
 const PIN_PATH = resolve(REPO_ROOT, "src", "contracts", "pins", "production-lock.json");
 const DEFAULT_PI_PATH = resolve(REPO_ROOT, "..", "pi");
-const DEFAULT_FETCH_URL = "https://github.com/blueforst/pi.git";
+const DEFAULT_FETCH_URL = "https://github.com/ceyirelehe47/pi.git";
 
 const pin = JSON.parse(readFileSync(PIN_PATH, "utf8"));
 const expectedCommit = pin.pi.fork.seamCommit;

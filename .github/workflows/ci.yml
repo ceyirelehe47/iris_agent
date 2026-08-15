@@ -14,45 +14,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Pi checkout ref is derived from the production lock (single source of
-      # truth, iris_agent#41): scripts/read-pi-pin.mjs prints the pinned
-      # seamCommit and the workflow uses it as the checkout ref. The lock
-      # gate below (npm run check -> test/production-lock.test.ts) then
-      # verifies the checked-out ../pi commit/tree against the same pin, so a
-      # stale pin, wrong remote, wrong commit/tree, or tampered manifest fails
-      # closed. No SHA is duplicated in this workflow.
-      - name: Read Pi pin from production lock
-        id: pi-pin
-        run: echo "PI_REF=$(node scripts/read-pi-pin.mjs)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          repository: blueforst/pi
-          path: pi-fork
-          ref: ${{ steps.pi-pin.outputs.PI_REF }}
-          # The production-lock gate resolves the accepted runtime commit and
-          # its ancestry inside ../pi; a shallow (depth 1) checkout lacks the
-          # parent objects and the gate would fail closed on every PR. Fetch
-          # full history so cat-file/merge-base work (mirrors the Pi-side
-          # unshallow gate fix).
-          fetch-depth: 0
-      - name: Move Pi fork checkout to adjacent path
-        run: mv pi-fork ../pi
+      # Cross-repo dependencies (@iris/context, @iris/pi-*) are consumed through
+      # EXACT commit/tree pins from src/contracts/pins/production-lock.json
+      # (iris_agent#131). The `npm ci` preinstall hook runs
+      # scripts/bootstrap-vendor-deps.mjs, which materializes the pinned
+      # checkouts into <repo>/../.iris-vendor and builds them — no manual
+      # sibling checkout, no nonexistent blueforst/pi checkout, no hardcoded
+      # SHA. test/production-lock.test.ts then verifies the materialized
+      # vendor dirs against the same pin (fail closed on drift/tamper).
       - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
           cache: npm
-      - name: Install Pi fork workspace
-        run: npm ci
-        working-directory: ../pi
-      - name: Build Pi fork packages (ai/agent/sqlite-node)
-        run: npm run build
-        working-directory: ../pi
+      # npm ci runs the preinstall bootstrap (fetch+build vendored deps at
+      # exact pins), then installs iris_agent's own dependencies.
       - run: npm ci
       # Repository hygiene guard (iris_agent#86): reject tracked node_modules
       # and absolute /tmp-style symlinks before running any build.
       - run: node scripts/check-repo-hygiene.mjs
-      # Single aggregate check (format/lint/typecheck/unit + subprocess +
-      # migration/crash/build/CLI/dist smoke) so CI never drifts from the
-      # repository's own check contract — including the subprocess suite that
-      # exercises the real long-lived Host.
+      # Single aggregate check (format/lint/typecheck/unit + clean-layout +
+      # production-lock + subprocess + migration/crash/build/CLI/dist smoke) so
+      # CI never drifts from the repository's own check contract — including
+      # the subprocess suite that exercises the real long-lived Host.
       - run: npm run check
