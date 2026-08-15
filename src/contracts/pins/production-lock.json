@@ -1,6 +1,17 @@
 {
   "schemaVersion": 2,
   "documentedAt": "2026-08-15",
+  "dshRuntime": {
+    "packages": {
+      "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+      "@deepseek-ai/dsh-llm": "0.1.0-rc.6"
+    },
+    "upstream": {
+      "repository": "deepseek-ai/deepseek-harness",
+      "release": "0.1.0-rc.6"
+    },
+    "syncNotes": "2026-08-15 (iris_agent#128 real DSH ingress): exact-pinned DSH packages consumed by src/runtime/dsh-adapter.ts (Session.id / Message.id / event.seq -> DshMessageRef). No floating 'latest'; upgrades require explicit release review."
+  },
   "toolchain": {
     "node": ">=22.19.0",
     "nodeCiExact": "22.19.0",
@@ -10,10 +21,10 @@
   "irisContext": {
     "package": "@iris/context",
     "repository": "ceyirelehe47/iris-context",
-    "commit": "323c66342b198c3c157ee0ef8c3bfd31c0c185b1",
-    "tree": "c4622a1b1cce3c4527b9268db427ba65d7550602",
+    "commit": "483f7738f325d02bbab885e10c5435889dfa589d",
+    "tree": "59154fc0cbaf661e221e19ce165be498f3ce971d",
     "vendorPath": "../.iris-vendor/iris-context",
-    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into <repo>/../.iris-vendor/iris-context (preinstall). 323c663 is the reviewed iris-context#2/#4/#5 head on ceyirelehe47/iris-context:extract-context-module (Feature 1 + Feature 2 independent-review PASS). After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
+    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout + #130): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into <repo>/../.iris-vendor/iris-context (preinstall). 483f773 is the reviewed iris-context#2/#4/#5 head + iris_agent#130 admitGenericRuntimeSource on ceyirelehe47/iris-context:extract-context-module. After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
   },
   "pi": {
     "currentDependencySource": "vendored_exact_git_pin",

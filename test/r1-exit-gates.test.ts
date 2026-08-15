@@ -6,7 +6,7 @@ import test from "node:test";
 
 import assert from "node:assert/strict";
 
-import { isDshMessageRef } from "@iris/context/contracts";
+import { isGenericSourceRef } from "@iris/context/contracts";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
@@ -145,17 +145,24 @@ test("r1 gate3: mock slice commits canonical units in order, exactly-once", asyn
     // exactly-once: unitId 唯一（同一 contextId+sourceRef 派生确定性 unitId）。
     const unitIds = new Set(units.map((unit) => unit.unitId));
     assert.equal(unitIds.size, units.length, "unitId must be unique per unit");
-    // runtime-origin 单元：DshMessageRef.messageId 唯一（每条消息恰好一个单元）。
-    const messageIds = new Set(
+    // runtime-origin 单元：sourceId（Pi entryId）唯一（每条消息恰好一个单元）。
+    // iris_agent#130：Pi 兼容来源是通用 ContextUnitSourceRefV1（非 DshMessageRef）。
+    const sourceIds = new Set(
       units.map((unit) => {
         assert.ok(
-          isDshMessageRef(unit.sourceRef),
-          `unit ${unit.unitId} must carry a DshMessageRef sourceRef`,
+          isGenericSourceRef(unit.sourceRef),
+          `unit ${unit.unitId} must carry a generic source ref, got ${JSON.stringify(unit.sourceRef)}`,
         );
-        return unit.sourceRef.messageId;
+        const ref = unit.sourceRef as { sourceSchemaId?: string; sourceId?: string };
+        assert.equal(
+          ref.sourceSchemaId,
+          "iris.pi_archive_entry.v1",
+          `unit ${unit.unitId} must be a Pi compatibility source`,
+        );
+        return ref.sourceId;
       }),
     );
-    assert.equal(messageIds.size, units.length, "messageId must be unique per unit");
+    assert.equal(sourceIds.size, units.length, "sourceId must be unique per unit");
 
     // 顺序：listContextUnits 按 context_seq 返回；首个单元是 user。
     const first = units[0];
@@ -194,16 +201,27 @@ test("r1 gate4: no synthetic repair — every unit maps to a committed DSH messa
     });
     const units = result.contextUnits;
 
-    // 每个 runtime-origin 单元必须携带稳定 DshMessageRef（sessionId+messageId）；
-    // 无 synthetic 单元（无凭空生成的 assistant/toolResult）。
+    // 每个 Pi runtime-origin 单元必须携带稳定的通用 source ref
+    // （sourceSchemaId=iris.pi_archive_entry.v1，sourceId 非空）—— 不是
+    // DshMessageRef（iris_agent#130）；无 synthetic 单元（无凭空生成的
+    // assistant/toolResult）。
     for (const unit of units) {
       assert.ok(
-        isDshMessageRef(unit.sourceRef),
-        `unit ${unit.unitId} must carry a DshMessageRef sourceRef, got ${JSON.stringify(unit.sourceRef)}`,
+        isGenericSourceRef(unit.sourceRef),
+        `unit ${unit.unitId} must carry a generic source ref, got ${JSON.stringify(unit.sourceRef)}`,
+      );
+      const ref = unit.sourceRef as {
+        sourceSchemaId?: string;
+        sourceId?: string;
+      };
+      assert.equal(
+        ref.sourceSchemaId,
+        "iris.pi_archive_entry.v1",
+        `unit ${unit.unitId} must be a Pi compatibility source`,
       );
       assert.ok(
-        unit.sourceRef.sessionId.length > 0 && unit.sourceRef.messageId.length > 0,
-        `unit ${unit.unitId} DshMessageRef must have non-empty sessionId/messageId`,
+        (ref.sourceId ?? "").length > 0,
+        `unit ${unit.unitId} Pi sourceId must be non-empty`,
       );
     }
 

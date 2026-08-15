@@ -172,21 +172,21 @@ try {
   // list entry is what gives the gate its teeth.
   const bridgePath = join(worktree, "src", "runtime", "iris-bridge.ts");
   const originalBridge = fs.readFileSync(bridgePath, "utf8");
-  // Regression: the bridge maps the user message to a WRONG messageId (not
-  // the Pi entry id). Only test/iris-bridge.test.ts asserts messageId == Pi
+  // Regression: the bridge maps the user message to a WRONG sourceId (not
+  // the Pi entry id). Only test/iris-bridge.test.ts asserts sourceId == Pi
   // entry id (the unique message-identity mapping check); r1/host tests only
-  // check non-empty sessionId/messageId and still pass, so removing the
-  // listed test lets the regression escape (proving the entry is load-bearing).
+  // check non-empty identity fields and still pass, so removing the listed
+  // test lets the regression escape (proving the entry is load-bearing).
   const regression = originalBridge.replace(
-    'this.admit(event.entryId, "iris.semantic.context_message.user.v1", payload, "user");',
-    'this.admit(`probe-${event.entryId}`, "iris.semantic.context_message.user.v1", payload, "user"); // SENSITIVITY PROBE: messageId mapping broken',
+    'this.admit(event.entryId, "iris.semantic.context_message.user.v1", payload,',
+    'this.admit(`probe-${event.entryId}`, "iris.semantic.context_message.user.v1", payload,',
   );
   fs.writeFileSync(bridgePath, regression);
   const caught = run("npx tsx --test test/iris-bridge.test.ts", worktree);
   expectFailure(
-    "iris-bridge catches the messageId-mapping regression",
+    "iris-bridge catches the sourceId-mapping regression",
     caught,
-    "DshMessageRef.messageId must equal the Pi entry id",
+    "Pi compatibility sourceId must equal the Pi entry id",
   );
   fs.writeFileSync(bridgePath, originalBridge);
 

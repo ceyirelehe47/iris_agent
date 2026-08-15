@@ -5,6 +5,14 @@ export const PRODUCTION_LOCK = pin;
 export interface ProductionLock {
   schemaVersion: number;
   documentedAt: string;
+  dshRuntime: {
+    packages: Record<string, string>;
+    upstream: {
+      repository: string;
+      release: string;
+    };
+    syncNotes?: string;
+  };
   toolchain: {
     node: string;
     nodeCiExact: string;
@@ -63,6 +71,10 @@ export function readProductionLock(): ProductionLock {
   return {
     schemaVersion: pin.schemaVersion,
     documentedAt: pin.documentedAt,
+    dshRuntime: {
+      packages: { ...pin.dshRuntime.packages },
+      upstream: { ...pin.dshRuntime.upstream },
+    },
     toolchain: { ...pin.toolchain },
     irisContext: { ...pin.irisContext },
     pi: {

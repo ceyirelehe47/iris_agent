@@ -102,6 +102,30 @@ test("r131: @iris/context pin matches package.json dependency", () => {
   );
 });
 
+test("r131: DSH runtime packages are exact-pinned and match package.json", () => {
+  const lock = readProductionLock();
+  const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
+  for (const [name, version] of Object.entries(lock.dshRuntime.packages)) {
+    assert.equal(
+      pkg.dependencies[name],
+      version,
+      `package.json must pin DSH runtime ${name}@${version} (no floating latest)`,
+    );
+    assert.match(version, /^0\.1\.0-rc\.6$/, `${name} must be the exact pinned DSH release`);
+  }
+  assert.equal(lock.dshRuntime.upstream.repository, "deepseek-ai/deepseek-harness");
+  assert.equal(lock.dshRuntime.upstream.release, "0.1.0-rc.6");
+  // The real DSH ingress adapter must exist and consume the pinned packages.
+  assert.ok(
+    readFileSync(resolve(REPO_ROOT, "src", "runtime", "dsh-adapter.ts"), "utf8").includes(
+      "@deepseek-ai/dsh-session",
+    ),
+    "src/runtime/dsh-adapter.ts must consume the pinned DSH session package",
+  );
+});
+
 test("r131: Pi package pins match package.json dependencies exactly", () => {
   const lock = readProductionLock();
   const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8")) as {
