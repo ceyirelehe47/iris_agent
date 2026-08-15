@@ -264,6 +264,7 @@ function ensureVendorBuilds() {
       runNpm(CACHE_IRIS_CONTEXT, ["ci", "--no-audit", "--no-fund", "--include=dev"]);
       runNpm(CACHE_IRIS_CONTEXT, ["run", "build"]);
     },
+    IRIS_CONTEXT_ARTIFACT_DIRS,
   );
   ensureVendorBuild(
     "pi",
@@ -275,6 +276,7 @@ function ensureVendorBuilds() {
         runNpm(resolve(CACHE_PI, pkg), ["run", "build"]);
       }
     },
+    PI_ARTIFACT_DIRS,
   );
 }
 

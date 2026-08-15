@@ -10,7 +10,7 @@
  * 直接单测 scripts/vendor-build-manifest.mjs（纯文件系统函数，不执行 npm）。
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -317,5 +317,37 @@ test("A6: a non-git directory at a managed vendor path fails closed (never recur
     assert.ok(existsSync(join(vendor, "pi", "user-data.txt")), "foreign dir must NOT be deleted");
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("A6 regression: bootstrap's ensureVendorBuild calls must pass artifact dirs to writeBuildStamp", () => {
+  // 回归门：artifact manifest 必须只 hash 构建产物目录（dist），不 hash 整个
+  // vendor 检出（.git/源码）。若 ensureVendorBuild 调用漏传 artifactDirs →
+  // stamp 会包含 .git 等非产物（stamp 持续失效 / --check 误报）—— 本门失败。
+  const bootstrap = readFileSync(join(REPO_ROOT, "scripts", "bootstrap-vendor-deps.mjs"), "utf8");
+  // ensureVendorBuild(name, dir, pin, buildSteps, artifactDirs) 的所有调用
+  // 都必须以 ARTIFACT_DIRS 常量结尾（第 5 个参数）。
+  const calls = [...bootstrap.matchAll(/ensureVendorBuild\(\s*"([a-z-]+)"/g)];
+  assert.ok(calls.length >= 2, "bootstrap must call ensureVendorBuild for both vendors");
+  for (const call of calls) {
+    const name = call[1];
+    // 括号配对找调用结束（buildSteps 闭包内含 `);`，不能用 indexOf(");")）。
+    let depth = 0;
+    let end = call.index;
+    for (; end < bootstrap.length; end += 1) {
+      const ch = bootstrap[end];
+      if (ch === "(") depth += 1;
+      if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    const args = bootstrap.slice(call.index, end + 1);
+    assert.match(
+      args,
+      /ARTIFACT_DIRS/,
+      `ensureVendorBuild("${name}") must pass an artifact dirs argument ` +
+        "(stamp must hash build output only, never the whole vendor checkout)",
+    );
   }
 });
