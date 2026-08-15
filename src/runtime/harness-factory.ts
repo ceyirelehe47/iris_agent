@@ -1,6 +1,6 @@
 // Production harness composition for IrisHost (pure projection path). The
 // provider-visible Context comes ONLY from @iris/context's validated
-// ContextGenerationV2 via the Provider Renderer; the m0/m1 ContextRenderer is
+// ContextGenerationV3 via the Provider Renderer; the m0/m1 ContextRenderer is
 // gone (Notion 01 Context Assembly｜Provider Wire Terminology Override).
 import { createHash } from "node:crypto";
 
@@ -141,7 +141,7 @@ export function createIrisHarness(options: CreateIrisHarnessOptions): {
       const generation = irisContext.getCurrentGeneration();
       if (generation === null) {
         throw new Error(
-          "IRIS_CONTEXT_TRANSFORM_UNAVAILABLE: no validated ContextGenerationV2 at provider boundary",
+          "IRIS_CONTEXT_TRANSFORM_UNAVAILABLE: no validated ContextGenerationV3 at provider boundary",
         );
       }
       const rendered = renderGenerationForProvider(generation);

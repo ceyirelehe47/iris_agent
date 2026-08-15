@@ -3,7 +3,7 @@
  *
  * iris_agent 是 Persona/System/Capability 权威 source 的 owner；BUST full
  * rebuild 时 @iris/context 的 BustCoordinator 调用 contributor.project() 冻结
- * 投影为 pre-projected ContextUnitV2（P0–P2）。本 seam 只提供 frozen
+ * 投影为 pre-projected ContextUnit（P0–P2）。本 seam 只提供 frozen
  * snapshot / identity / hash + invalidation，不允许直接 push/splice
  * generation（Notion Composition & Plugin Model v29）。
  *
