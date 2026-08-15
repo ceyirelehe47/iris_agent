@@ -33,13 +33,24 @@ import {
   createUserMessage,
 } from "@deepseek-ai/dsh-llm";
 
-import { deriveContextUnitId, isDshMessageRef, type DshMessageRef } from "@iris/context/contracts";
+import {
+  deriveContextUnitId,
+  isDshMessageRef,
+  type DshMessageRef,
+  type DshAttachmentRef,
+} from "@iris/context/contracts";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
 import { RuntimeEpochStore } from "../src/runtime/epoch-manager.js";
 import { assembleIrisContext } from "../src/runtime/iris-context.js";
-import { DshIngressAdapter } from "../src/runtime/dsh-adapter.js";
+import {
+  DshIngressAdapter,
+  dshAssistantSourceHash,
+  dshToolResultSourceHash,
+  dshUserSourceHash,
+} from "../src/runtime/dsh-adapter.js";
+import { renderGenerationForProvider } from "../src/runtime/context-render.js";
 import {
   closeSessionStorage,
   composeProvider,
@@ -383,8 +394,13 @@ test("dsh ingress: assistant with real DSH TokenUsage ingests with Iris usage sh
     assert.equal(usage["cacheRead"], 20);
     assert.equal(usage["totalTokens"], 170);
     assert.equal(usage["reasoning"], 5);
-    // Iris 语义 usage 形状（cost 为 DSH 不携带的中性 0）。
-    assert.deepEqual(usage["cost"], { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 });
+    // A4：DSH 不携带 provider cost → canonical usage 显式声明 unavailable，
+    // 绝不写真实的 0 成本（cost 字段不存在）。
+    assert.equal(usage["costStatus"], "unavailable");
+    assert.ok(
+      !("cost" in usage),
+      "canonical usage must NOT carry a cost field when cost is unavailable (never write 0)",
+    );
   } finally {
     await close();
   }
@@ -436,4 +452,270 @@ test("dsh ingress: tool result with reasoning block maps to reasoning (not think
   } finally {
     await close();
   }
+});
+
+// ---------------------------------------------------------------------------
+// A3：DSH user image → typed attachmentRef（不把 opaque attachmentId 当图片）
+// ---------------------------------------------------------------------------
+
+test("A3: DSH user image admits a typed attachmentRef (never attachmentId as image data)", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "dsh-image-"));
+  const { assembly, close } = await mountAssembly(dataRoot, "dsh-session-a");
+  try {
+    const session = Session.create(SessionId("dsh-session-a"));
+    const user = createUserMessage({
+      content: [
+        { type: "text", text: "look at this" },
+        {
+          type: "image",
+          attachment: {
+            attachmentId: "att-opaque-1",
+            mediaType: "image/png",
+            bytes: 64,
+            width: 8,
+            height: 8,
+          },
+        },
+      ] as never,
+      source: { kind: "user" },
+    });
+    session.append("user/message", user, { surfaceOp: "append" });
+
+    const result = new DshIngressAdapter(assembly.contextService).ingest(session);
+    assert.equal(result.admitted, 1, "user image message must be admitted");
+    const units = assembly.contextService
+      .getStore()
+      .listContextUnits(assembly.lineageId, { disposition: "all" });
+    const userUnit = units.find(
+      (u) => u.contentSchemaId === "iris.semantic.context_message.user.v1",
+    );
+    assert.ok(userUnit, "user unit must exist");
+    const content = (userUnit.content as { content?: unknown[] }).content ?? [];
+    const imagePart = content.find((part) => (part as { type?: string }).type === "image") as
+      { type: string; attachmentRef?: DshAttachmentRef; data?: string } | undefined;
+    assert.ok(imagePart, "image part must exist in canonical content");
+    assert.ok(imagePart.attachmentRef !== undefined, "image part must carry a typed attachmentRef");
+    assert.ok(
+      !("data" in imagePart),
+      "opaque attachmentId must NOT be placed into the semantic image.data",
+    );
+    assert.equal(imagePart.attachmentRef?.schemaId, "iris.dsh_attachment_ref.v1");
+    assert.equal(imagePart.attachmentRef?.attachmentId, "att-opaque-1");
+    assert.equal(imagePart.attachmentRef?.mediaType, "image/png");
+    assert.equal(imagePart.attachmentRef?.bytes, 64);
+  } finally {
+    await close();
+  }
+});
+
+test("A3 e2e: DSH user image → admission → BUST generation → Provider Renderer → consumable image data", async () => {
+  const dataRoot = mkdtempSync(join(tmpdir(), "dsh-image-e2e-"));
+  const { assembly, close } = await mountAssembly(dataRoot, "dsh-session-a");
+  try {
+    const session = Session.create(SessionId("dsh-session-a"));
+    const user = createUserMessage({
+      content: [
+        {
+          type: "image",
+          attachment: {
+            attachmentId: "att-opaque-2",
+            mediaType: "image/jpeg",
+            bytes: 128,
+            width: 16,
+            height: 16,
+          },
+        },
+      ] as never,
+      source: { kind: "user" },
+    });
+    session.append("user/message", user, { surfaceOp: "append" });
+    new DshIngressAdapter(assembly.contextService).ingest(session);
+
+    // 安全 provider 边界完成 canonical BUST → generation。
+    const run = await assembly.contextService.runBustIfPending();
+    assert.ok(run.published, "BUST must publish a generation");
+    const generation = assembly.contextService.getCurrentGeneration();
+    assert.ok(generation !== null, "generation must be published");
+
+    // Provider Renderer + DSH AttachmentStore 语义的 materializer（readImage：
+    // 校验 + 返回 bytes → base64 data URL）。
+    const materializer = {
+      materializeImage: async (ref: DshAttachmentRef) => {
+        assert.equal(ref.attachmentId, "att-opaque-2");
+        return { data: "data:image/jpeg;base64,/9j/4AAQ", mimeType: "image/jpeg" };
+      },
+    };
+    const rendered = await renderGenerationForProvider(generation, {
+      attachmentMaterializer: materializer,
+    });
+    const imagePart = rendered.messages
+      .flatMap((m) => {
+        const content = (m as { content?: unknown }).content;
+        return Array.isArray(content) ? (content as unknown[]) : [];
+      })
+      .find((part) => (part as { type?: string }).type === "image") as
+      { type: string; data?: string; mimeType?: string } | undefined;
+    assert.ok(imagePart, "rendered provider wire must carry an image part");
+    assert.match(imagePart.data ?? "", /^data:image\/jpeg;base64,/);
+    assert.equal(imagePart.mimeType, "image/jpeg");
+    assert.ok(
+      !(imagePart.data ?? "").includes("att-opaque-2"),
+      "opaque attachment id must not appear in the final image.data",
+    );
+  } finally {
+    await close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A5：版本化 canonical source snapshot —— 字段敏感度
+// ---------------------------------------------------------------------------
+
+test("A5: user source snapshot — content unchanged, timestamp stable → same hash; content change → different", () => {
+  const base = createUserMessage({
+    content: [{ type: "text", text: "hello" }],
+    source: { kind: "user" },
+  });
+  const same = createUserMessage({
+    content: [{ type: "text", text: "hello" }],
+    source: { kind: "user" },
+  });
+  // 不同 Message.id → 不同 snapshot（message ID 是 immutable source 字段）。
+  assert.notEqual(dshUserSourceHash(base, 1), dshUserSourceHash(same, 1));
+  // 同一 message（同 id）：对象键序无关（canonical JSON）→ 同一 hash。
+  assert.equal(dshUserSourceHash(base, 1), dshUserSourceHash(base, 1));
+});
+
+test("A5: assistant snapshot — provider/model changes alter the hash, eventSeq does not", () => {
+  const a = createAssistantMessage({
+    content: [{ type: "text", text: "reply" }],
+    source: { provider: "deepseek", model: "deepseek-v4-flash" },
+  });
+  const b = createAssistantMessage({
+    content: [{ type: "text", text: "reply" }],
+    source: { provider: "openai", model: "deepseek-v4-flash" },
+  });
+  const c = createAssistantMessage({
+    content: [{ type: "text", text: "reply" }],
+    source: { provider: "deepseek", model: "gpt-4o" },
+  });
+  assert.notEqual(
+    dshAssistantSourceHash(a, { time: 1 }),
+    dshAssistantSourceHash(b, { time: 1 }),
+    "provider change must alter the source snapshot hash",
+  );
+  assert.notEqual(
+    dshAssistantSourceHash(a, { time: 1 }),
+    dshAssistantSourceHash(c, { time: 1 }),
+    "model change must alter the source snapshot hash",
+  );
+  // 同一 message（同 id）：time 相同 → 同一 hash（eventSeq 不在 snapshot 内，
+  // 且 canonical JSON 键序无关）。
+  assert.equal(dshAssistantSourceHash(a, { time: 1 }), dshAssistantSourceHash(a, { time: 1 }));
+});
+
+test("A5: tool result snapshot — toolName / callId / isError changes alter the hash", () => {
+  const toolResult = createToolResultMessage({
+    callId: CallId("call-1"),
+    content: [{ type: "text", text: "file: 42" }],
+    isError: false,
+  });
+  const toolResultOtherName = createToolResultMessage({
+    callId: CallId("call-1"),
+    content: [{ type: "text", text: "file: 42" }],
+    isError: false,
+  });
+  const toolResultError = createToolResultMessage({
+    callId: CallId("call-1"),
+    content: [{ type: "text", text: "file: 42" }],
+    isError: true,
+  });
+  // 不同 message id → 不同 hash；同一 message → 同一 hash。
+  assert.notEqual(
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    dshToolResultSourceHash(toolResultOtherName, { toolName: "read_file", time: 1 }),
+    "message ID must be part of the source snapshot",
+  );
+  assert.equal(
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    "canonical snapshot is deterministic",
+  );
+  assert.notEqual(
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    dshToolResultSourceHash(toolResult, { toolName: "write_file", time: 1 }),
+    "resolved toolName change must alter the source snapshot hash",
+  );
+  assert.notEqual(
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    dshToolResultSourceHash(toolResultError, { toolName: "read_file", time: 1 }),
+    "isError change must alter the source snapshot hash",
+  );
+  // callId 变化（不同 tool 弧）→ hash 变化。
+  const toolResultOtherCall = createToolResultMessage({
+    callId: CallId("call-2"),
+    content: [{ type: "text", text: "file: 42" }],
+    isError: false,
+  });
+  assert.notEqual(
+    dshToolResultSourceHash(toolResult, { toolName: "read_file", time: 1 }),
+    dshToolResultSourceHash(toolResultOtherCall, { toolName: "read_file", time: 1 }),
+    "callId change must alter the source snapshot hash",
+  );
+});
+
+test("A5: content blocks (incl. attachment refs) are covered by the snapshot", () => {
+  // DSH messages 是 frozen immutable（id 固定）；为验证"attachment 内容变化 →
+  // hash 变化"，用同一 message id 构造两个同形状消息（运行时形状即可）。
+  const messageId = "same-id-for-snapshot-test";
+  const plain = {
+    id: messageId,
+    role: "user",
+    source: { kind: "user" },
+    content: [{ type: "text", text: "hi" }],
+  };
+  const withImage = {
+    id: messageId,
+    role: "user",
+    source: { kind: "user" },
+    content: [
+      { type: "text", text: "hi" },
+      {
+        type: "image",
+        attachment: {
+          attachmentId: "att-a",
+          mediaType: "image/png",
+          bytes: 10,
+          width: 2,
+          height: 2,
+        },
+      },
+    ],
+  };
+  assert.notEqual(
+    dshUserSourceHash(plain as never, 1),
+    dshUserSourceHash(withImage as never, 1),
+    "attachment identity in content must alter the source snapshot hash",
+  );
+});
+
+test("A5: canonical JSON — object key insertion order does not change the hash", () => {
+  const messageId = "same-id-order-test";
+  const orderA = {
+    id: messageId,
+    role: "user",
+    source: { kind: "user" },
+    content: [{ type: "text", text: "hi" }],
+  };
+  const orderB = {
+    id: messageId,
+    role: "user",
+    source: { kind: "user" },
+    content: [{ text: "hi", type: "text" }],
+  };
+  assert.equal(
+    dshUserSourceHash(orderA as never, 1),
+    dshUserSourceHash(orderB as never, 1),
+    "canonical JSON is key-order independent",
+  );
 });

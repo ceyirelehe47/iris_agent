@@ -21,10 +21,10 @@
   "irisContext": {
     "package": "@iris/context",
     "repository": "ceyirelehe47/iris-context",
-    "commit": "483f7738f325d02bbab885e10c5435889dfa589d",
-    "tree": "59154fc0cbaf661e221e19ce165be498f3ce971d",
+    "commit": "e83261dae3baf3e987a380316d70df5e35f54965",
+    "tree": "db6d3d173ee2372096d015478549472940effc8c",
     "vendorPath": "../.iris-vendor/iris-context",
-    "syncNotes": "2026-08-15 (iris_agent#131 clean-checkout + #130): @iris/context is consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into <repo>/../.iris-vendor/iris-context (preinstall). 483f773 is the reviewed iris-context#2/#4/#5 head + iris_agent#130 admitGenericRuntimeSource on ceyirelehe47/iris-context:extract-context-module. After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
+    "syncNotes": "2026-08-15 (iris_agent#132 A1-A5): @iris/context consumed through an EXACT commit/tree pin materialized by scripts/bootstrap-vendor-deps.mjs into <repo>/../.iris-vendor/iris-context (preinstall). e83261d is the iris-context#6 head after A1-A5 hardening (canonical identity encoder, PiArchiveEntryRef, DSH attachment ref, usage cost status, schema/codegen). After the upstream iris-context PR merges, update this pin to the blueforst merge commit; the pin must never float to an unrelated main HEAD."
   },
   "pi": {
     "currentDependencySource": "vendored_exact_git_pin",

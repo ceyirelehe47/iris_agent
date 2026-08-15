@@ -36,9 +36,14 @@
 import { createHash } from "node:crypto";
 
 import type { ContextService } from "@iris/context";
-import type { JsonValue } from "@iris/context/contracts";
+import { canonicalJson, type JsonValue } from "@iris/context/contracts";
 import type { Session } from "@deepseek-ai/dsh-session";
-import type { Message, UserMessage } from "@deepseek-ai/dsh-llm";
+import type {
+  AssistantMessage,
+  Message,
+  ToolResultMessage,
+  UserMessage,
+} from "@deepseek-ai/dsh-llm";
 import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 
 export type RuntimeSourceKind = "user" | "plugin" | "model" | "tool" | "other";
@@ -56,6 +61,14 @@ export interface DshIngestResult {
  * reasoning 块的映射随目标语义 schema 变化：user/assistant content 接受
  * `thinking`，tool_result content 接受 `reasoning` —— 传 `toolResult: true`
  * 时按 `reasoning` 映射（否则 `thinking`）。
+ *
+ * image 块（A3）：DSH `ImageBlock.attachment` 是 content-addressed 不可变
+ * attachment 的 **typed reference**（attachmentId 是 durable 存储标识，不是
+ * 图片字节/base64/data URL）。Iris canonical content 保存该 typed
+ * `iris.dsh_attachment_ref.v1`（含持久元数据 bytes/width/height），由
+ * Provider Renderer 在渲染时经 AttachmentStore.readImage 物化为 provider 可
+ * 消费的图片 data（fail-closed）。opaque attachmentId 绝不进入最终
+ * image.data。
  */
 export function dshContentToSemanticParts(
   content: readonly ContentBlock[],
@@ -76,8 +89,15 @@ export function dshContentToSemanticParts(
       case "image":
         parts.push({
           type: "image",
-          data: block.attachment.attachmentId,
-          mimeType: block.attachment.mediaType,
+          attachmentRef: {
+            schemaId: "iris.dsh_attachment_ref.v1",
+            attachmentId: block.attachment.attachmentId,
+            mediaType: block.attachment.mediaType,
+            bytes: block.attachment.bytes,
+            width: block.attachment.width,
+            height: block.attachment.height,
+            ...(block.attachment.name !== undefined ? { name: block.attachment.name } : {}),
+          },
         });
         break;
       case "tool-call": {
@@ -196,7 +216,7 @@ export class DshIngressAdapter {
         content: dshContentToSemanticParts(message.content),
       },
       runtimeSourceKind: "user",
-      sourceHash: messageSourceHash(message),
+      sourceHash: dshUserSourceHash(message, time),
     });
     return true;
   }
@@ -226,7 +246,10 @@ export class DshIngressAdapter {
         timestamp: time,
       },
       runtimeSourceKind: "model",
-      sourceHash: messageSourceHash(event.message),
+      sourceHash: dshAssistantSourceHash(event.message as AssistantMessage, {
+        usage: event.usage,
+        time,
+      }),
     });
     return true;
   }
@@ -267,20 +290,26 @@ export class DshIngressAdapter {
         timestamp: time,
       },
       runtimeSourceKind: "tool",
-      sourceHash: messageSourceHash(event.message),
+      sourceHash: dshToolResultSourceHash(event.message as ToolResultMessage, {
+        toolName,
+        time,
+      }),
     });
     return true;
   }
 }
 
 /**
- * DSH TokenUsage → Iris assistant/tool_result 语义 usage 形状（review F4
- * BLOCKING）。DSH 计费字段为 inputTokens/outputTokens/cacheReadTokens/
- * cacheWriteTokens/reasoningTokens；Iris 语义 schema 要求
- * {input,output,cacheRead,cacheWrite,totalTokens,cost{...}} 且
- * additionalProperties:false —— 原样透传 DSH TokenUsage 会在真实带计费的
- * assistant 消息上 fail-closed。cost 是 provider 定价派生字段，DSH 不携带；
- * 以 0 表示（诚实的中性值），token 计数按 DSH 实值转换。
+ * DSH TokenUsage → Iris 语义 usage 形状（review F4 BLOCKING + A4）。
+ * DSH 计费字段为 inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens/
+ * reasoningTokens；Iris 语义 schema 要求 {input,output,cacheRead,cacheWrite,
+ * totalTokens,costStatus?}（cost 可选）且 additionalProperties:false —— 原样
+ * 透传 DSH TokenUsage 会在真实带计费的 assistant 消息上 fail-closed。
+ *
+ * A4 知识状态：DSH 不携带 provider cost —— canonical usage 显式声明
+ * `costStatus: "unavailable"` 且**不写 cost 字段**，绝不把未知 cost 写成真实
+ * 的 0（不得被 benchmark 当作零成本）。`totalTokens` = input + output +
+ * cacheRead + cacheWrite（reasoning 是 output 的子集，不重复加入 total）。
  */
 export function dshUsageToIris(usage: unknown): JsonValue {
   const record = usage as {
@@ -302,11 +331,105 @@ export function dshUsageToIris(usage: unknown): JsonValue {
     cacheWrite,
     ...(record.reasoningTokens !== undefined ? { reasoning: record.reasoningTokens } : {}),
     totalTokens,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    costStatus: "unavailable",
   };
 }
 
-/** 消息的确定性 source hash（canonical content 的 sha256；跨 restart 可重放）。 */
-function messageSourceHash(message: { content: readonly ContentBlock[] }): string {
-  return createHash("sha256").update(JSON.stringify(message.content), "utf8").digest("hex");
+/**
+ * 版本化 canonical source snapshot（A5）。
+ *
+ * 背景：旧 `messageSourceHash` 只对 `JSON.stringify(message.content)` 取 hash
+ * —— 未覆盖 provider/model/toolName/callId/isError/usage 等影响 accepted
+ * canonical semantics 的 immutable source 字段，且普通 `JSON.stringify` 未
+ * 声明为协议（对象键序不稳定）。
+ *
+ * 本实现为 user / assistant / tool result 分别定义版本化 canonical source
+ * snapshot（canonical JSON，键序无关），覆盖：
+ *  - message ID（Message.id）；
+ *  - source kind（user / model / tool）；
+ *  - provider / model（assistant）；
+ *  - content blocks（含 image attachment 的 typed ref —— attachment 稳定
+ *    identity/hash 进入 snapshot）；
+ *  - tool call ID + resolved tool name（tool result；tool name 来自匹配的
+ *    tool/call 事件）；
+ *  - isError（tool result）；
+ *  - usage token 计数（若存在）；
+ *  - event time（进入 accepted content 的 timestamp；DSH 消息不可变，确定性）。
+ *
+ * `eventSeq` 是 Session-local locator（不进入 semantic identity），因此
+ * **不进入** source snapshot —— 同一条消息无论 eventSeq 定位值如何都产生同一
+ * sourceHash（与 unitId 派生一致）。
+ */
+export const DSH_SOURCE_SNAPSHOT_BASIS_VERSION = "iris.dsh_source_snapshot.v1" as const;
+
+function dshSourceSnapshotHash(basis: JsonValue): string {
+  return createHash("sha256").update(canonicalJson(basis), "utf8").digest("hex");
+}
+
+/** user/message 的 canonical source snapshot hash。 */
+export function dshUserSourceHash(message: UserMessage, time: number): string {
+  return dshSourceSnapshotHash({
+    basis: DSH_SOURCE_SNAPSHOT_BASIS_VERSION,
+    kind: "user",
+    messageId: message.id,
+    content: message.content as unknown as JsonValue,
+    timestamp: time,
+  });
+}
+
+/** assistant/message 的 canonical source snapshot hash。 */
+export function dshAssistantSourceHash(
+  message: AssistantMessage,
+  extra: { usage?: unknown; time: number },
+): string {
+  const source = message.source as { provider?: string; model?: string };
+  return dshSourceSnapshotHash({
+    basis: DSH_SOURCE_SNAPSHOT_BASIS_VERSION,
+    kind: "model",
+    messageId: message.id,
+    ...(source.provider !== undefined ? { provider: source.provider } : {}),
+    ...(source.model !== undefined ? { model: source.model } : {}),
+    content: message.content as unknown as JsonValue,
+    usage: usageTokenCounts(extra.usage),
+    timestamp: extra.time,
+  });
+}
+
+/** tool/result 的 canonical source snapshot hash。 */
+export function dshToolResultSourceHash(
+  message: ToolResultMessage,
+  extra: { toolName: string; time: number },
+): string {
+  const resultBlock = message.content[0];
+  return dshSourceSnapshotHash({
+    basis: DSH_SOURCE_SNAPSHOT_BASIS_VERSION,
+    kind: "tool",
+    messageId: message.id,
+    callId: message.source.callId,
+    toolName: extra.toolName,
+    content: message.content as unknown as JsonValue,
+    isError: resultBlock?.isError === true,
+    timestamp: extra.time,
+  });
+}
+
+/** DSH TokenUsage → snapshot 用的 token 计数（仅 immutable 计费字段）。 */
+function usageTokenCounts(usage: unknown): JsonValue {
+  const record = usage as {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+  };
+  if (record === null || typeof record !== "object") {
+    return {};
+  }
+  return {
+    ...(record.inputTokens !== undefined ? { input: record.inputTokens } : {}),
+    ...(record.outputTokens !== undefined ? { output: record.outputTokens } : {}),
+    ...(record.cacheReadTokens !== undefined ? { cacheRead: record.cacheReadTokens } : {}),
+    ...(record.cacheWriteTokens !== undefined ? { cacheWrite: record.cacheWriteTokens } : {}),
+    ...(record.reasoningTokens !== undefined ? { reasoning: record.reasoningTokens } : {}),
+  };
 }

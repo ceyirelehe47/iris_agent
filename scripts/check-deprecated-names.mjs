@@ -149,6 +149,62 @@ if (violations.length > 0) {
 }
 
 // ---------------------------------------------------------------------------
+// A8 (iris-context#5 consume): generated *V3 wire type names are NOT part of
+// the current-domain API. Production code (src/) must use the unversioned
+// ContextUnit / ContextGeneration names; ContextUnitV3 / ContextGenerationV3
+// may only exist in the @iris/context wire shim (iris-context) or generated
+// schema — never in the consuming repo's production code. Reintroducing them
+// here fails CI.
+// ---------------------------------------------------------------------------
+const WIRE_V3_TYPE_NAMES = ["ContextUnitV3", "ContextGenerationV3"];
+const v3Violations = [];
+for (const file of trackedFiles) {
+  if (isExempt(file)) continue;
+  if (!file.startsWith("src/")) continue;
+  if (!file.endsWith(".ts")) continue;
+  let content;
+  try {
+    content = readFileSync(file, "utf-8");
+  } catch {
+    continue;
+  }
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const name of WIRE_V3_TYPE_NAMES) {
+      if (new RegExp(`\\b${name}\\b`).test(line)) {
+        const trimmed = line.trim();
+        const isComment =
+          trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*");
+        if (
+          isComment &&
+          (line.includes("historical") ||
+            line.includes("deprecated") ||
+            line.includes("removed") ||
+            line.includes("superseded") ||
+            line.includes("DO NOT IMPLEMENT"))
+        ) {
+          continue;
+        }
+        v3Violations.push({ file, name, line: i + 1 });
+      }
+    }
+  }
+}
+if (v3Violations.length > 0) {
+  console.error(`Wire *V3 type-name check FAILED (${v3Violations.length} violation(s)):`);
+  for (const v of v3Violations) {
+    console.error(`  ${v.file}:${v.line} — ${v.name}`);
+  }
+  console.error(
+    `\nProduction code must use the unversioned ContextUnit / ContextGeneration names; ` +
+      `ContextUnitV3 / ContextGenerationV3 are wire/schema implementation details in ` +
+      `@iris/context only (A8).`,
+  );
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
 // iris_agent#96: Structural architecture gate
 //
 // A trivial rename of old DTOs must not bypass the architecture boundary.
@@ -172,10 +228,10 @@ const STRUCTURAL_CHECKS = [
   },
   {
     description:
-      "Pi compatibility bridge must consume the generic runtime source admission " +
-      "(admitGenericRuntimeSource), NOT DshMessageRef (iris_agent#130)",
+      "Pi compatibility bridge must consume the dedicated Pi archive entry admission " +
+      "(admitPiArchiveEntry -> PiArchiveEntryRef), NOT DshMessageRef (iris_agent#130 A2)",
     file: "src/runtime/iris-bridge.ts",
-    pattern: /admitGenericRuntimeSource/,
+    pattern: /admitPiArchiveEntry/,
   },
   {
     description:

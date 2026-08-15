@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Vendor dependency bootstrap（iris_agent#131 clean-checkout CI）。
+ * Vendor dependency bootstrap（iris_agent#131 clean-checkout CI + A6 build
+ * provenance）。
  *
  * 目标：一个 fresh checkout（无 sibling 项目仓库）执行 `npm ci` + `npm run check`
  * 即可成功。跨仓库依赖（@iris/context、@iris/pi-*）不再依赖「开发者/CI 预先放好
@@ -16,28 +17,48 @@
  *
  * 布局：
  *   - 缓存根：`<repo>/../.iris-vendor`（仓库外 sibling；可再生的精确 pin 检出）；
- *   - `<repo>/../.iris-vendor/pi`、`<repo>/../.iris-vendor/iris-context`。
+ *   - `<repo>/../.iris-vendor/pi`、`<repo>/../.iris-vendor/iris-context`；
+ *   - build stamp：`<repo>/../.iris-vendor/.build-stamps/<name>.json`（A6）。
  *
- * 行为（幂等）：
- *   - ensureRepo(dir, repository, commit, tree)：
- *       已存在且 HEAD==commit 且 tree==pin → 跳过；
- *       否则 fetch 精确 commit 的完整历史（ancestry 校验需要）并 detached
- *       checkout，校验 commit+tree；
- *   - ensureBuilds()：构建产物 marker 存在 → 跳过；否则执行 vendor 内构建
- *       （iris-context: npm ci + npm run build；pi: npm ci + 三包 build）。
- *   - `--check`：只校验（不物化、不构建、不联网）；任何不匹配 → 退出非 0
- *     （fail-closed）。供 production-lock.test.ts / clean-layout gate 使用。
+ * A6 build provenance：
+ *   - commit/tree 变化 → 清除 dist / node_modules / 旧 build stamp（受管
+ *     vendor 检出内的安全、明确范围 clean；绝不误删仓库外目录）；
+ *   - 构建完成后写版本化 build manifest/stamp，覆盖 repo / commit / tree /
+ *     package-lock hash / Node / npm / build profile / artifact manifest
+ *     hashes（scripts/vendor-build-manifest.mjs）；
+ *   - 构建产物 marker 存在但 stamp 缺失/与 pin 不符/产物 hash 不匹配 → 重建
+ *     （绝不复用旧 artifact —— poisoned cache fail-closed）；
+ *   - `--check` 验证 source pin **和** build stamp/artifact（不只 Git HEAD）。
  *
  * 失败一律 fail-closed：不静默 fallback 到旧 sibling 项目 checkout、不猜测 pin。
+ *
+ * 测试注入（test/vendor-build-provenance.test.ts）：
+ *   - IRIS_VENDOR_ROOT   覆盖缓存根（默认 <repo>/../.iris-vendor）；
+ *   - IRIS_VENDOR_PIN_PATH 覆盖 production-lock 路径；
+ *   - IRIS_VENDOR_STAMP_DIR 覆盖 build stamp 目录。
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, lstatSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import {
+  cleanVendorBuild,
+  readBuildStamp,
+  verifyBuildStamp,
+  writeBuildStamp,
+} from "./vendor-build-manifest.mjs";
+
 const REPO_ROOT = resolve(import.meta.dirname, "..");
-const PIN_PATH = resolve(REPO_ROOT, "src", "contracts", "pins", "production-lock.json");
-const CACHE_ROOT = resolve(dirname(REPO_ROOT), ".iris-vendor");
+const PIN_PATH = process.env.IRIS_VENDOR_PIN_PATH
+  ? resolve(process.env.IRIS_VENDOR_PIN_PATH)
+  : resolve(REPO_ROOT, "src", "contracts", "pins", "production-lock.json");
+const CACHE_ROOT = process.env.IRIS_VENDOR_ROOT
+  ? resolve(process.env.IRIS_VENDOR_ROOT)
+  : resolve(dirname(REPO_ROOT), ".iris-vendor");
+const STAMP_DIR = process.env.IRIS_VENDOR_STAMP_DIR
+  ? resolve(process.env.IRIS_VENDOR_STAMP_DIR)
+  : resolve(CACHE_ROOT, ".build-stamps");
 const CACHE_PI = resolve(CACHE_ROOT, "pi");
 const CACHE_IRIS_CONTEXT = resolve(CACHE_ROOT, "iris-context");
 
@@ -69,6 +90,15 @@ function isGitRepo(dir) {
   return run("git", ["-C", dir, "rev-parse", "--git-dir"]).ok;
 }
 
+/** 是否 symlink（开发环境快速通道；symlink 指向真实项目 checkout，禁止 clean）。 */
+function isSymlink(dir) {
+  try {
+    return lstatSync(dir).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /** 校验 vendor 检出的 git identity（commit + tree）与 pin 一致。 */
 function verifyRepo(dir, repository, commit, tree) {
   const problems = [];
@@ -94,16 +124,41 @@ function verifyRepo(dir, repository, commit, tree) {
   return problems;
 }
 
-/** 物化 vendor 检出到精确 commit（fetch exact SHA 完整历史 + detached checkout）。 */
-function provisionRepo(dir, repository, commit, tree) {
+/**
+ * 物化 vendor 检出到精确 commit（fetch exact SHA 完整历史 + detached checkout）。
+ *
+ * A6：commit/tree 变化时（旧 HEAD != 目标 commit），先清除旧构建产物
+ * （dist/node_modules/build stamp）—— 绝不复用旧 commit 的 artifact。
+ *
+ * symlink 快速通道（开发环境：vendor 目录 symlink 到真实项目 checkout）：
+ * **绝不** checkout / clean / fetch —— 开发者工作树与未提交改动不可被
+ * preinstall 触碰；pin 漂移由 `--check` / production-lock gate 报错（fail
+ * closed），由开发者手动对齐。
+ */
+function provisionRepo(dir, name, repository, commit, tree) {
+  if (isSymlink(dir)) {
+    const problems = verifyRepo(dir, repository, commit, tree);
+    if (problems.length > 0) {
+      throw new Error(
+        `vendor symlink ${dir} does not match the pin: ${problems.join("; ")} ` +
+          "(dev symlink fast path: align the checkout manually; preinstall will not mutate it)",
+      );
+    }
+    return;
+  }
   if (existsSync(dir) && isGitRepo(dir)) {
     const problems = verifyRepo(dir, repository, commit, tree);
     if (problems.length === 0) {
       return;
     }
+    const previousHead = run("git", ["-C", dir, "rev-parse", "HEAD"]);
     const fetch = run("git", ["-C", dir, "fetch", `https://github.com/${repository}.git`, commit]);
     if (!fetch.ok) {
       throw new Error(`cannot fetch pinned commit ${commit} from ${repository}: ${fetch.out}`);
+    }
+    if (previousHead.ok && previousHead.out !== commit) {
+      // commit 切换：遗留 dist/node_modules 来自旧 commit —— 清除（A6）。
+      cleanVendorBuild(dir, name, STAMP_DIR);
     }
     const checkout = run("git", ["-C", dir, "checkout", "--detach", "--force", commit]);
     if (!checkout.ok) {
@@ -146,7 +201,7 @@ function runNpm(dir, args) {
   return result;
 }
 
-/** 构建产物 markers。 */
+/** 构建产物 markers（供 symlink 快速通道的快速判断；真实验证走 build stamp）。 */
 const IRIS_CONTEXT_BUILD_MARKER = resolve(CACHE_IRIS_CONTEXT, "dist", "src", "cordis", "index.js");
 const PI_BUILD_MARKERS = [
   "packages/ai/dist/index.js",
@@ -154,19 +209,59 @@ const PI_BUILD_MARKERS = [
   "packages/storage/sqlite-node/dist/index.js",
 ].map((rel) => resolve(CACHE_PI, rel));
 
+/**
+ * 确保 vendor 检出有**与 pin + lock + 产物一致**的构建（A6）：
+ *   - build stamp 有效（commit/tree/lockHash/artifacts 全匹配）→ 跳过；
+ *   - 否则（stamp 缺失 / pin 变化 / lock 变化 / 产物被篡改）→ 受管 clean
+ *     （dist/node_modules/stamp；symlink 快速通道不 clean，直接重建覆盖）+
+ *     重建 + 写版本化 build stamp。
+ */
+function ensureVendorBuild(name, dir, pin, buildSteps) {
+  const check = verifyBuildStamp(name, dir, pin, STAMP_DIR);
+  if (check.length === 0) {
+    console.log(`bootstrap: ${name} build stamp valid (${pin.commit})`);
+    return;
+  }
+  console.log(`bootstrap: ${name} build stamp invalid (${check[0]}) — rebuilding…`);
+  if (!isSymlink(dir)) {
+    cleanVendorBuild(dir, name, STAMP_DIR);
+  }
+  buildSteps();
+  writeBuildStamp({ name, dir, pin, stampDir: STAMP_DIR, buildProfile: "npm-ci-build" });
+  console.log(`bootstrap: ${name} rebuilt and stamped at ${pin.commit}`);
+}
+
 function ensureVendorBuilds() {
-  if (!existsSync(IRIS_CONTEXT_BUILD_MARKER)) {
-    console.log("bootstrap: building @iris/context (../.iris-vendor/iris-context)…");
-    runNpm(CACHE_IRIS_CONTEXT, ["ci", "--no-audit", "--no-fund"]);
-    runNpm(CACHE_IRIS_CONTEXT, ["run", "build"]);
-  }
-  if (!PI_BUILD_MARKERS.every(existsSync)) {
-    console.log("bootstrap: building @iris/pi-* (../.iris-vendor/pi)…");
-    runNpm(CACHE_PI, ["ci", "--no-audit", "--no-fund"]);
-    for (const pkg of ["packages/ai", "packages/agent", "packages/storage/sqlite-node"]) {
-      runNpm(resolve(CACHE_PI, pkg), ["run", "build"]);
-    }
-  }
+  const pin = readPin();
+  const piFork = pin.pi.fork;
+  const irisContextPin = pin.irisContext;
+
+  ensureVendorBuild(
+    "iris-context",
+    CACHE_IRIS_CONTEXT,
+    {
+      repository: irisContextPin.repository,
+      commit: irisContextPin.commit,
+      tree: irisContextPin.tree,
+    },
+    () => {
+      // --include=dev：vendor 构建需要 devDeps（typescript/tsx 等）；若宿主
+      // 环境 NODE_ENV=production，npm 默认 omit dev —— 必须显式包含。
+      runNpm(CACHE_IRIS_CONTEXT, ["ci", "--no-audit", "--no-fund", "--include=dev"]);
+      runNpm(CACHE_IRIS_CONTEXT, ["run", "build"]);
+    },
+  );
+  ensureVendorBuild(
+    "pi",
+    CACHE_PI,
+    { repository: piFork.repository, commit: piFork.seamCommit, tree: piFork.seamTree },
+    () => {
+      runNpm(CACHE_PI, ["ci", "--no-audit", "--no-fund", "--include=dev"]);
+      for (const pkg of ["packages/ai", "packages/agent", "packages/storage/sqlite-node"]) {
+        runNpm(resolve(CACHE_PI, pkg), ["run", "build"]);
+      }
+    },
+  );
 }
 
 const args = process.argv.slice(2);
@@ -186,19 +281,48 @@ const problems = [
   ),
 ];
 
-if (problems.length > 0) {
-  if (checkOnly) {
-    console.error("bootstrap-vendor-deps: vendor checkouts do not match the production lock:");
+if (checkOnly) {
+  // A6：--check 必须验证 source pin **和** build stamp/artifact，不只 Git HEAD。
+  problems.push(
+    ...verifyBuildStamp(
+      "pi",
+      CACHE_PI,
+      { repository: piFork.repository, commit: piFork.seamCommit, tree: piFork.seamTree },
+      STAMP_DIR,
+    ),
+    ...verifyBuildStamp(
+      "iris-context",
+      CACHE_IRIS_CONTEXT,
+      {
+        repository: irisContextPin.repository,
+        commit: irisContextPin.commit,
+        tree: irisContextPin.tree,
+      },
+      STAMP_DIR,
+    ),
+  );
+  if (problems.length > 0) {
+    console.error(
+      "bootstrap-vendor-deps: vendor checkouts/builds do not match the production lock:",
+    );
     for (const problem of problems) {
       console.error(`  - ${problem}`);
     }
     process.exit(1);
   }
+  console.log(
+    `bootstrap: vendor checkouts + build stamps OK (pi ${piFork.seamCommit} / iris-context ${irisContextPin.commit})`,
+  );
+  process.exit(0);
+}
+
+if (problems.length > 0) {
   console.error("bootstrap-vendor-deps: provisioning exact-pinned checkouts…");
   try {
-    provisionRepo(CACHE_PI, piFork.repository, piFork.seamCommit, piFork.seamTree);
+    provisionRepo(CACHE_PI, "pi", piFork.repository, piFork.seamCommit, piFork.seamTree);
     provisionRepo(
       CACHE_IRIS_CONTEXT,
+      "iris-context",
       irisContextPin.repository,
       irisContextPin.commit,
       irisContextPin.tree,
@@ -208,7 +332,7 @@ if (problems.length > 0) {
     console.error(`FAIL: ${error.message}`);
     process.exit(1);
   }
-} else if (!checkOnly) {
+} else {
   ensureVendorBuilds();
 }
 

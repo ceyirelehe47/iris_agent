@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isGenericSourceRef, type ContextUnitSourceRef } from "@iris/context/contracts";
+import { isPiArchiveEntryRef, type ContextUnitSourceRef } from "@iris/context/contracts";
 
 import { defaultAgentConfig } from "../src/config/load.js";
 import { initializeDataRoot, resolveDataRootPaths } from "../src/host/data-root.js";
@@ -30,9 +30,11 @@ import type { AgentInput } from "../src/contracts/origin.js";
  * 覆盖：
  *  - 端到端：真实 @iris/context 装配 + 真实 harness + bridge attach →
  *    prompt 后 canonical ContextUnit 按 user→assistant/tool_result 接纳；
- *  - 每个 Pi runtime-origin unit 的 sourceRef 是**通用** ContextUnitSourceRefV1
- *    （sourceSchemaId = iris.pi_archive_entry.v1；sourceId = Pi entryId），
- *    **不是** DshMessageRef（iris_agent#130：Pi entry 不得伪装 DSH provenance）；
+ *  - 每个 Pi runtime-origin unit 的 sourceRef 是**专用判别** PiArchiveEntryRef
+ *    （schemaId = iris.pi_archive_entry_ref.v1；runtimeSessionId + entryId +
+ *    sourceHash，entrySeq 仅作 locator），**不是** DshMessageRef 也不是通用
+ *    ContextUnitSourceRefV1（iris_agent#130 A2）；
+ *  - raw provenance 只依赖持久化 sourceRef 即可定位原 Pi runtime/archive；
  *  - 统一 ContextUnit 模型：无 companion/pairing/operational 事件
  *    （旧双事件模型的 hidden companion 已废止）。
  */
@@ -120,21 +122,22 @@ test("bridge e2e: prompt admits canonical ContextUnits (unified ContextUnit mode
         "first unit must be the user request",
       );
 
-      // 每个 Pi runtime-origin unit 的 sourceRef 是**通用** ContextUnitSourceRefV1：
-      // sourceSchemaId = iris.pi_archive_entry.v1，sourceId = Pi entryId（稳定
-      // identity）。**不是** DshMessageRef（iris_agent#130：Pi entry 不得伪装
-      // DSH provenance）。
+      // 每个 Pi runtime-origin unit 的 sourceRef 是**专用判别** PiArchiveEntryRef：
+      // schemaId = iris.pi_archive_entry_ref.v1，runtimeSessionId + entryId（稳定
+      // identity）。**不是** DshMessageRef、也不是通用 ContextUnitSourceRefV1
+      // （iris_agent#130 A2：Pi entry 不得伪装 DSH provenance，也不得丢失
+      // archive owner）。
       for (const unit of units) {
         assert.ok(
-          isGenericSourceRef(unit.sourceRef),
-          `unit ${unit.unitId} must carry a generic ContextUnitSourceRefV1 (NOT a DshMessageRef), got ${JSON.stringify(unit.sourceRef)}`,
+          isPiArchiveEntryRef(unit.sourceRef),
+          `unit ${unit.unitId} must carry a dedicated PiArchiveEntryRef (NOT a DshMessageRef / generic ref), got ${JSON.stringify(unit.sourceRef)}`,
         );
         const ref = unit.sourceRef as ContextUnitSourceRef;
-        if (ref.schemaId === "iris.context_unit_source_ref.v1") {
+        if (ref.schemaId === "iris.pi_archive_entry_ref.v1") {
           assert.equal(
-            ref.sourceSchemaId,
-            "iris.pi_archive_entry.v1",
-            `unit ${unit.unitId} sourceSchemaId must be the Pi compatibility source`,
+            ref.runtimeSessionId,
+            epoch.runtimeSessionId,
+            `unit ${unit.unitId} must persist the Pi archive owner (runtimeSessionId)`,
           );
         }
         // 统一 ContextUnit 只接受 user/assistant/tool_result 语义（无 synthetic）。
@@ -149,7 +152,7 @@ test("bridge e2e: prompt admits canonical ContextUnits (unified ContextUnit mode
       // 统一 ContextUnit 模型：无 companion/pairing/operational 事件可断言
       // （旧双事件模型的 hidden companion 已废止；Pi raw archive 保存原文）。
 
-      // sourceId 必须是 Pi entryId（稳定 identity；本断言只在本测试做 —— 它是
+      // entryId 必须是 Pi entryId（稳定 identity；本断言只在本测试做 —— 它是
       // bridge 消息身份映射的唯一精确校验）。
       const entries = await session.getEntries();
       const userEntry = entries.find(
@@ -162,13 +165,13 @@ test("bridge e2e: prompt admits canonical ContextUnits (unified ContextUnit mode
       assert.ok(userUnit !== undefined, "user ContextUnit must exist");
       const userRef = userUnit.sourceRef as {
         schemaId: string;
-        sourceSchemaId?: string;
-        sourceId?: string;
+        runtimeSessionId?: string;
+        entryId?: string;
       };
       assert.equal(
-        userRef.sourceId,
+        userRef.entryId,
         userEntry.id,
-        "Pi compatibility sourceId must equal the Pi entry id",
+        "Pi compatibility entryId must equal the Pi entry id",
       );
     } finally {
       await assembly.close();
@@ -188,7 +191,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "..");
 const BRIDGE_PATH = join(REPO_ROOT, "src", "runtime", "iris-bridge.ts");
 const DSH_ADAPTER_PATH = join(REPO_ROOT, "src", "runtime", "dsh-adapter.ts");
 
-test("F4: Pi bridge must NOT produce DshMessageRef (uses the generic compatibility source)", () => {
+test("F4: Pi bridge must NOT produce DshMessageRef (uses the dedicated PiArchiveEntryRef)", () => {
   const bridge = readFileSync(BRIDGE_PATH, "utf8");
   assert.doesNotMatch(
     bridge,
@@ -198,13 +201,13 @@ test("F4: Pi bridge must NOT produce DshMessageRef (uses the generic compatibili
   );
   assert.match(
     bridge,
-    /admitGenericRuntimeSource\(/,
-    "Pi compatibility bridge must use the generic runtime source admission",
+    /admitPiArchiveEntry\(/,
+    "Pi compatibility bridge must use the dedicated Pi archive entry admission",
   );
   assert.match(
     bridge,
-    /PI_COMPATIBILITY_SOURCE_SCHEMA_ID|iris\.pi_archive_entry\.v1/,
-    "Pi compatibility bridge must declare the distinct Pi archive source schema",
+    /PI_COMPATIBILITY_SOURCE_REF_SCHEMA_ID|iris\.pi_archive_entry_ref\.v1/,
+    "Pi compatibility bridge must declare the distinct Pi archive entry ref schema",
   );
 });
 
@@ -221,5 +224,5 @@ test("F4 sensitivity: mapping a Pi entry id into DshMessageRef fails the archite
   // 注入：Pi bridge 改回 admitRuntimeMessage（Pi runtimeSessionId + entryId →
   // DshMessageRef）→ 上一测试必须失败。
   const bridge = readFileSync(BRIDGE_PATH, "utf8");
-  assert.doesNotMatch(bridge, /admitRuntimeMessage\(/, "bridge must stay on the generic path");
+  assert.doesNotMatch(bridge, /admitRuntimeMessage\(/, "bridge must stay on the dedicated path");
 });

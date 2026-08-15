@@ -172,8 +172,8 @@ try {
   // list entry is what gives the gate its teeth.
   const bridgePath = join(worktree, "src", "runtime", "iris-bridge.ts");
   const originalBridge = fs.readFileSync(bridgePath, "utf8");
-  // Regression: the bridge maps the user message to a WRONG sourceId (not
-  // the Pi entry id). Only test/iris-bridge.test.ts asserts sourceId == Pi
+  // Regression: the bridge maps the user message to a WRONG entryId (not
+  // the Pi entry id). Only test/iris-bridge.test.ts asserts entryId == Pi
   // entry id (the unique message-identity mapping check); r1/host tests only
   // check non-empty identity fields and still pass, so removing the listed
   // test lets the regression escape (proving the entry is load-bearing).
@@ -184,9 +184,9 @@ try {
   fs.writeFileSync(bridgePath, regression);
   const caught = run("npx tsx --test test/iris-bridge.test.ts", worktree);
   expectFailure(
-    "iris-bridge catches the sourceId-mapping regression",
+    "iris-bridge catches the entryId-mapping regression",
     caught,
-    "Pi compatibility sourceId must equal the Pi entry id",
+    "Pi compatibility entryId must equal the Pi entry id",
   );
   fs.writeFileSync(bridgePath, originalBridge);
 
