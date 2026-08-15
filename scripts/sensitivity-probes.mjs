@@ -73,10 +73,22 @@ try {
   // iris_agent#131: the shared node_modules/@iris/* links resolve through the
   // sibling managed cache (<repo>/../.iris-vendor). Mirror it beside the
   // worktree so those symlinks resolve inside the probe environment.
+  // iris_agent#131: the shared node_modules/@iris/* links resolve through the
+  // sibling managed cache (<repo>/../.iris-vendor). When the worktree's parent
+  // already IS the cache location (e.g. a repo cloned into /tmp), the links
+  // resolve natively and no mirror is needed. Otherwise mirror the cache at
+  // the worktree's parent. NEVER delete a real cache directory — only remove a
+  // previously-created mirror symlink.
   const realVendor = resolve(REPO_ROOT, "..", ".iris-vendor");
   const vendorMirror = join(dirname(worktree), ".iris-vendor");
-  if (fs.existsSync(realVendor)) {
-    fs.rmSync(vendorMirror, { recursive: true, force: true });
+  if (
+    fs.existsSync(realVendor) &&
+    resolve(realVendor) !== resolve(vendorMirror) &&
+    !(fs.existsSync(vendorMirror) && fs.lstatSync(vendorMirror).isDirectory())
+  ) {
+    if (fs.existsSync(vendorMirror)) {
+      fs.rmSync(vendorMirror, { force: true });
+    }
     fs.symlinkSync(realVendor, vendorMirror, "dir");
   }
 
